@@ -25,7 +25,9 @@ describe('armi basate su dati', () => {
     expect(WEAPONS['dmr-3'].range).toBeGreaterThan(WEAPONS['smg-9'].range)
   })
   it('inizializza il caricatore dalla definizione dell’arma', () => {
-    expect(createMagazine(DEFAULT_WEAPON)).toEqual({ ammo: 30, reserveAmmo: null })
+    // Nessuna arma ha più munizioni infinite: anche l'AR-07 iniziale ha una riserva.
+    expect(createMagazine(DEFAULT_WEAPON)).toEqual({ ammo: 30, reserveAmmo: 180 })
+    expect(Object.values(WEAPONS).every((weapon) => weapon.reserveAmmo !== null)).toBe(true)
     expect(createMagazine(WEAPONS['p-12'])).toEqual({ ammo: 12, reserveAmmo: 72 })
   })
 

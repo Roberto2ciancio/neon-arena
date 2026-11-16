@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getCompatibleAttachments, resolveWeapon } from './attachments'
+import { getCompatibleAttachments, MAX_WEAPON_LEVEL, resolveWeapon } from './attachments'
 import type { AttachmentSelection } from './attachments'
 import { WEAPONS } from './weapons'
 
@@ -37,5 +37,25 @@ describe('accessori', () => {
     expect(getCompatibleAttachments(WEAPONS['p-12'], 'optic').map((attachment) => attachment.id)).toEqual(['red-dot'])
     expect(getCompatibleAttachments(WEAPONS['sr-50'], 'optic')).toEqual([])
     expect(getCompatibleAttachments(WEAPONS['ar-07'], 'muzzle')).toHaveLength(3)
+  })
+})
+
+describe('livelli e varianti delle armi', () => {
+  it('ogni livello aumenta il danno e riduce rinculo e ricarica, fino al massimo', () => {
+    const base = WEAPONS['smg-9']
+    const level3 = resolveWeapon(base, {}, { level: 3 })
+    expect(level3.damage).toBeCloseTo(base.damage * 1.24)
+    expect(level3.recoil.vertical).toBeCloseTo(base.recoil.vertical * 0.85)
+    expect(level3.reloadDuration).toBeCloseTo(base.reloadDuration * 0.88)
+    expect(resolveWeapon(base, {}, { level: 99 }).weaponLevel).toBe(MAX_WEAPON_LEVEL)
+  })
+
+  it('la variante MK II delle postazioni è più forte e riconoscibile', () => {
+    const mk2 = resolveWeapon(WEAPONS['ak-74r'], { optic: 'holo' }, { fieldVariant: true })
+    expect(mk2.shortName).toBe('AK-74R MK II')
+    expect(mk2.name).toBe('AK-74R MK II // PESANTE')
+    expect(mk2.damage).toBeCloseTo(WEAPONS['ak-74r'].damage * 1.35)
+    expect(mk2.magazineSize).toBe(36)
+    expect(mk2.attachments.optic).toBe('holo')
   })
 })

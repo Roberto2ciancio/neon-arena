@@ -72,6 +72,8 @@ export interface HudData {
   interaction: { label: string; cost: number; canAfford: boolean; denied: boolean } | null
   weaponSlots: { key: string; name: string; owned: boolean; active: boolean }[]
   stance: 'stand' | 'crouch' | 'slide'
+  /** Bonus attivi con il tempo residuo. */
+  powerUps: { id: string; name: string; icon: string; remaining: number; duration: number; color: number }[]
   tct?: TctHudData
   performance?: { fps: number; drawCalls: number }
 }
@@ -103,4 +105,6 @@ export interface GameEvents {
   onHit: (headshot: boolean) => void
   /** Accecamento da flashbang (0–1). */
   onFlash?: (intensity: number) => void
+  /** Bonus raccolto: annuncio a schermo. */
+  onPowerUp?: (name: string, description: string, color: number) => void
 }

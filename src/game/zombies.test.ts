@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { FINAL_WAVE, getWaveSpawnCount, getZombieStats, SPEED_SCALE_CAP, WAVE_BREAK_SECONDS } from './zombies'
+import { FINAL_WAVE, getEliteChance, getWaveSpawnCount, getZombieStats, SPEED_SCALE_CAP, WAVE_BREAK_SECONDS } from './zombies'
 
 describe('progressione zombie', () => {
   it('prevede 15 ondate e un intervallo reale fra esse', () => {
     expect(FINAL_WAVE).toBe(15)
     expect(WAVE_BREAK_SECONDS).toBe(8)
-    expect(getWaveSpawnCount(1)).toBe(9)
-    expect(getWaveSpawnCount(15)).toBe(57)
+    expect(getWaveSpawnCount(1)).toBe(12)
+    expect(getWaveSpawnCount(15)).toBe(71)
   })
 
   it('distingue gli archetipi per HP, velocità e danno', () => {
@@ -50,5 +50,23 @@ describe('progressione zombie', () => {
 
   it('rinforza il Bruto nelle apparizioni successive', () => {
     expect(getZombieStats('brute', 10).health).toBeGreaterThan(getZombieStats('brute', 5).health)
+  })
+})
+
+describe('difficoltà crescente', () => {
+  it('la vita cresce in modo esponenziale: a metà run serve un arsenale migliore', () => {
+    const first = getZombieStats('walker', 1).health
+    expect(getZombieStats('walker', 8).health).toBeGreaterThan(first * 2.5)
+    expect(getZombieStats('walker', 15).health).toBeGreaterThan(first * 7)
+  })
+
+  it('introduce élite più resistenti e redditizie dalla quinta ondata', () => {
+    expect(getEliteChance(4)).toBe(0)
+    expect(getEliteChance(5)).toBeGreaterThan(0)
+    expect(getEliteChance(30)).toBe(0.45)
+    const normal = getZombieStats('runner', 9)
+    const elite = getZombieStats('runner', 9, true)
+    expect(elite.health).toBeCloseTo(normal.health * 1.6)
+    expect(elite.score).toBe(normal.score * 2)
   })
 })

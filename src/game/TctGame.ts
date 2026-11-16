@@ -915,6 +915,7 @@ export class TctGame {
       interaction: null,
       weaponSlots: this.weapons.hudSlots,
       stance: this.controller.sliding ? 'slide' : this.controller.crouched ? 'crouch' : 'stand',
+      powerUps: [],
       performance: { fps: this.fps, drawCalls: this.renderer.info.render.calls },
       tct: {
         teamScore: this.teamScore,

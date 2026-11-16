@@ -90,6 +90,7 @@ const game = new Game(byId('scene'), {
   onDamage: flashDamage,
   onHit: showHitmarker,
   onFlash: showFlash,
+  onPowerUp: showPowerUp,
 })
 
 const tctGame = new TctGame(byId('scene'), {
@@ -194,6 +195,14 @@ function updateHud(data: HudData): void {
   }
   crosshair.classList.toggle('crouched', data.stance !== 'stand')
   renderWeaponSlots(data.weaponSlots)
+  const powerUps = data.powerUps.map((power) => {
+    const item = document.createElement('span')
+    item.className = 'power-up'
+    item.style.color = `#${power.color.toString(16).padStart(6, '0')}`
+    item.innerHTML = `<b>${power.icon}</b>${power.name} ${Math.ceil(power.remaining)}s<i style="width:${Math.round((power.remaining / Math.max(power.duration, 0.1)) * 100)}%"></i>`
+    return item
+  })
+  byId('power-ups').replaceChildren(...powerUps)
   if (data.tct) updateTctOverlay(data.tct)
 }
 
@@ -290,7 +299,9 @@ function showUpgradeChoices(ids: string[], pending: number): void {
   })
   upgradeChoices.replaceChildren(...buttons)
   byId('upgrade-pending').textContent = pending > 1 ? `+${pending - 1} IN CODA` : ''
+  const wasHidden = upgradePanel.classList.contains('hidden')
   upgradePanel.classList.toggle('hidden', buttons.length === 0)
+  if (wasHidden && buttons.length > 0) byId('upgrade-title').textContent = pending > 1 ? `LIVELLO SU! SCEGLI UN POTENZIAMENTO (${pending})` : 'LIVELLO SU! SCEGLI UN POTENZIAMENTO'
 }
 
 function syncCloudProfile(): void {
@@ -431,8 +442,9 @@ function grantXp(amount: number): string {
   return ` +${amount} XP // LIVELLO ${result.state.level}!${unlocked.length > 0 ? ` Sbloccati: ${unlocked.join(', ')}.` : ''}`
 }
 
-function currentLoadout() {
-  return resolveLoadout(armory.loadout, armory.cosmetics)
+/** I livelli delle armi valgono solo in Zombie: nel TCT tutti hanno le stesse statistiche. */
+function currentLoadout(mode: 'zombies' | 'tct' = 'zombies') {
+  return resolveLoadout(armory.loadout, armory.cosmetics, mode === 'zombies' ? armory.weaponLevels : {})
 }
 
 function completeRun(result: RunResult): void {
@@ -546,6 +558,19 @@ function showWaveBanner(wave: number): void {
 }
 
 let flashTimer = 0
+let powerBannerTimer = 0
+
+function showPowerUp(name: string, description: string, color: number): void {
+  const banner = byId<HTMLElement>('power-banner')
+  window.clearTimeout(powerBannerTimer)
+  banner.style.color = `#${color.toString(16).padStart(6, '0')}`
+  byId('power-banner-title').textContent = name
+  byId('power-banner-text').textContent = description
+  banner.classList.add('hidden')
+  void banner.offsetWidth
+  banner.classList.remove('hidden')
+  powerBannerTimer = window.setTimeout(() => banner.classList.add('hidden'), 2200)
+}
 
 /** Accecamento del flashbang: bianco pieno che sfuma in base all'intensità. */
 function showFlash(intensity: number): void {
@@ -657,7 +682,7 @@ function onSessionMessage(message: HostMessage): void {
   }
   if (message.t === 'start' && selectedMode === 'tct') {
     armoryScreen.close()
-    tctGame.start(session, message.mapId, message.players, currentLoadout())
+    tctGame.start(session, message.mapId, message.players, currentLoadout('tct'))
   }
 }
 
@@ -785,6 +810,15 @@ const armoryScreen = new ArmoryScreen({
   root: byId('armory-screen'),
   getState: () => armory,
   setState: setArmory,
+  getCores: () => progress.cores,
+  spendCores: (amount) => {
+    if (progress.cores < amount) return false
+    progress = { ...progress, cores: progress.cores - amount }
+    saveProgress(window.localStorage, progress)
+    syncCloudProfile()
+    renderMenu()
+    return true
+  },
 })
 byId<HTMLButtonElement>('armory-button').addEventListener('click', () => armoryScreen.open())
 byId<HTMLButtonElement>('armory-close').addEventListener('click', () => armoryScreen.close())

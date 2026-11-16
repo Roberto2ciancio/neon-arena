@@ -232,19 +232,20 @@ kbd { display: inline-block; color: #aab4cb; font-family: 'Chakra Petch', sans-s
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
 
-.upgrade-panel { position: absolute; z-index: 4; left: 38px; bottom: 128px; width: 280px; padding: 8px; border: 1px solid rgba(154, 123, 255, 0.45); background: rgba(8, 10, 22, 0.82); pointer-events: none; animation: upgrade-in 180ms ease-out; }
+.upgrade-panel { position: absolute; z-index: 6; left: 50%; bottom: 150px; width: min(700px, calc(100vw - 32px)); padding: 12px 14px 14px; border: 2px solid var(--violet); background: rgba(10, 8, 26, 0.9); box-shadow: 0 0 40px rgba(154, 123, 255, 0.35), inset 0 0 30px rgba(154, 123, 255, 0.12); transform: translateX(-50%); pointer-events: none; animation: upgrade-in 220ms ease-out, upgrade-glow 1.6s ease-in-out infinite; }
 .upgrade-panel header { display: flex; justify-content: space-between; align-items: baseline; margin: 0 2px 6px; font-family: 'Chakra Petch', sans-serif; letter-spacing: 0.12em; }
-.upgrade-panel header strong { color: var(--violet); font-size: 10px; font-weight: 500; }
-.upgrade-panel header span { color: #8a93ad; font-size: 8px; }
-.upgrade-choices { display: grid; gap: 4px; }
-.upgrade-choice { display: grid; grid-template-columns: 20px 20px 1fr; align-items: center; gap: 8px; width: 100%; padding: 5px 7px; color: inherit; text-align: left; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.02); font: inherit; pointer-events: auto; cursor: pointer; }
+.upgrade-panel header strong { color: #c9b8ff; font-size: 15px; font-weight: 600; text-shadow: 0 0 14px rgba(154, 123, 255, 0.8); }
+.upgrade-panel header span { color: #c3c9de; font-size: 11px; }
+.upgrade-choices { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.upgrade-choice { position: relative; display: grid; grid-template-columns: 34px 1fr; align-items: start; gap: 4px 10px; width: 100%; padding: 12px 12px 12px 10px; color: inherit; text-align: left; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.02); font: inherit; pointer-events: auto; cursor: pointer; }
 .upgrade-choice:hover { border-color: var(--cyan); }
-.upgrade-key { display: grid; place-items: center; width: 20px; height: 20px; color: var(--cyan); border: 1px solid rgba(88, 245, 229, 0.35); font-family: 'Chakra Petch', sans-serif; font-size: 9px; }
-.upgrade-icon { color: var(--cyan); font-family: 'Chakra Petch', sans-serif; font-size: 14px; text-align: center; }
+.upgrade-key { position: absolute; top: 8px; right: 8px; display: grid; place-items: center; width: 26px; height: 26px; color: #071310; background: var(--cyan); font-family: 'Chakra Petch', sans-serif; font-size: 13px; font-weight: 700; }
+.upgrade-icon { grid-row: span 2; color: var(--cyan); font-family: 'Chakra Petch', sans-serif; font-size: 26px; text-align: center; text-shadow: 0 0 12px rgba(88, 245, 229, 0.6); }
 .upgrade-choice span:last-child { display: flex; flex-direction: column; min-width: 0; }
-.upgrade-choice strong { font-family: 'Chakra Petch', sans-serif; font-size: 10px; font-weight: 500; letter-spacing: 0.06em; }
-.upgrade-choice small { overflow: hidden; color: #8790a8; font-size: 9px; white-space: nowrap; text-overflow: ellipsis; }
-@keyframes upgrade-in { from { opacity: 0; transform: translateX(-12px); } }
+.upgrade-choice strong { padding-right: 30px; font-family: 'Chakra Petch', sans-serif; font-size: 13px; font-weight: 600; letter-spacing: 0.06em; }
+.upgrade-choice small { color: #b3bad0; font-size: 11px; line-height: 1.4; }
+@keyframes upgrade-in { from { opacity: 0; transform: translate(-50%, 16px); } }
+@keyframes upgrade-glow { 50% { box-shadow: 0 0 60px rgba(154, 123, 255, 0.6), inset 0 0 30px rgba(154, 123, 255, 0.2); } }
 @media (prefers-reduced-motion: reduce) { .upgrade-panel { animation: none; } }
 
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
@@ -410,3 +411,18 @@ kbd { display: inline-block; color: #aab4cb; font-family: 'Chakra Petch', sans-s
   .profile-level { min-width: 0; }
 }
 @media (prefers-reduced-motion: reduce) { .drawer-panel { animation: none; } .side-link { transition: none; } }
+
+.power-ups { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-top: 8px; }
+.power-up { position: relative; display: flex; align-items: center; gap: 6px; min-width: 120px; padding: 5px 9px 7px; overflow: hidden; border: 1px solid currentColor; background: rgba(8, 10, 21, 0.85); font-family: 'Chakra Petch', sans-serif; font-size: 10px; letter-spacing: 0.08em; }
+.power-up b { font-size: 14px; }
+.power-up i { position: absolute; left: 0; bottom: 0; height: 2px; background: currentColor; }
+.power-banner { position: absolute; z-index: 7; top: 30%; left: 50%; display: grid; gap: 4px; padding: 14px 26px; text-align: center; border: 2px solid currentColor; background: rgba(6, 8, 18, 0.88); transform: translate(-50%, -50%); pointer-events: none; animation: power-in 260ms ease-out; }
+.power-banner strong { font-family: 'Chakra Petch', sans-serif; font-size: 26px; letter-spacing: 0.1em; text-shadow: 0 0 20px currentColor; }
+.power-banner span { color: #d6dbee; font-size: 13px; }
+@keyframes power-in { from { opacity: 0; transform: translate(-50%, -50%) scale(0.85); } }
+.armory-level { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 6px 0 10px; padding: 10px 12px; border: 1px solid rgba(255, 209, 102, 0.4); background: rgba(255, 209, 102, 0.06); }
+.armory-level strong { color: #ffd166; font-family: 'Chakra Petch', sans-serif; font-size: 12px; letter-spacing: 0.1em; }
+.armory-level .stars { color: #ffd166; letter-spacing: 3px; }
+.armory-level small { flex-basis: 100%; color: #8790a8; font-size: 10px; }
+.armory-level .primary-button { min-width: 0; min-height: 36px; margin: 0 0 0 auto; padding: 0 14px; gap: 12px; font-size: 10px; }
+@media (prefers-reduced-motion: reduce) { .upgrade-panel { animation: none; } .power-banner { animation: none; } }

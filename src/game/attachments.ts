@@ -70,10 +70,31 @@ export function getCompatibleAttachments(weapon: WeaponDefinition, slot: Attachm
 export interface ResolvedWeapon extends WeaponDefinition {
   attachments: AttachmentSelection
   suppressed: boolean
+  /** Livello di potenziamento acquistato nell'armeria (solo modalità Zombie). */
+  weaponLevel: number
+  /** Variante da campo trovata sulle mappe Zombie. */
+  fieldVariant: boolean
 }
 
-/** Applica gli accessori: quelli incompatibili o in uno slot sbagliato sono ignorati. */
-export function resolveWeapon(weapon: WeaponDefinition, selection: AttachmentSelection = {}): ResolvedWeapon {
+export const MAX_WEAPON_LEVEL = 5
+/** Costo in frammenti per passare al livello successivo (indice = livello attuale). */
+export const WEAPON_LEVEL_COSTS = [6, 12, 20, 32, 48] as const
+export const FIELD_VARIANT_DAMAGE = 1.35
+export const FIELD_VARIANT_MAGAZINE = 1.2
+
+export interface WeaponBonus {
+  level?: number
+  fieldVariant?: boolean
+}
+
+/** Moltiplicatori di un livello d'arma: più danno, meno rinculo, ricarica più rapida. */
+export function getWeaponLevelBonus(level: number): { damage: number; recoil: number; reload: number } {
+  const clamped = Math.min(MAX_WEAPON_LEVEL, Math.max(0, Math.floor(level)))
+  return { damage: 1 + clamped * 0.08, recoil: 1 - clamped * 0.05, reload: 1 - clamped * 0.04 }
+}
+
+/** Applica accessori, livello e variante: accessori incompatibili o nello slot sbagliato sono ignorati. */
+export function resolveWeapon(weapon: WeaponDefinition, selection: AttachmentSelection = {}, bonus: WeaponBonus = {}): ResolvedWeapon {
   const totals: AttachmentModifiers = { range: 1, hipSpread: 1, adsSpread: 1, recoilVertical: 1, recoilHorizontal: 1, magazine: 1, reload: 1, mobility: 1, damage: 1 }
   const applied: AttachmentSelection = {}
   let adsFov = weapon.adsFov
@@ -84,17 +105,27 @@ export function resolveWeapon(weapon: WeaponDefinition, selection: AttachmentSel
     for (const [key, value] of Object.entries(attachment.modifiers) as [keyof AttachmentModifiers, number][]) totals[key] *= value
     if (attachment.adsFov !== undefined) adsFov = Math.min(adsFov, attachment.adsFov)
   }
+  const level = getWeaponLevelBonus(bonus.level ?? 0)
+  const field = bonus.fieldVariant === true
+  const fieldDamage = field ? FIELD_VARIANT_DAMAGE : 1
+  const fieldMagazine = field ? FIELD_VARIANT_MAGAZINE : 1
+  const suffix = field ? ' MK II' : ''
   return {
     ...weapon,
+    name: field ? weapon.name.replace(' //', `${suffix} //`) : weapon.name,
+    shortName: `${weapon.shortName}${suffix}`,
     attachments: applied,
     suppressed: applied.muzzle === 'suppressor',
-    damage: weapon.damage * totals.damage,
+    weaponLevel: Math.min(MAX_WEAPON_LEVEL, Math.max(0, Math.floor(bonus.level ?? 0))),
+    fieldVariant: field,
+    damage: weapon.damage * totals.damage * level.damage * fieldDamage,
     range: weapon.range * totals.range,
     hipSpread: weapon.hipSpread * totals.hipSpread,
     adsSpread: weapon.adsSpread * totals.adsSpread,
-    recoil: { ...weapon.recoil, vertical: weapon.recoil.vertical * totals.recoilVertical, horizontal: weapon.recoil.horizontal * totals.recoilHorizontal },
-    magazineSize: Math.round(weapon.magazineSize * totals.magazine),
-    reloadDuration: weapon.reloadDuration * totals.reload,
+    recoil: { ...weapon.recoil, vertical: weapon.recoil.vertical * totals.recoilVertical * level.recoil, horizontal: weapon.recoil.horizontal * totals.recoilHorizontal * level.recoil },
+    magazineSize: Math.round(weapon.magazineSize * totals.magazine * fieldMagazine),
+    reserveAmmo: weapon.reserveAmmo === null ? null : Math.round(weapon.reserveAmmo * fieldMagazine),
+    reloadDuration: weapon.reloadDuration * totals.reload * level.reload,
     moveMultiplier: weapon.moveMultiplier * totals.mobility,
     adsFov,
   }

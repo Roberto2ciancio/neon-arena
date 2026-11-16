@@ -253,6 +253,32 @@ test('l’armeria equipaggia armi, accessori ed equipaggiamenti e li porta in pa
   expect(errors).toEqual([])
 })
 
+test('le armi si potenziano con i frammenti e non hanno munizioni infinite', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  await page.goto('/')
+  await page.evaluate(() => {
+    window.localStorage.setItem('neon-arena:progress:v1', JSON.stringify({ cores: 20 }))
+    window.localStorage.setItem('neon-arena:graphics:v1', 'low')
+  })
+  await page.reload()
+  await page.getByRole('button', { name: 'ARMERIA' }).click()
+  await expect(page.locator('.armory-level strong')).toHaveText('LIVELLO ARMA 0/5')
+  await page.locator('#weapon-upgrade').click()
+  await expect(page.locator('.armory-level strong')).toHaveText('LIVELLO ARMA 1/5')
+  await page.locator('#weapon-upgrade').click()
+  await expect(page.locator('.armory-level strong')).toHaveText('LIVELLO ARMA 2/5')
+  // 6 + 12 frammenti spesi: ne restano 2, non bastano per il terzo livello (20).
+  await expect(page.locator('#weapon-upgrade')).toBeDisabled()
+  await expect(page.locator('#core-balance-side')).toHaveText('2')
+  await page.getByRole('button', { name: 'CHIUDI' }).click()
+  await page.reload()
+  await page.getByRole('button', { name: 'INIZIA RUN' }).click()
+  await expect(page.locator('#app')).toHaveAttribute('data-state', 'playing')
+  await expect(page.locator('#reserve-text')).toHaveText('180')
+  expect(errors).toEqual([])
+})
+
 test('il TCT online segnala codici stanza non validi o inesistenti', async ({ page }) => {
   await page.goto('/?net=local')
   await page.locator('[data-mode="tct"]').click()

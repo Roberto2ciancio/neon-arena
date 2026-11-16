@@ -37,11 +37,22 @@ import type { EnemyModel } from './models'
 import { applyUpgrade, createBaseStats, FIRST_LEVEL_XP, getNextLevelXp, getUpgradeChoices, UPGRADE_KEYS } from './upgrades'
 import { WEAPONS } from './weapons'
 import { BURN_DURATION, CHAIN_LIGHTNING_RADIUS, getBurnDamagePerSecond, getChainLightningDamage, getChainTargetCount, getHeadshotExplosionDamage, HEADSHOT_EXPLOSION_RADIUS } from './specialEffects'
-import { FINAL_WAVE, getWaveSpawnCount, getZombieColor, getZombieStats, WAVE_BREAK_SECONDS } from './zombies'
+import { FINAL_WAVE, getEliteChance, getWaveSpawnCount, getZombieColor, getZombieStats, WAVE_BREAK_SECONDS } from './zombies'
+import { INSTA_KILL_BOSS_MULTIPLIER, POWER_UP_LIFETIME, POWER_UPS, rollPowerUp, SHOCKWAVE_RADIUS } from './powerups'
+import type { PowerUpId } from './powerups'
 import type { EnemyKind, GameEvents, GameState, HitZone, MetaBonuses, RunResult } from './types'
+
+interface PowerUpPickup {
+  id: PowerUpId
+  group: THREE.Group
+  life: number
+  baseY: number
+  phase: number
+}
 
 interface Enemy {
   model: EnemyModel
+  elite: boolean
   /** Il corpo condivide la posizione del modello: `y` è la quota dei piedi. */
   body: Body
   path: NavPoint[]
@@ -170,6 +181,8 @@ export class Game {
   private readonly cooldowns: Record<EquipmentSlot, number> = { lethal: 0, tactical: 0, gadget: 0 }
   private decoy: { position: THREE.Vector3; life: number } | null = null
   private radarTimer = 0
+  private readonly powerPickups: PowerUpPickup[] = []
+  private readonly activePowerUps = new Map<PowerUpId, number>()
   private readonly audio = new GameAudio()
   private readonly enemies: Enemy[] = []
   private readonly enemyPool = new Map<EnemyKind, EnemyModel[]>()
@@ -319,7 +332,7 @@ export class Game {
       damage: (target, amount, source) => {
         const enemy = this.targetOwners.get(target)
         if (!enemy || enemy.health <= 0) return
-        enemy.health -= amount * (this.stats.damage / 20)
+        enemy.health -= this.scaleDamage(enemy, amount * (this.stats.damage / 20))
         enemy.hitFlash = 0.1
         enemy.flinch = Math.min(1, enemy.flinch + (source === 'molotov' ? 0.15 : 0.6))
         if (source === 'molotov') enemy.burnTimer = Math.max(enemy.burnTimer, 0.6)
@@ -434,6 +447,7 @@ export class Game {
     this.equipment.clear()
     this.decoy = null
     this.radarTimer = 0
+    this.activePowerUps.clear()
     this.invulnerability = 0
     this.currentUpgradeIds = []
     this.events.onUpgrade([], 0)
@@ -652,11 +666,13 @@ export class Game {
   }
 
   private spawnEnemy(kind: EnemyKind): void {
-    const stats = getZombieStats(kind, this.wave)
+    const elite = kind !== 'brute' && Math.random() < getEliteChance(this.wave)
+    const stats = getZombieStats(kind, this.wave, elite)
     const pooled = this.enemyPool.get(kind)?.pop()
     const model = pooled ?? createEnemyModel(kind, getZombieColor(kind))
     model.group.visible = true
     model.group.rotation.set(0, 0, 0)
+    model.group.scale.setScalar(elite ? 1.12 : 1)
     model.body.material.emissive.setHex(0x000000)
     model.body.material.emissiveIntensity = 0
     model.leftLeg.rotation.x = 0
@@ -680,6 +696,7 @@ export class Game {
     const target: EquipmentTarget = { id: `z${Math.random().toString(36).slice(2, 9)}`, feet: model.group.position, height: model.height, radius: stats.radius }
     const enemy: Enemy = {
       model,
+      elite,
       body: { position: model.group.position, velocityY: 0, grounded: true },
       path: [],
       pathTimer: 0,
@@ -729,7 +746,7 @@ export class Game {
     })
     if (result.landingSpeed > 7) this.cameraShake = Math.max(this.cameraShake, Math.min(0.3, (result.landingSpeed - 7) * 0.05))
 
-    const frameInput = { aiming: this.aiming, crouched: this.controller.crouched, blocked: this.controller.sprinting, fireRateMultiplier: this.stats.fireRate / 8.5 }
+    const frameInput = { aiming: this.aiming, crouched: this.controller.crouched, blocked: this.controller.sprinting, fireRateMultiplier: (this.stats.fireRate / 8.5) * (this.activePowerUps.has('rapid-fire') ? 1.6 : 1) }
     const frame = this.weapons.update(delta, frameInput)
     this.pitch = THREE.MathUtils.clamp(this.pitch - frame.recovery.pitch, -1.45, 1.45)
     this.yaw -= frame.recovery.yaw
@@ -802,7 +819,7 @@ export class Game {
       const distance = offset.length()
       if (distance > melee.range + enemy.radius) continue
       if (distance > 0.3 && offset.divideScalar(distance).dot(forward) < minimumDot) continue
-      enemy.health -= melee.damage * (this.stats.damage / 20)
+      enemy.health -= this.scaleDamage(enemy, melee.damage * (this.stats.damage / 20))
       enemy.hitFlash = 0.12
       enemy.flinch = 1
       enemy.knockback.addScaledVector(forward, enemy.kind === 'brute' ? 1 : 4)
@@ -940,7 +957,7 @@ export class Game {
       enemy.specialCooldown = Math.max(enemy.specialCooldown, 3)
     }
 
-    const damage = baseDamage * multiplier * (critical ? this.stats.critMultiplier : 1)
+    const damage = this.scaleDamage(enemy, baseDamage * multiplier * (critical ? this.stats.critMultiplier : 1))
     enemy.health -= damage
     enemy.hitFlash = 0.08
     // Reazione al colpo: sobbalzo e piccola spinta all'indietro.
@@ -1061,7 +1078,7 @@ export class Game {
     if (definition.kind === 'medkit') return { label: 'KIT MEDICO', cost: definition.cost }
     if (definition.kind === 'ammo') return { label: 'RIFORNIMENTO MUNIZIONI', cost: definition.cost }
     const weaponId = definition.weapon!
-    const name = WEAPONS[weaponId].name.split(' //')[0]
+    const name = `${WEAPONS[weaponId].shortName} MK II`
     // Un'arma già posseduta si ricarica a metà prezzo.
     return this.weapons.has(weaponId)
       ? { label: `MUNIZIONI ${name}`, cost: Math.ceil(definition.cost / 2) }
@@ -1101,7 +1118,7 @@ export class Game {
         const weaponId = definition.weapon
         // Un'arma nuova sostituisce quella dello stesso slot; una posseduta si ricarica.
         if (this.weapons.has(weaponId)) this.weapons.refill(weaponId)
-        else this.weapons.replace(resolveWeapon(WEAPONS[weaponId], this.loadout.attachments[weaponId]))
+        else this.weapons.replace(resolveWeapon(WEAPONS[weaponId], definition.attachments, { fieldVariant: true, level: this.loadout.weaponLevels[weaponId] }))
       }
       this.effects.pulse(model.group.position, STATION_COLORS[definition.kind], 1.8)
       this.spawnBurst(model.group.position.clone().setY(model.group.position.y + 1.3), STATION_COLORS[definition.kind], 14)
@@ -1180,8 +1197,10 @@ export class Game {
         }
       }
       if (enemy.health <= 0) continue
-      enemy.model.body.material.emissive.setHex(enemy.hitFlash > 0 ? 0x882233 : enemy.burnTimer > 0 ? 0x8a2f09 : 0x000000)
-      enemy.model.body.material.emissiveIntensity = enemy.hitFlash > 0 ? 1.8 : enemy.burnTimer > 0 ? 1.2 : 0
+      // Le élite hanno un alone dorato pulsante, riconoscibile a distanza.
+      const eliteGlow = enemy.elite ? 0.55 + Math.sin(this.elapsed * 5 + enemy.phase) * 0.25 : 0
+      enemy.model.body.material.emissive.setHex(enemy.hitFlash > 0 ? 0x882233 : enemy.burnTimer > 0 ? 0x8a2f09 : enemy.elite ? 0x7a5200 : 0x000000)
+      enemy.model.body.material.emissiveIntensity = enemy.hitFlash > 0 ? 1.8 : enemy.burnTimer > 0 ? 1.2 : eliteGlow
       if (enemy.kind === 'brute') {
         enemy.model.weakPoint.material.emissiveIntensity = enemy.coreExposedTimer > 0 ? 3 : 0.12
       }
@@ -1437,8 +1456,11 @@ export class Game {
     if (!enemy) return
     const position = enemy.model.group.position.clone()
     const color = getZombieColor(enemy.kind)
-    this.score += enemy.score * this.wave
+    this.score += enemy.score * this.wave * this.lootMultiplier
     this.kills += 1
+    const active = new Set<PowerUpId>([...this.activePowerUps.keys(), ...this.powerPickups.map((pickup) => pickup.id)])
+    const dropped = rollPowerUp(enemy.kind, Math.random, active)
+    if (dropped) this.spawnPowerPickup(position, dropped)
     this.spawnBurst(position.clone().setY(position.y + enemy.model.height * 0.5), color, enemy.kind === 'brute' ? 28 : 12)
     if (enemy.kind === 'brute') {
       for (let drop = 0; drop < 8; drop += 1) {
@@ -1455,6 +1477,113 @@ export class Game {
     this.audio.playAt('kill', position, this.player, this.yaw)
   }
 
+  private get lootMultiplier(): number {
+    return this.activePowerUps.has('double-loot') ? 2 : 1
+  }
+
+  /** Colpo letale: uccide gli zombie comuni e quadruplica il danno sul Bruto. */
+  private scaleDamage(enemy: Enemy, damage: number): number {
+    if (!this.activePowerUps.has('insta-kill')) return damage
+    return enemy.kind === 'brute' ? damage * INSTA_KILL_BOSS_MULTIPLIER : Math.max(damage, enemy.health + 1)
+  }
+
+  private spawnPowerPickup(position: THREE.Vector3, id: PowerUpId): void {
+    const definition = POWER_UPS[id]
+    const group = new THREE.Group()
+    const core = new THREE.Mesh(
+      new THREE.IcosahedronGeometry(0.28, 1),
+      new THREE.MeshStandardMaterial({ color: definition.color, emissive: definition.color, emissiveIntensity: 1.8, metalness: 0.3, roughness: 0.25 }),
+    )
+    group.add(core)
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(0.5, 0.03, 8, 32),
+      new THREE.MeshBasicMaterial({ color: definition.color, transparent: true, opacity: 0.8 }),
+    )
+    ring.rotation.x = Math.PI / 2
+    group.add(ring)
+    const canvas = document.createElement('canvas')
+    canvas.width = 128
+    canvas.height = 128
+    const context = canvas.getContext('2d')
+    if (context) {
+      context.fillStyle = `#${definition.color.toString(16).padStart(6, '0')}`
+      context.font = 'bold 92px sans-serif'
+      context.textAlign = 'center'
+      context.textBaseline = 'middle'
+      context.fillText(definition.icon, 64, 70)
+    }
+    const texture = new THREE.CanvasTexture(canvas)
+    const icon = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false }))
+    icon.scale.setScalar(0.7)
+    icon.position.y = 0.75
+    group.add(icon)
+    // Colonna di luce visibile da lontano.
+    const beam = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.12, 0.35, 5, 12, 1, true),
+      new THREE.MeshBasicMaterial({ color: definition.color, transparent: true, opacity: 0.18, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }),
+    )
+    beam.position.y = 2.5
+    group.add(beam)
+    const baseY = getGroundHeight(position.x, position.z, position.y + 0.3, 0.2, this.obstacles)
+    group.position.set(position.x, baseY + 0.6, position.z)
+    this.scene.add(group)
+    this.effects.pulse(group.position.clone().setY(baseY), definition.color, 1.4)
+    this.powerPickups.push({ id, group, life: POWER_UP_LIFETIME, baseY, phase: Math.random() * Math.PI * 2 })
+  }
+
+  private removePowerPickup(index: number): void {
+    const pickup = this.powerPickups[index]
+    if (!pickup) return
+    this.scene.remove(pickup.group)
+    disposeObject(pickup.group)
+    this.powerPickups.splice(index, 1)
+  }
+
+  private activatePowerUp(id: PowerUpId): void {
+    const definition = POWER_UPS[id]
+    this.audio.play('upgrade')
+    this.effects.pulse(this.player, definition.color, 3)
+    this.events.onPowerUp?.(definition.name, definition.description, definition.color)
+    if (id === 'full-ammo') {
+      this.weapons.refill()
+      this.cooldowns.lethal = 0
+      this.cooldowns.tactical = 0
+    } else if (id === 'shockwave') {
+      this.effects.explosion(this.player.clone().setY(this.player.y + 1), 6, definition.color, this.player.y)
+      this.cameraShake = Math.max(this.cameraShake, 0.4)
+      for (const enemy of this.enemies) {
+        if (enemy.kind === 'brute' || enemy.health <= 0) continue
+        if (enemy.body.position.distanceTo(this.player) <= SHOCKWAVE_RADIUS) enemy.health = 0
+      }
+      this.killDestroyedEnemies()
+    }
+    if (definition.duration > 0) this.activePowerUps.set(id, definition.duration)
+    this.emitHud()
+  }
+
+  private updatePowerUps(delta: number): void {
+    for (const [id, remaining] of this.activePowerUps) {
+      if (remaining - delta <= 0) this.activePowerUps.delete(id)
+      else this.activePowerUps.set(id, remaining - delta)
+    }
+    for (let index = this.powerPickups.length - 1; index >= 0; index -= 1) {
+      const pickup = this.powerPickups[index]!
+      pickup.life -= delta
+      pickup.group.rotation.y += delta * 2
+      pickup.group.position.y = pickup.baseY + 0.6 + Math.sin(this.elapsed * 3 + pickup.phase) * 0.15
+      // Negli ultimi secondi lampeggia prima di sparire.
+      pickup.group.visible = pickup.life > 5 || Math.sin(pickup.life * 14) > 0
+      const close = Math.hypot(pickup.group.position.x - this.player.x, pickup.group.position.z - this.player.z) < 1.5
+      if (close && Math.abs(pickup.baseY - this.player.y) < 1.4) {
+        const id = pickup.id
+        this.removePowerPickup(index)
+        this.activatePowerUp(id)
+        continue
+      }
+      if (pickup.life <= 0) this.removePowerPickup(index)
+    }
+  }
+
   private gainXp(amount: number): void {
     if (this.state !== 'playing') return
     this.xp += amount
@@ -1466,7 +1595,10 @@ export class Game {
       this.xpNext = getNextLevelXp(this.xpNext)
       leveled = true
     }
-    if (leveled) this.offerNextUpgrade()
+    if (leveled) {
+      this.audio.play('upgrade')
+      this.offerNextUpgrade()
+    }
   }
 
   private spawnPickup(position: THREE.Vector3, value: number): void {
@@ -1490,9 +1622,10 @@ export class Game {
         pickup.mesh.position.addScaledVector(direction.normalize(), (5 + this.stats.magnetRadius - distance) * delta)
       }
       if (distance < 0.8) {
-        this.shards += pickup.value
-        this.shardsCollected += pickup.value
-        this.score += 25 * pickup.value
+        const value = pickup.value * this.lootMultiplier
+        this.shards += value
+        this.shardsCollected += value
+        this.score += 25 * value
         this.effects.pulse(pickup.mesh.position.clone().setY(pickup.baseY), 0x6affea, 0.8)
         this.audio.play('pickup')
         this.scene.remove(pickup.mesh)
@@ -1566,7 +1699,7 @@ export class Game {
   }
 
   private damagePlayer(amount: number): void {
-    if (this.state !== 'playing' || this.invulnerability > 0) return
+    if (this.state !== 'playing' || this.invulnerability > 0 || this.activePowerUps.has('barrier')) return
     this.health = Math.max(0, this.health - Math.max(1, amount - this.stats.armor))
     this.invulnerability = 0.32
     this.cameraShake = 0.4
@@ -1604,6 +1737,7 @@ export class Game {
     }
     this.equipment.clear()
     this.effects.clear()
+    for (let index = this.powerPickups.length - 1; index >= 0; index -= 1) this.removePowerPickup(index)
     this.enemies.length = 0
     this.dyingEnemies.length = 0
     this.projectiles.length = 0
@@ -1652,6 +1786,14 @@ export class Game {
       aiming: this.aiming,
       waveBreak: this.waveBreak,
       enemiesRemaining: this.enemies.length + this.spawnQueue,
+      powerUps: [...this.activePowerUps].map(([id, remaining]) => ({
+        id,
+        name: POWER_UPS[id].name,
+        icon: POWER_UPS[id].icon,
+        remaining,
+        duration: POWER_UPS[id].duration,
+        color: POWER_UPS[id].color,
+      })),
       equipment: (['lethal', 'tactical', 'gadget'] as const).map((slot) => ({
         key: slot === 'lethal' ? 'G' : slot === 'tactical' ? 'Q' : 'T',
         name: EQUIPMENT[this.loadout[slot]].name,
@@ -1686,6 +1828,7 @@ export class Game {
     this.updateHazards(delta)
     if (this.state !== 'playing') return
     this.updatePickups(delta)
+    this.updatePowerUps(delta)
     this.updateEffects(delta)
     this.hudTimer -= delta
     if (this.hudTimer <= 0) {

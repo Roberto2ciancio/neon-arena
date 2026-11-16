@@ -1,4 +1,4 @@
-import { ATTACHMENTS, isAttachmentCompatible, resolveWeapon } from './attachments'
+import { ATTACHMENTS, isAttachmentCompatible, MAX_WEAPON_LEVEL, resolveWeapon, WEAPON_LEVEL_COSTS } from './attachments'
 import type { AttachmentId, AttachmentSelection, ResolvedWeapon } from './attachments'
 import { CAMOS, DEFAULT_COSMETICS, normalizeCosmetics } from './cosmetics'
 import type { CamoId, Cosmetics } from './cosmetics'
@@ -37,6 +37,8 @@ export interface ArmoryState {
   xp: number
   loadout: Loadout
   cosmetics: Cosmetics
+  /** Livelli delle armi (0–5), validi solo nella modalità Zombie. */
+  weaponLevels: Partial<Record<WeaponId, number>>
 }
 
 /** Loadout pronto per i motori di gioco: statistiche finali e scelte estetiche. */
@@ -49,6 +51,8 @@ export interface ResolvedLoadout {
   gadget: GadgetId
   camos: Partial<Record<WeaponId, CamoId>>
   attachments: Partial<Record<WeaponId, AttachmentSelection>>
+  /** Livelli applicati (vuoto nel TCT per non alterare l'equilibrio fra giocatori). */
+  weaponLevels: Partial<Record<WeaponId, number>>
   cosmetics: Cosmetics
 }
 
@@ -64,7 +68,7 @@ export const DEFAULT_LOADOUT: Loadout = {
 }
 
 export function createDefaultArmory(): ArmoryState {
-  return { level: 1, xp: 0, loadout: structuredClone(DEFAULT_LOADOUT), cosmetics: { ...DEFAULT_COSMETICS } }
+  return { level: 1, xp: 0, loadout: structuredClone(DEFAULT_LOADOUT), cosmetics: { ...DEFAULT_COSMETICS }, weaponLevels: {} }
 }
 
 /** XP necessaria per passare da `level` a `level + 1`. */
@@ -133,7 +137,31 @@ export function normalizeArmory(value: unknown): ArmoryState {
   const source = typeof value === 'object' && value !== null ? value as Record<string, unknown> : {}
   const level = typeof source.level === 'number' && Number.isFinite(source.level) ? Math.min(MAX_LEVEL, Math.max(1, Math.floor(source.level))) : 1
   const xp = typeof source.xp === 'number' && Number.isFinite(source.xp) ? Math.min(Math.max(0, Math.floor(source.xp)), xpForLevel(level) - 1) : 0
-  return { level, xp: level >= MAX_LEVEL ? 0 : xp, loadout: normalizeLoadout(source.loadout, level), cosmetics: normalizeCosmetics(source.cosmetics, level) }
+  return { level, xp: level >= MAX_LEVEL ? 0 : xp, loadout: normalizeLoadout(source.loadout, level), cosmetics: normalizeCosmetics(source.cosmetics, level), weaponLevels: normalizeWeaponLevels(source.weaponLevels) }
+}
+
+function normalizeWeaponLevels(value: unknown): Partial<Record<WeaponId, number>> {
+  const source = typeof value === 'object' && value !== null ? value as Record<string, unknown> : {}
+  const levels: Partial<Record<WeaponId, number>> = {}
+  for (const [id, level] of Object.entries(source)) {
+    if (!(id in WEAPONS) || typeof level !== 'number' || !Number.isFinite(level)) continue
+    const clamped = Math.min(MAX_WEAPON_LEVEL, Math.max(0, Math.floor(level)))
+    if (clamped > 0) levels[id as WeaponId] = clamped
+  }
+  return levels
+}
+
+/** Costo del prossimo livello dell'arma, o null se è già al massimo. */
+export function getWeaponUpgradeCost(state: ArmoryState, weaponId: WeaponId): number | null {
+  return WEAPON_LEVEL_COSTS[state.weaponLevels[weaponId] ?? 0] ?? null
+}
+
+/** Potenzia un'arma spendendo frammenti; null se al massimo o se i frammenti non bastano. */
+export function upgradeWeapon(state: ArmoryState, weaponId: WeaponId, cores: number): { state: ArmoryState; cost: number } | null {
+  const cost = getWeaponUpgradeCost(state, weaponId)
+  if (cost === null || cores < cost) return null
+  const level = (state.weaponLevels[weaponId] ?? 0) + 1
+  return { state: { ...state, weaponLevels: { ...state.weaponLevels, [weaponId]: level } }, cost }
 }
 
 export function loadArmory(storage: KeyValueStorage): ArmoryState {
@@ -153,16 +181,17 @@ export function saveArmory(storage: KeyValueStorage, state: ArmoryState): void {
   }
 }
 
-export function resolveLoadout(loadout: Loadout, cosmetics: Cosmetics): ResolvedLoadout {
+export function resolveLoadout(loadout: Loadout, cosmetics: Cosmetics, weaponLevels: Partial<Record<WeaponId, number>> = {}): ResolvedLoadout {
   return {
-    primary: resolveWeapon(WEAPONS[loadout.primary], loadout.attachments[loadout.primary]),
-    secondary: resolveWeapon(WEAPONS[loadout.secondary], loadout.attachments[loadout.secondary]),
+    primary: resolveWeapon(WEAPONS[loadout.primary], loadout.attachments[loadout.primary], { level: weaponLevels[loadout.primary] }),
+    secondary: resolveWeapon(WEAPONS[loadout.secondary], loadout.attachments[loadout.secondary], { level: weaponLevels[loadout.secondary] }),
     melee: MELEE_WEAPONS[loadout.melee],
     lethal: loadout.lethal,
     tactical: loadout.tactical,
     gadget: loadout.gadget,
     camos: loadout.camos,
     attachments: loadout.attachments,
+    weaponLevels,
     cosmetics,
   }
 }

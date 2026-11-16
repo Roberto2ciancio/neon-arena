@@ -13,7 +13,10 @@ export interface ZombieStats {
 
 export const FINAL_WAVE = 15
 export const WAVE_BREAK_SECONDS = 8
-export const SPEED_SCALE_CAP = 1.35
+export const SPEED_SCALE_CAP = 1.4
+/** Crescita della vita per ondata (esponenziale). */
+export const HEALTH_GROWTH = 1.16
+export const ELITE_FIRST_WAVE = 5
 
 const BASE_STATS: Record<EnemyKind, ZombieStats> = {
   walker: { name: 'Errante', health: 58, speed: 1.85, damage: 12, radius: 0.52, score: 100, xp: 24, attackInterval: 0.9 },
@@ -27,22 +30,31 @@ const BASE_STATS: Record<EnemyKind, ZombieStats> = {
 
 export function getWaveSpawnCount(wave: number): number {
   const normalizedWave = Math.max(1, wave)
-  return 6 + normalizedWave * 3 + Math.floor(normalizedWave / 4) * 2
+  return 8 + Math.round(normalizedWave * 3.5) + Math.floor(normalizedWave / 3) * 2
 }
 
-export function getZombieStats(kind: EnemyKind, wave: number): ZombieStats {
+/** Probabilità che uno zombie sia un'élite (più resistente, veloce e letale). */
+export function getEliteChance(wave: number): number {
+  return wave < ELITE_FIRST_WAVE ? 0 : Math.min(0.45, (wave - ELITE_FIRST_WAVE + 1) * 0.05)
+}
+
+export function getZombieStats(kind: EnemyKind, wave: number, elite = false): ZombieStats {
   const base = BASE_STATS[kind]
   const normalizedWave = Math.max(1, wave)
-  const healthScale = 1 + (normalizedWave - 1) * 0.12
-  const damageScale = 1 + (normalizedWave - 1) * 0.065
-  const speedScale = Math.min(SPEED_SCALE_CAP, 1 + (normalizedWave - 1) * 0.024)
-  const bossScale = kind === 'brute' ? 1 + (normalizedWave / 5 - 1) * 0.3 : 1
+  // Vita esponenziale: dalla metà della run servono armi migliori e potenziate.
+  const healthScale = HEALTH_GROWTH ** (normalizedWave - 1)
+  const damageScale = 1 + (normalizedWave - 1) * 0.08
+  const speedScale = Math.min(SPEED_SCALE_CAP, 1 + (normalizedWave - 1) * 0.028)
+  const bossScale = kind === 'brute' ? 1 + (normalizedWave / 5 - 1) * 0.35 : 1
+  const eliteScale = elite ? { health: 1.6, speed: 1.15, damage: 1.25, reward: 2 } : { health: 1, speed: 1, damage: 1, reward: 1 }
 
   return {
     ...base,
-    health: base.health * healthScale * bossScale,
-    speed: base.speed * speedScale,
-    damage: base.damage * damageScale,
+    health: base.health * healthScale * bossScale * eliteScale.health,
+    speed: base.speed * speedScale * eliteScale.speed,
+    damage: base.damage * damageScale * eliteScale.damage,
+    score: base.score * eliteScale.reward,
+    xp: base.xp * eliteScale.reward,
   }
 }
 

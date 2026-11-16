@@ -1,8 +1,8 @@
 import { ArmoryPreview } from './game/ArmoryPreview'
 import type { PreviewSubject } from './game/ArmoryPreview'
-import { isUnlocked, xpForLevel, MAX_LEVEL } from './game/armory'
+import { getWeaponUpgradeCost, isUnlocked, upgradeWeapon, xpForLevel, MAX_LEVEL } from './game/armory'
 import type { ArmoryState, Loadout } from './game/armory'
-import { ATTACHMENT_SLOT_LABELS, ATTACHMENTS, getCompatibleAttachments, resolveWeapon } from './game/attachments'
+import { ATTACHMENT_SLOT_LABELS, ATTACHMENTS, getCompatibleAttachments, MAX_WEAPON_LEVEL, resolveWeapon } from './game/attachments'
 import type { AttachmentId } from './game/attachments'
 import { CAMOS, COSMETIC_CATALOG, COSMETIC_LABELS } from './game/cosmetics'
 import type { CosmeticOption, Cosmetics } from './game/cosmetics'
@@ -17,6 +17,9 @@ interface ArmoryScreenOptions {
   root: HTMLElement
   getState: () => ArmoryState
   setState: (state: ArmoryState) => void
+  /** Frammenti disponibili per potenziare le armi. */
+  getCores: () => number
+  spendCores: (amount: number) => boolean
 }
 
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className?: string, text?: string): HTMLElementTagNameMap[K] {
@@ -31,8 +34,8 @@ function lockLabel(level: number): string {
 }
 
 /** Barre delle statistiche normalizzate 0–1 per confrontare le armi. */
-function weaponStats(id: WeaponId, loadout: Loadout): { label: string; value: number }[] {
-  const weapon = resolveWeapon(WEAPONS[id], loadout.attachments[id])
+function weaponStats(id: WeaponId, loadout: Loadout, level = 0): { label: string; value: number }[] {
+  const weapon = resolveWeapon(WEAPONS[id], loadout.attachments[id], { level })
   const burst = weapon.fireMode === 'burst' ? weapon.burstCount : 1
   return [
     { label: 'DANNO', value: Math.min(1, (weapon.damage * weapon.pellets) / 120) },
@@ -192,9 +195,11 @@ export class ArmoryScreen {
     this.showPreview({ kind: 'weapon', weapon, attachments: selection, camo })
     this.info.append(element('h3', undefined, weapon.name), element('p', 'armory-description', weapon.description))
     const mode = weapon.fireMode === 'auto' ? 'AUTOMATICA' : weapon.fireMode === 'burst' ? `RAFFICA DA ${weapon.burstCount}` : weapon.fireMode === 'bolt' ? 'OTTURATORE' : 'SEMIAUTOMATICA'
-    const resolved = resolveWeapon(weapon, selection)
+    const weaponLevel = this.state.weaponLevels[equipped] ?? 0
+    const resolved = resolveWeapon(weapon, selection, { level: weaponLevel })
     this.info.append(element('p', 'armory-meta', `${mode} // ${resolved.magazineSize} COLPI // RICARICA ${resolved.reloadDuration.toFixed(1).replace('.', ',')}s`))
-    this.info.append(this.stats(weaponStats(equipped, loadout)))
+    this.info.append(this.weaponLevel(equipped, weaponLevel))
+    this.info.append(this.stats(weaponStats(equipped, loadout, weaponLevel)))
     for (const attachmentSlot of weapon.attachmentSlots) {
       const options = getCompatibleAttachments(weapon, attachmentSlot)
       if (options.length === 0) continue
@@ -215,6 +220,29 @@ export class ArmoryScreen {
     this.info.append(this.chips('MIMETICA', CAMOS.map((option) => ({ ...option })), camo, (id) => {
       this.update({ camos: { ...loadout.camos, [equipped]: id } })
     }))
+  }
+
+  /** Livello dell'arma acquistabile con i frammenti: vale solo nella modalità Zombie. */
+  private weaponLevel(id: WeaponId, level: number): HTMLElement {
+    const box = element('div', 'armory-level')
+    box.append(element('strong', undefined, `LIVELLO ARMA ${level}/${MAX_WEAPON_LEVEL}`))
+    box.append(element('span', 'stars', '★'.repeat(level) + '☆'.repeat(MAX_WEAPON_LEVEL - level)))
+    const cost = getWeaponUpgradeCost(this.state, id)
+    const cores = this.options.getCores()
+    const button = element('button', 'primary-button')
+    button.type = 'button'
+    button.id = 'weapon-upgrade'
+    button.textContent = cost === null ? 'LIVELLO MASSIMO' : `POTENZIA ◆ ${cost}`
+    button.disabled = cost === null || cores < cost
+    button.addEventListener('click', () => {
+      const result = upgradeWeapon(this.state, id, this.options.getCores())
+      if (!result || !this.options.spendCores(result.cost)) return
+      this.options.setState(result.state)
+      this.render()
+    })
+    box.append(button)
+    box.append(element('small', undefined, `Hai ◆ ${cores} frammenti. Ogni livello: danno +8%, rinculo −5%, ricarica −4%. Vale solo in Zombie, anche sulle armi MK II trovate sulla mappa.`))
+    return box
   }
 
   private renderMelee(): void {

@@ -67,7 +67,7 @@ export const WEAPONS: Record<WeaponId, WeaponDefinition> = {
   'ar-07': define('ar-07', {
     name: 'AR-07 // AUTOMATICO', shortName: 'AR-07', description: 'Fucile d’assalto equilibrato, preciso a media distanza.',
     slot: 'primary', category: 'assault', fireMode: 'auto', damage: 20, fireRate: 8.5, magazineSize: 30,
-    reserveAmmo: null, reloadDuration: 1.35, range: 60, hipSpread: 0.009, adsSpread: 0.002,
+    reserveAmmo: 180, reloadDuration: 1.35, range: 60, hipSpread: 0.009, adsSpread: 0.002,
     recoil: { vertical: 0.0045, horizontal: 0.0022, growth: 0.05, recovery: 7 },
     headshotMultiplier: 2, pellets: 1, moveMultiplier: 1, adsFov: 52, attachmentSlots: RIFLE_SLOTS, unlockLevel: 1,
   }),

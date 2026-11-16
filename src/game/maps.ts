@@ -1,6 +1,7 @@
 import { getDoorPoints, DOOR_OPENING } from './structures'
 import type { BuildingDefinition, Side } from './structures'
 import type { WeaponId } from './weapons'
+import type { AttachmentSelection } from './attachments'
 
 export interface MapObstacleDefinition {
   id: string
@@ -36,6 +37,8 @@ export interface StationDefinition {
   y: number
   z: number
   cost: number
+  /** Accessori già montati sulle armi delle postazioni (variante MK II). */
+  attachments?: AttachmentSelection
 }
 
 export interface MapDefinition {
@@ -53,17 +56,17 @@ export interface MapDefinition {
 type PurchasableWeapon = Exclude<WeaponId, 'ar-07' | 'p-12'>
 
 export const STATION_COSTS: Record<PurchasableWeapon | 'ammo' | 'medkit', number> = {
-  'smg-9': 6,
-  'vx-45': 9,
-  'sg-6': 8,
-  'as-12': 14,
-  'dmr-3': 10,
-  'sr-50': 16,
-  'lmg-75': 14,
-  'ak-74r': 12,
-  'br-3': 12,
-  'r-44': 6,
-  'ap-18': 7,
+  'smg-9': 8,
+  'vx-45': 12,
+  'sg-6': 10,
+  'as-12': 18,
+  'dmr-3': 12,
+  'sr-50': 20,
+  'lmg-75': 18,
+  'ak-74r': 15,
+  'br-3': 15,
+  'r-44': 8,
+  'ap-18': 9,
   ammo: 3,
   medkit: 4,
 }
@@ -83,8 +86,23 @@ function buildingDoor(id: string, building: BuildingDefinition, side: Side, cost
   }
 }
 
+/** Configurazioni da campo: ogni arma delle postazioni arriva con accessori adatti al suo ruolo. */
+export const FIELD_ATTACHMENTS: Record<PurchasableWeapon, AttachmentSelection> = {
+  'smg-9': { optic: 'red-dot', underbarrel: 'laser', magazine: 'extended-mag' },
+  'vx-45': { optic: 'holo', underbarrel: 'vertical-grip', magazine: 'extended-mag' },
+  'sg-6': { barrel: 'long-barrel', underbarrel: 'laser', magazine: 'extended-mag' },
+  'as-12': { optic: 'red-dot', underbarrel: 'vertical-grip', magazine: 'fast-mag' },
+  'dmr-3': { optic: 'scope-4x', muzzle: 'compensator', underbarrel: 'vertical-grip' },
+  'sr-50': { muzzle: 'compensator', barrel: 'long-barrel', magazine: 'fast-mag' },
+  'lmg-75': { optic: 'holo', underbarrel: 'vertical-grip', magazine: 'fast-mag' },
+  'ak-74r': { optic: 'holo', muzzle: 'compensator', underbarrel: 'vertical-grip', magazine: 'extended-mag' },
+  'br-3': { optic: 'red-dot', muzzle: 'flash-hider', magazine: 'extended-mag' },
+  'r-44': { optic: 'red-dot', barrel: 'long-barrel' },
+  'ap-18': { optic: 'red-dot', magazine: 'extended-mag' },
+}
+
 const weapon = (id: string, weaponId: PurchasableWeapon, x: number, y: number, z: number): StationDefinition => ({
-  id, kind: 'weapon', weapon: weaponId, x, y, z, cost: STATION_COSTS[weaponId],
+  id, kind: 'weapon', weapon: weaponId, x, y, z, cost: STATION_COSTS[weaponId], attachments: FIELD_ATTACHMENTS[weaponId],
 })
 
 // ---------------------------------------------------------------------------
