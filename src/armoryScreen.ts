@@ -232,7 +232,7 @@ export class ArmoryScreen {
     const button = element('button', 'primary-button')
     button.type = 'button'
     button.id = 'weapon-upgrade'
-    button.textContent = cost === null ? 'LIVELLO MASSIMO' : `POTENZIA ◆ ${cost}`
+    button.textContent = cost === null ? 'LIVELLO MASSIMO' : cores < cost ? `SERVONO ◆ ${cost}` : `POTENZIA ◆ ${cost}`
     button.disabled = cost === null || cores < cost
     button.addEventListener('click', () => {
       const result = upgradeWeapon(this.state, id, this.options.getCores())

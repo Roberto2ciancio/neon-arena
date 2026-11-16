@@ -37,7 +37,7 @@ import type { EnemyModel } from './models'
 import { applyUpgrade, createBaseStats, FIRST_LEVEL_XP, getNextLevelXp, getUpgradeChoices, UPGRADE_KEYS } from './upgrades'
 import { WEAPONS } from './weapons'
 import { BURN_DURATION, CHAIN_LIGHTNING_RADIUS, getBurnDamagePerSecond, getChainLightningDamage, getChainTargetCount, getHeadshotExplosionDamage, HEADSHOT_EXPLOSION_RADIUS } from './specialEffects'
-import { BLOATER_BLAST, ENEMY_FIRST_WAVE, FINAL_WAVE, getEliteChance, getMaxActiveZombies, getMeleeDamage, getPrewarmCount, getSpawnPool, PATH_BUDGET_PER_FRAME, getWaveSpawnCount, getZombieColor, getZombieStats, SHIELD_FRONT_REDUCTION, WAVE_BREAK_SECONDS } from './zombies'
+import { BLOATER_BLAST, ENEMY_FIRST_WAVE, ENEMY_INTEL, FINAL_WAVE, getEliteChance, getMaxActiveZombies, getMeleeDamage, getPrewarmCount, getSpawnPool, PATH_BUDGET_PER_FRAME, getWaveSpawnCount, getZombieColor, getZombieStats, SHIELD_FRONT_REDUCTION, WAVE_BREAK_SECONDS } from './zombies'
 import { INSTA_KILL_BOSS_MULTIPLIER, POWER_UP_LIFETIME, POWER_UPS, rollPowerUp, SHOCKWAVE_RADIUS } from './powerups'
 import type { PowerUpId } from './powerups'
 import type { EnemyKind, GameEvents, GameState, HitZone, MetaBonuses, RunResult } from './types'
@@ -191,6 +191,8 @@ export class Game {
   private readonly enemies: Enemy[] = []
   private readonly enemyPool = new Map<EnemyKind, EnemyModel[]>()
   private pathBudget = 0
+  /** Tipi di zombie già presentati in questa run. */
+  private readonly introducedKinds = new Set<EnemyKind>()
   private readonly dyingEnemies: DyingEnemy[] = []
   private readonly projectiles: Projectile[] = []
   private readonly pickups: Pickup[] = []
@@ -437,6 +439,8 @@ export class Game {
     this.clearEntities()
     this.setMap(map)
     this.prewarmEnemies()
+    this.introducedKinds.clear()
+    this.introducedKinds.add('walker')
     this.stats = createBaseStats(bonuses)
     this.health = this.stats.maxHealth
     this.score = 0
@@ -697,6 +701,11 @@ export class Game {
   private spawnEnemy(kind: EnemyKind): void {
     const elite = kind !== 'brute' && Math.random() < getEliteChance(this.wave)
     const stats = getZombieStats(kind, this.wave, elite)
+    if (!this.introducedKinds.has(kind)) {
+      this.introducedKinds.add(kind)
+      const color = getZombieColor(kind)
+      this.events.onNotice?.(`NUOVO NEMICO // ${getZombieStats(kind, 1).name.toUpperCase()}`, ENEMY_INTEL[kind], kind === 'brute' ? 0xff6b6b : color)
+    }
     const pooled = this.enemyPool.get(kind)?.pop()
     const model = pooled ?? createEnemyModel(kind, getZombieColor(kind))
     model.group.visible = true

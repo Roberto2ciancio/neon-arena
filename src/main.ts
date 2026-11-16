@@ -1,3 +1,4 @@
+import * as THREE from 'three'
 import './style.css'
 import { Game } from './game/Game'
 import { loadAccessibility, saveAccessibility } from './game/accessibility'
@@ -91,6 +92,8 @@ const game = new Game(byId('scene'), {
   onHit: showHitmarker,
   onFlash: showFlash,
   onPowerUp: showPowerUp,
+  // I colori dei nemici sono spenti: schiariti per restare leggibili sul fondo scuro.
+  onNotice: (title, text, color) => showPowerUp(title, text, new THREE.Color(color).lerp(new THREE.Color(0xffffff), 0.45).getHex()),
 })
 
 const tctGame = new TctGame(byId('scene'), {
@@ -127,6 +130,7 @@ function updateState(state: GameState): void {
   byId('door-prompt').classList.toggle('hidden', state !== 'playing')
   if (state !== 'playing') hitmarker.classList.remove('active')
   pauseScreen.classList.toggle('hidden', state !== 'paused')
+  if (state === 'paused') renderPauseSummary()
   if (state !== 'playing' && state !== 'paused') upgradePanel.classList.add('hidden')
   gameoverScreen.classList.toggle('hidden', state !== 'gameover' && state !== 'victory')
 
@@ -176,7 +180,18 @@ function renderPowerUps(powerUps: HudData['powerUps']): void {
   }))
 }
 
+let lastHud: HudData | null = null
+
+function renderPauseSummary(): void {
+  const data = lastHud
+  byId('pause-summary').textContent = !data ? '' : data.tct
+    ? `${data.mapName.toUpperCase()} // ${data.tct.teamScore} : ${data.tct.enemyScore}`
+    : `${data.mapName.toUpperCase()} // ONDATA ${data.wave}/15
+${data.kills} ELIMINAZIONI // ${data.enemiesRemaining} NEMICI RIMASTI`
+}
+
 function updateHud(data: HudData): void {
+  lastHud = data
   const healthPercentage = Math.max(0, (data.health / data.maxHealth) * 100)
   setText(hudEl('health-text'), `${Math.ceil(data.health)} / ${data.maxHealth}`)
   if (data.performance) setText(hudEl('performance-stats'), `${data.performance.fps} FPS · ${data.performance.drawCalls} DC`)
@@ -479,6 +494,7 @@ function completeRun(result: RunResult): void {
   byId('result-wave-label').textContent = 'ONDATA'
   byId('result-kills-label').textContent = 'ELIMINAZIONI'
   byId('result-shards').parentElement?.classList.remove('hidden')
+  const previousBest = progress.bestScore
   progress = recordRun(progress, result)
   saveProgress(window.localStorage, progress)
   syncCloudProfile()
@@ -493,7 +509,8 @@ function completeRun(result: RunResult): void {
   const xp = result.kills * XP_REWARDS.zombieKill + Math.max(0, result.wave - 1) * XP_REWARDS.wave + XP_REWARDS.runComplete
   byId('gameover-message').textContent = (result.won
     ? 'Hai superato tutte le 15 ondate. Bonus vittoria: 10 frammenti.'
-    : 'L’orda ti ha sopraffatto. I frammenti recuperati sono al sicuro.') + grantXp(xp)
+    : `L’orda ti ha sopraffatto all’ondata ${result.wave} di 15. I frammenti recuperati sono al sicuro.`) + grantXp(xp)
+  byId('gameover-title').textContent += result.score > previousBest && result.score > 0 ? ' // NUOVO RECORD' : ''
   renderMenu()
 }
 
@@ -574,6 +591,7 @@ function renderMenu(): void {
 function showWaveBanner(wave: number): void {
   window.clearTimeout(waveBannerTimer)
   byId('wave-banner-title').textContent = wave % 5 === 0 ? `BOSS // ONDATA ${wave}` : `ONDATA ${wave}`
+  byId('wave-banner-subtitle').textContent = wave % 5 === 0 ? 'IL BRUTO STA ARRIVANDO' : wave === 15 ? 'ULTIMA ONDATA' : `MINACCE IN ARRIVO // ${wave}/15`
   waveBanner.classList.add('hidden')
   waveBanner.style.animation = 'none'
   void waveBanner.offsetWidth
