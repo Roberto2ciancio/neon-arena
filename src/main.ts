@@ -870,9 +870,13 @@ byId<HTMLButtonElement>('drawer-close').addEventListener('click', closeDrawer)
 byId('menu-drawer').addEventListener('click', (event) => {
   if (event.target === event.currentTarget) closeDrawer()
 })
+// In fase di cattura: con il pannello aperto Esc lo chiude soltanto, senza riprendere la partita in pausa.
 window.addEventListener('keydown', (event) => {
-  if (event.code === 'Escape' && !byId('menu-drawer').classList.contains('hidden')) closeDrawer()
-})
+  if (event.code !== 'Escape' || byId('menu-drawer').classList.contains('hidden')) return
+  event.stopPropagation()
+  closeDrawer()
+}, true)
+byId<HTMLButtonElement>('pause-settings-button').addEventListener('click', () => openDrawer('settings'))
 
 renderMenu()
 renderProfile()

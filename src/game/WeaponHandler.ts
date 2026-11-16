@@ -224,6 +224,13 @@ export class WeaponHandler {
     this.meleeModel.visible = this.visible && showMelee
   }
 
+  /** Slot successivo (rotella giù) o precedente (rotella su), in ciclo. */
+  nextSlot(direction: 1 | -1): ActiveSlot {
+    const order: ActiveSlot[] = ['primary', 'secondary', 'melee']
+    const index = order.indexOf(this.activeSlot)
+    return order[(index + direction + order.length) % order.length]!
+  }
+
   switchTo(slot: ActiveSlot): boolean {
     if (!this.slots || slot === this.activeSlot || this.meleeTimer > 0) return false
     this.activeSlot = slot

@@ -81,4 +81,12 @@ describe('gestione delle armi del loadout', () => {
     expect(handler.has('ar-07')).toBe(true)
     expect(handler.slot).toBe('secondary')
   })
+
+  it('la rotella scorre gli slot in ciclo nei due sensi', () => {
+    const handler = createHandler()
+    expect(handler.nextSlot(1)).toBe('secondary')
+    expect(handler.nextSlot(-1)).toBe('melee')
+    handler.switchTo('melee')
+    expect(handler.nextSlot(1)).toBe('primary')
+  })
 })

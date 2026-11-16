@@ -104,6 +104,7 @@ export class TctGame {
   private stunTimer = 0
   private cameraShake = 0
   private deployCounter = 0
+  private lastWheel = 0
   private state: GameState = 'menu'
   private graphicsQuality: GraphicsQuality = 'medium'
   private active = true
@@ -287,6 +288,7 @@ export class TctGame {
     window.removeEventListener('resize', this.resize)
     window.removeEventListener('keydown', this.onKeyDown)
     window.removeEventListener('keyup', this.onKeyUp)
+    window.removeEventListener('wheel', this.onWheel)
     window.removeEventListener('blur', this.onBlur)
     window.removeEventListener('mouseup', this.onMouseButtonUp)
     document.removeEventListener('mousemove', this.onMouseMove)
@@ -1013,6 +1015,21 @@ export class TctGame {
     if (event.code === 'KeyC' && !event.repeat) this.controller.pressCrouch()
   }
 
+  /** Rotella del mouse: scorre primaria, secondaria e arma bianca. */
+  private readonly onWheel = (event: WheelEvent): void => {
+    if (!this.active || !this.alive || !this.wheelReady(event)) return
+    this.switchSlot(this.weapons.nextSlot(event.deltaY > 0 ? 1 : -1))
+  }
+
+  private wheelReady(event: WheelEvent): boolean {
+    if (event.deltaY === 0 || this.state !== 'playing') return false
+    const now = performance.now()
+    // Una tacca della rotella produce spesso più eventi ravvicinati: uno solo per cambio.
+    if (now - this.lastWheel < 140) return false
+    this.lastWheel = now
+    return true
+  }
+
   private readonly onKeyUp = (event: KeyboardEvent): void => {
     this.keys.delete(event.code)
   }
@@ -1066,6 +1083,7 @@ export class TctGame {
     window.addEventListener('resize', this.resize)
     window.addEventListener('keydown', this.onKeyDown)
     window.addEventListener('keyup', this.onKeyUp)
+    window.addEventListener('wheel', this.onWheel, { passive: true })
     window.addEventListener('blur', this.onBlur)
     window.addEventListener('mouseup', this.onMouseButtonUp)
     document.addEventListener('mousemove', this.onMouseMove)

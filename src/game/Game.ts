@@ -220,6 +220,7 @@ export class Game {
   private yaw = 0
   private pitch = 0
   private doorDeniedTimer = 0
+  private lastWheel = 0
   private currentUpgradeIds: string[] = []
   private animationId = 0
   private lastTime = performance.now()
@@ -517,6 +518,7 @@ export class Game {
     window.removeEventListener('resize', this.resize)
     window.removeEventListener('keydown', this.onKeyDown)
     window.removeEventListener('keyup', this.onKeyUp)
+    window.removeEventListener('wheel', this.onWheel)
     window.removeEventListener('blur', this.onBlur)
     window.removeEventListener('mouseup', this.onMouseButtonUp)
     document.removeEventListener('mousemove', this.onMouseMove)
@@ -1757,6 +1759,21 @@ export class Game {
     if (event.code === 'Space' && !event.repeat) this.controller.jump(this.obstacles)
   }
 
+  /** Rotella del mouse: scorre primaria, secondaria e arma bianca. */
+  private readonly onWheel = (event: WheelEvent): void => {
+    if (!this.wheelReady(event)) return
+    this.switchSlot(this.weapons.nextSlot(event.deltaY > 0 ? 1 : -1))
+  }
+
+  private wheelReady(event: WheelEvent): boolean {
+    if (event.deltaY === 0 || this.state !== 'playing') return false
+    const now = performance.now()
+    // Una tacca della rotella produce spesso più eventi ravvicinati: uno solo per cambio.
+    if (now - this.lastWheel < 140) return false
+    this.lastWheel = now
+    return true
+  }
+
   private readonly onKeyUp = (event: KeyboardEvent): void => {
     this.keys.delete(event.code)
   }
@@ -1809,6 +1826,7 @@ export class Game {
     window.addEventListener('resize', this.resize)
     window.addEventListener('keydown', this.onKeyDown)
     window.addEventListener('keyup', this.onKeyUp)
+    window.addEventListener('wheel', this.onWheel, { passive: true })
     window.addEventListener('blur', this.onBlur)
     window.addEventListener('mouseup', this.onMouseButtonUp)
     document.addEventListener('mousemove', this.onMouseMove)

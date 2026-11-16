@@ -77,6 +77,13 @@ test('una run FPS usa mouse, fuoco, mira e ricarica e salva il risultato', async
   await page.keyboard.press('KeyR')
   await expect(page.locator('#ammo-text')).toHaveText('12', { timeout: process.env.CI ? 15000 : 3000 })
 
+  // Rotella: dalla secondaria in giù si passa all'arma bianca, in su si torna alla secondaria.
+  await page.mouse.wheel(0, 120)
+  await expect(page.locator('#weapon-name')).toHaveText('COLTELLO DA COMBATTIMENTO')
+  await page.waitForTimeout(250)
+  await page.mouse.wheel(0, -120)
+  await expect(page.locator('#weapon-name')).toHaveText('P-12 // SEMIAUTOMATICA')
+
   await expect(page.locator('#grenade-status')).toHaveText('PRONTA')
   await page.keyboard.press('KeyG')
   await expect(page.locator('#grenade-status')).toHaveText(/^[1-7]s$/)
@@ -84,6 +91,15 @@ test('una run FPS usa mouse, fuoco, mira e ricarica e salva il risultato', async
   await expect(page.locator('#turret-status')).toHaveText(/^1[0-8]s$/)
 
   await page.keyboard.press('Escape')
+  await expect(page.locator('#app')).toHaveAttribute('data-state', 'paused')
+  // Impostazioni dalla pausa: Esc chiude il pannello e la partita resta in pausa.
+  await page.getByRole('button', { name: 'IMPOSTAZIONI', exact: true }).click()
+  await expect(page.locator('#menu-drawer')).toBeVisible()
+  await page.locator('#graphics-quality').selectOption('low')
+  await page.locator('#mouse-sensitivity').fill('1.5')
+  await expect(page.locator('#sensitivity-value')).toHaveText('1,5×')
+  await page.keyboard.press('Escape')
+  await expect(page.locator('#menu-drawer')).toBeHidden()
   await expect(page.locator('#app')).toHaveAttribute('data-state', 'paused')
   await page.getByRole('button', { name: 'RIPRENDI' }).click()
   await expect(page.locator('#app')).toHaveAttribute('data-state', 'playing')
