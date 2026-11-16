@@ -99,6 +99,77 @@ function createSurfaceMaps(albedo: HTMLCanvasElement, repeat: number): { normalM
   }
 }
 
+export function createOrganicTexture(color: number): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas')
+  canvas.width = 128
+  canvas.height = 128
+  const context = canvas.getContext('2d')
+  if (!context) throw new Error('Canvas 2D non disponibile')
+  const base = new THREE.Color(color)
+  context.fillStyle = `#${base.getHexString()}`
+  context.fillRect(0, 0, 128, 128)
+  let seed = 73
+  const random = () => {
+    seed = seed * 16807 % 2147483647
+    return (seed - 1) / 2147483646
+  }
+  for (let index = 0; index < 900; index += 1) {
+    const dark = random() > 0.6
+    context.fillStyle = dark ? `rgba(45,24,20,${random() * 0.16})` : `rgba(215,220,195,${random() * 0.09})`
+    const radius = random() * 2.5 + 0.4
+    context.beginPath()
+    context.arc(random() * 128, random() * 128, radius, 0, Math.PI * 2)
+    context.fill()
+  }
+  context.strokeStyle = 'rgba(54,29,26,0.2)'
+  context.lineWidth = 0.7
+  for (let index = 0; index < 16; index += 1) {
+    const x = random() * 128
+    const y = random() * 128
+    context.beginPath()
+    context.moveTo(x, y)
+    context.lineTo(x + random() * 14 - 7, y + random() * 20)
+    context.stroke()
+  }
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  return texture
+}
+
+export function createFabricTexture(color: number): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas')
+  canvas.width = 128
+  canvas.height = 128
+  const context = canvas.getContext('2d')
+  if (!context) throw new Error('Canvas 2D non disponibile')
+  context.fillStyle = `#${new THREE.Color(color).getHexString()}`
+  context.fillRect(0, 0, 128, 128)
+  context.strokeStyle = 'rgba(210,220,220,0.055)'
+  context.lineWidth = 1
+  for (let line = 0; line < 128; line += 4) {
+    context.beginPath()
+    context.moveTo(line, 0)
+    context.lineTo(line, 128)
+    context.stroke()
+    context.beginPath()
+    context.moveTo(0, line)
+    context.lineTo(128, line)
+    context.stroke()
+  }
+  let seed = 97
+  for (let index = 0; index < 300; index += 1) {
+    seed = seed * 16807 % 2147483647
+    const x = (seed - 1) / 2147483646 * 128
+    seed = seed * 16807 % 2147483647
+    const y = (seed - 1) / 2147483646 * 128
+    context.fillStyle = 'rgba(5,7,8,0.09)'
+    context.fillRect(x, y, 2, 2)
+  }
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  return texture
+}
+
 export function createIndustrialMaterialMaps(base: string, line: string, repeat: number): IndustrialMaterialMaps {
   const albedo = createAlbedo(base, line)
   return {

@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import type { CollisionObstacle } from './collision'
 import type { MapDefinition, MapDoorDefinition } from './maps'
 import { createIndustrialMaterialMaps } from './textures'
+import { addMapDetails } from './mapDetails'
 
 export interface BuiltDoor {
   definition: MapDoorDefinition
@@ -20,11 +21,11 @@ export function buildMap(map: MapDefinition): BuiltMap {
   const group = new THREE.Group()
   const obstacles: CollisionObstacle[] = []
   const doors: BuiltDoor[] = []
-  group.add(new THREE.HemisphereLight(0x8a9cff, 0x080910, 2.1))
-  const keyLight = new THREE.DirectionalLight(0xc7dcff, 2.8)
-  keyLight.position.set(-6, 16, 8)
+  group.add(new THREE.HemisphereLight(0xb9c9dc, 0x161410, 2.4))
+  const keyLight = new THREE.DirectionalLight(0xffe5c5, 3.2)
+  keyLight.position.set(-8, 18, 10)
   keyLight.castShadow = true
-  keyLight.shadow.mapSize.set(1024, 1024)
+  keyLight.shadow.mapSize.set(2048, 2048)
   keyLight.shadow.camera.left = -24
   keyLight.shadow.camera.right = 24
   keyLight.shadow.camera.top = 24
@@ -33,7 +34,7 @@ export function buildMap(map: MapDefinition): BuiltMap {
   keyLight.shadow.camera.far = 55
   keyLight.shadow.bias = -0.0004
   group.add(keyLight)
-  const rimLight = new THREE.PointLight(0x7040ff, 65, 45)
+  const rimLight = new THREE.PointLight(0x6c82ff, 55, 45)
   rimLight.position.set(0, 8, -8)
   group.add(rimLight)
 
@@ -50,6 +51,8 @@ export function buildMap(map: MapDefinition): BuiltMap {
   group.add(ground)
   const grid = new THREE.GridHelper(map.arenaLimit * 2 + 1, 34, 0x376474, 0x243345)
   grid.position.y = -0.025
+  grid.material.transparent = true
+  grid.material.opacity = 0.2
   group.add(grid)
 
   const centerRing = new THREE.Mesh(
@@ -145,6 +148,8 @@ export function buildMap(map: MapDefinition): BuiltMap {
     obstacles.push(obstacle)
     doors.push({ definition, group: doorGroup, obstacle })
   }
+
+  addMapDetails(group, map)
 
   const starPositions = new Float32Array(450)
   for (let index = 0; index < starPositions.length; index += 3) {

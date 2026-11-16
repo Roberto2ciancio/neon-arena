@@ -1221,7 +1221,7 @@ export class Game {
     const enemy = this.enemies[index]
     if (!enemy) return
     const position = enemy.model.group.position.clone()
-    const color = enemy.model.body.material.color.getHex()
+    const color = getZombieColor(enemy.kind)
     this.score += enemy.score * this.wave
     this.kills += 1
     this.spawnBurst(position.clone().setY(enemy.model.height * 0.5), color, enemy.kind === 'brute' ? 28 : 12)
