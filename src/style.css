@@ -181,24 +181,15 @@ kbd { display: inline-block; color: #aab4cb; font-family: 'Chakra Petch', sans-s
 @keyframes banner-in { 0% { opacity: 0; transform: translate(-50%, -42%); } 15%, 70% { opacity: 1; transform: translate(-50%, -50%); } 100% { opacity: 0; } }
 
 .modal-overlay { z-index: 10; display: grid; place-items: center; padding: 90px 24px 30px; background: rgba(4, 5, 12, 0.76); backdrop-filter: blur(9px); }
-.modal-card, .upgrade-container { width: min(100%, 520px); padding: 36px; border: 1px solid var(--line); background: rgba(10, 12, 25, 0.96); box-shadow: 0 25px 90px rgba(0, 0, 0, 0.5); text-align: center; }
-.modal-card h2, .upgrade-container h2 { margin-bottom: 18px; font-family: 'Chakra Petch', sans-serif; font-size: 36px; letter-spacing: 0.04em; }
-.modal-card > p:not(.eyebrow), .upgrade-container > p:not(.eyebrow) { color: #858da6; font-size: 12px; line-height: 1.7; }
+.modal-card { width: min(100%, 520px); padding: 36px; border: 1px solid var(--line); background: rgba(10, 12, 25, 0.96); box-shadow: 0 25px 90px rgba(0, 0, 0, 0.5); text-align: center; }
+.modal-card h2 { margin-bottom: 18px; font-family: 'Chakra Petch', sans-serif; font-size: 36px; letter-spacing: 0.04em; }
+.modal-card > p:not(.eyebrow) { color: #858da6; font-size: 12px; line-height: 1.7; }
 .compact-card { max-width: 390px; }
 .compact-card .primary-button, .compact-card .secondary-button, .gameover-card .primary-button, .gameover-card .secondary-button { width: 100%; margin-top: 12px; justify-content: center; }
 .run-results { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 26px 0 18px; }
 .run-results div { display: flex; flex-direction: column; gap: 8px; padding: 14px 4px; border: 1px solid var(--line); }
 .run-results strong { font-family: 'Chakra Petch', sans-serif; font-size: 20px; font-weight: 500; }
 #result-shards { color: var(--cyan); }
-.upgrade-container { width: min(100%, 1000px); }
-.upgrade-choices { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 28px; }
-.upgrade-choice { position: relative; min-height: 230px; padding: 25px 20px; color: inherit; text-align: left; border: 1px solid var(--line); background: linear-gradient(150deg, rgba(29, 33, 55, 0.8), rgba(13, 15, 29, 0.8)); cursor: pointer; transition: transform 150ms, border-color 150ms; }
-.upgrade-choice:hover { transform: translateY(-5px); border-color: var(--cyan); }
-.upgrade-key { position: absolute; top: 12px; right: 12px; display: grid; place-items: center; width: 23px; height: 23px; color: #8a93ab; border: 1px solid var(--line); font-family: 'Chakra Petch', sans-serif; font-size: 10px; }
-.upgrade-icon { display: block; margin: 12px 0 24px; color: var(--cyan); font-family: 'Chakra Petch', sans-serif; font-size: 35px; text-shadow: 0 0 20px rgba(88, 245, 229, 0.3); }
-.upgrade-choice strong { display: block; margin-bottom: 10px; font-family: 'Chakra Petch', sans-serif; font-size: 16px; letter-spacing: 0.06em; }
-.upgrade-choice p { margin: 0; color: #9099b2; font-size: 11px; line-height: 1.7; }
-.upgrade-choice small { display: block; margin-top: 18px; color: var(--violet); font-family: 'Chakra Petch', sans-serif; font-size: 8px; letter-spacing: 0.14em; }
 .desktop-note { display: none; }
 
 @media (max-width: 1000px) {
@@ -240,3 +231,53 @@ kbd { display: inline-block; color: #aab4cb; font-family: 'Chakra Petch', sans-s
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+
+.upgrade-panel { position: absolute; z-index: 4; left: 38px; bottom: 128px; width: 280px; padding: 8px; border: 1px solid rgba(154, 123, 255, 0.45); background: rgba(8, 10, 22, 0.82); pointer-events: none; animation: upgrade-in 180ms ease-out; }
+.upgrade-panel header { display: flex; justify-content: space-between; align-items: baseline; margin: 0 2px 6px; font-family: 'Chakra Petch', sans-serif; letter-spacing: 0.12em; }
+.upgrade-panel header strong { color: var(--violet); font-size: 10px; font-weight: 500; }
+.upgrade-panel header span { color: #8a93ad; font-size: 8px; }
+.upgrade-choices { display: grid; gap: 4px; }
+.upgrade-choice { display: grid; grid-template-columns: 20px 20px 1fr; align-items: center; gap: 8px; width: 100%; padding: 5px 7px; color: inherit; text-align: left; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.02); font: inherit; pointer-events: auto; cursor: pointer; }
+.upgrade-choice:hover { border-color: var(--cyan); }
+.upgrade-key { display: grid; place-items: center; width: 20px; height: 20px; color: var(--cyan); border: 1px solid rgba(88, 245, 229, 0.35); font-family: 'Chakra Petch', sans-serif; font-size: 9px; }
+.upgrade-icon { color: var(--cyan); font-family: 'Chakra Petch', sans-serif; font-size: 14px; text-align: center; }
+.upgrade-choice span:last-child { display: flex; flex-direction: column; min-width: 0; }
+.upgrade-choice strong { font-family: 'Chakra Petch', sans-serif; font-size: 10px; font-weight: 500; letter-spacing: 0.06em; }
+.upgrade-choice small { overflow: hidden; color: #8790a8; font-size: 9px; white-space: nowrap; text-overflow: ellipsis; }
+@keyframes upgrade-in { from { opacity: 0; transform: translateX(-12px); } }
+@media (prefers-reduced-motion: reduce) { .upgrade-panel { animation: none; } }
+
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.tct-lobby { max-width: 490px; margin-bottom: 18px; }
+.lobby-connect { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.lobby-connect .primary-button { margin: 0; }
+.lobby-join { display: flex; flex: 1; min-width: 200px; gap: 6px; }
+.lobby-join input { flex: 1; min-width: 0; padding: 0 12px; color: var(--cyan); border: 1px solid var(--line); background: rgba(8, 10, 21, 0.72); font-family: 'Chakra Petch', sans-serif; font-size: 14px; letter-spacing: 0.3em; text-transform: uppercase; }
+.lobby-join .secondary-button { margin: 0; }
+.lobby-room { margin-top: 8px; padding: 12px; border: 1px solid var(--line); background: rgba(8, 10, 21, 0.72); }
+.lobby-code { display: grid; grid-template-columns: auto 1fr; align-items: baseline; gap: 2px 12px; margin-bottom: 10px; font-family: 'Chakra Petch', sans-serif; }
+.lobby-code span { color: #8a93ad; font-size: 9px; letter-spacing: 0.12em; }
+.lobby-code strong { grid-row: span 2; color: var(--cyan); font-size: 26px; font-weight: 500; letter-spacing: 0.3em; text-align: right; }
+.lobby-code small { color: #697189; font-size: 8px; }
+.lobby-teams { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.lobby-teams ul { min-height: 92px; margin: 6px 0 0; padding: 0; list-style: none; }
+.lobby-teams li { padding: 4px 6px; margin-bottom: 3px; border-left: 2px solid var(--line); font-family: 'Chakra Petch', sans-serif; font-size: 11px; letter-spacing: 0.06em; }
+.lobby-teams li.me { color: #fff; border-left-color: var(--cyan); }
+.lobby-teams li small { color: #697189; font-size: 8px; }
+.team-name { font-family: 'Chakra Petch', sans-serif; font-size: 10px; letter-spacing: 0.14em; }
+.team-name.alpha { color: var(--cyan); }
+.team-name.bravo { color: #ff4f87; }
+.lobby-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.lobby-actions button { margin: 0; }
+.lobby-status { margin: 8px 0 0; color: #8a93ad; font-size: 11px; line-height: 1.5; }
+.lobby-status.error { color: #ff6f9a; }
+.tct-lobby .primary-button { min-width: 0; min-height: 42px; gap: 18px; }
+.tct-lobby .secondary-button { min-height: 42px; padding: 0 14px; }
+.tct-lobby button:disabled { cursor: not-allowed; opacity: 0.45; }
+.weapon-slots { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; max-width: 330px; margin-top: 8px; }
+.weapon-hud .weapon-slots { display: flex; align-items: center; }
+.weapon-hud .weapon-slots .weapon-slot { padding: 3px 6px; color: #4d5468; border: 1px solid rgba(151, 164, 209, 0.1); font-family: 'Chakra Petch', sans-serif; font-size: 8px; letter-spacing: 0.08em; }
+.weapon-hud .weapon-slots .weapon-slot.owned { color: #9aa3bb; border-color: var(--line); }
+.weapon-hud .weapon-slots .weapon-slot.active { color: var(--cyan); border-color: rgba(88, 245, 229, 0.55); }
+.hud.tct .weapon-slots { display: none; }
+.crosshair.crouched { transform: translate(-50%, -50%) scale(0.85); }

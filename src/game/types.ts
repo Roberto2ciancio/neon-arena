@@ -1,4 +1,4 @@
-export type GameState = 'menu' | 'playing' | 'paused' | 'upgrade' | 'gameover' | 'victory'
+export type GameState = 'menu' | 'playing' | 'paused' | 'gameover' | 'victory'
 
 export type EnemyKind = 'walker' | 'runner' | 'armored' | 'brute' | 'crawler' | 'spitter' | 'screamer'
 export type HitZone = 'body' | 'head' | 'legs' | 'generator' | 'core' | 'spine' | 'throat'
@@ -27,8 +27,9 @@ export interface MetaBonuses {
 }
 
 export interface TctHudData {
-  alphaScore: number
+  teamScore: number
   enemyScore: number
+  team: 'alpha' | 'bravo'
   timeRemaining: number
   playerRespawn: number
   minimap: {
@@ -37,9 +38,9 @@ export interface TctHudData {
     yaw: number
     arenaLimit: number
     obstacles: { x: number; z: number; width: number; depth: number }[]
-    bots: { x: number; z: number; team: 'alpha' | 'enemy'; alive: boolean }[]
+    players: { x: number; z: number; ally: boolean; alive: boolean }[]
   }
-  allies: { id: number; x: number; y: number; health: number; role: string }[]
+  allies: { id: string; x: number; y: number; health: number; name: string }[]
 }
 
 export interface HudData {
@@ -63,7 +64,10 @@ export interface HudData {
   enemiesRemaining: number
   grenadeCooldown: number
   turretCooldown: number
-  door: { cost: number; canAfford: boolean; denied: boolean } | null
+  /** Porta o postazione d'acquisto a portata di mano (tasto E). */
+  interaction: { label: string; cost: number; canAfford: boolean; denied: boolean } | null
+  weaponSlots: { key: string; name: string; owned: boolean; active: boolean }[]
+  stance: 'stand' | 'crouch' | 'slide'
   tct?: TctHudData
   performance?: { fps: number; drawCalls: number }
 }
@@ -88,7 +92,7 @@ export interface LeaderboardEntry {
 export interface GameEvents {
   onStateChange: (state: GameState) => void
   onHud: (hud: HudData) => void
-  onUpgrade: (choices: string[]) => void
+  onUpgrade: (choices: string[], pending: number) => void
   onRunEnd: (result: RunResult) => void
   onWave: (wave: number) => void
   onDamage: () => void

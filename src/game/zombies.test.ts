@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { FINAL_WAVE, getWaveSpawnCount, getZombieStats, WAVE_BREAK_SECONDS } from './zombies'
+import { FINAL_WAVE, getWaveSpawnCount, getZombieStats, SPEED_SCALE_CAP, WAVE_BREAK_SECONDS } from './zombies'
 
 describe('progressione zombie', () => {
   it('prevede 15 ondate e un intervallo reale fra esse', () => {
     expect(FINAL_WAVE).toBe(15)
     expect(WAVE_BREAK_SECONDS).toBe(8)
-    expect(getWaveSpawnCount(1)).toBe(6)
-    expect(getWaveSpawnCount(15)).toBe(34)
+    expect(getWaveSpawnCount(1)).toBe(9)
+    expect(getWaveSpawnCount(15)).toBe(57)
   })
 
   it('distingue gli archetipi per HP, velocità e danno', () => {
@@ -24,7 +24,7 @@ describe('progressione zombie', () => {
     const early = getZombieStats('walker', 1)
     const late = getZombieStats('walker', 15)
 
-    expect(late.health).toBeGreaterThan(early.health * 2)
+    expect(late.health).toBeGreaterThan(early.health * 2.5)
     expect(late.damage).toBeGreaterThan(early.damage)
   })
 
@@ -33,8 +33,8 @@ describe('progressione zombie', () => {
     const beyond = getZombieStats('runner', 100)
 
     expect(beyond.speed).toBe(capped.speed)
-    expect(getZombieStats('runner', FINAL_WAVE).speed).toBeLessThanOrEqual(getZombieStats('runner', 1).speed * 1.25)
-    expect(beyond.speed).toBe(getZombieStats('runner', 1).speed * 1.25)
+    expect(getZombieStats('runner', FINAL_WAVE).speed).toBeLessThanOrEqual(getZombieStats('runner', 1).speed * SPEED_SCALE_CAP)
+    expect(beyond.speed).toBe(getZombieStats('runner', 1).speed * SPEED_SCALE_CAP)
   })
 
   it('include i tre specialisti con ruoli statistici distinti', () => {

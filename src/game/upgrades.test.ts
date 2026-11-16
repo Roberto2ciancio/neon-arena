@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyUpgrade, createBaseStats, getUpgradeChoices, UPGRADE_BY_ID } from './upgrades'
+import { applyUpgrade, createBaseStats, FIRST_LEVEL_XP, getNextLevelXp, getUpgradeChoices, UPGRADE_BY_ID } from './upgrades'
 
 describe('upgrade della run', () => {
   it('offre tre scelte diverse senza superare i limiti', () => {
@@ -63,5 +63,14 @@ describe('upgrade della run', () => {
 
     expect(choices).toHaveLength(3)
     expect(choices.every((choice) => choice.isAvailable(stats))).toBe(true)
+  })
+})
+
+describe('curva di livello', () => {
+  it('richiede piu esperienza a ogni livello', () => {
+    expect(FIRST_LEVEL_XP).toBe(90)
+    const second = getNextLevelXp(FIRST_LEVEL_XP)
+    expect(second).toBe(130)
+    expect(getNextLevelXp(second)).toBeGreaterThan(second * 1.4)
   })
 })

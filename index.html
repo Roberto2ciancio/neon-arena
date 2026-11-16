@@ -66,10 +66,15 @@
         <div><kbd>G</kbd><span>GRANATA</span><strong id="grenade-status">PRONTA</strong></div>
         <div><kbd>T</kbd><span>TORRETTA</span><strong id="turret-status">PRONTA</strong></div>
       </div>
+      <aside id="upgrade-panel" class="upgrade-panel hidden" aria-live="polite" aria-labelledby="upgrade-title">
+        <header><strong id="upgrade-title">LIVELLO SU</strong><span id="upgrade-pending"></span></header>
+        <div id="upgrade-choices" class="upgrade-choices"></div>
+      </aside>
       <div id="weapon-hud" class="weapon-hud hidden">
         <span id="weapon-name" class="hud-label">AR-07 // AUTOMATICO</span>
         <div><strong id="ammo-text">30</strong><span>/ <span id="reserve-text">∞</span></span></div>
         <small id="reload-text">CARICATORE PRONTO</small>
+        <div id="weapon-slots" class="weapon-slots" aria-label="Armi disponibili"></div>
       </div>
       <div id="door-prompt" class="door-prompt hidden"><kbd>E</kbd><span id="door-prompt-text">APRI PORTA</span></div>
       <div id="crosshair" class="crosshair hidden" aria-hidden="true"><i></i><i></i><i></i><i></i><b></b></div>
@@ -86,7 +91,7 @@
           <p class="eyebrow">PROTOCOLLO DI COMBATTIMENTO // 01</p>
           <div class="mode-selector" aria-label="Seleziona modalità">
             <button type="button" class="selected" data-mode="zombies" aria-pressed="true">ZOMBIE // ONDATE</button>
-            <button type="button" data-mode="tct" aria-pressed="false">TCT // 4 CONTRO 4</button>
+            <button type="button" data-mode="tct" aria-pressed="false">TCT // ONLINE 4V4</button>
           </div>
           <h1>NEON<br /><span>ARENA</span></h1>
           <p class="tagline">Sopravvivi. Evolviti. Ricomincia più forte.</p>
@@ -107,6 +112,30 @@
             </div>
             <small>SECONDARIA: P-12 // G GRANATA · T TORRETTA</small>
           </div>
+          <section id="tct-lobby" class="tct-lobby hidden" aria-labelledby="lobby-title">
+            <span id="lobby-title" class="hud-label">STANZA ONLINE // GIOCATORI REALI</span>
+            <div id="lobby-connect" class="lobby-connect">
+              <button id="create-room" class="primary-button" type="button"><span>CREA STANZA</span><span aria-hidden="true">+</span></button>
+              <div class="lobby-join">
+                <label for="room-code" class="visually-hidden">Codice stanza</label>
+                <input id="room-code" maxlength="5" placeholder="CODICE" autocomplete="off" spellcheck="false" />
+                <button id="join-room" class="secondary-button" type="button">ENTRA</button>
+              </div>
+            </div>
+            <div id="lobby-room" class="lobby-room hidden">
+              <div class="lobby-code"><span>CODICE STANZA</span><strong id="room-code-display">-----</strong><small>Condividilo con gli altri giocatori</small></div>
+              <div class="lobby-teams">
+                <div><span class="team-name alpha">ALPHA</span><ul id="team-alpha"></ul></div>
+                <div><span class="team-name bravo">BRAVO</span><ul id="team-bravo"></ul></div>
+              </div>
+              <div class="lobby-actions">
+                <button id="start-match" class="primary-button" type="button"><span>AVVIA PARTITA</span><span aria-hidden="true">↗</span></button>
+                <button id="switch-team" class="secondary-button" type="button">CAMBIA SQUADRA</button>
+                <button id="leave-room" class="secondary-button" type="button">ESCI</button>
+              </div>
+            </div>
+            <p id="lobby-status" class="lobby-status" aria-live="polite">Crea una stanza o inserisci il codice di un amico.</p>
+          </section>
           <button id="start-button" class="primary-button" type="button"><span>INIZIA RUN</span><span aria-hidden="true">↗</span></button>
           <div class="menu-records">
             <div><span>RECORD</span><strong id="best-score">0</strong></div>
@@ -155,15 +184,6 @@
             <div><kbd>ESC</kbd><span>Pausa</span></div>
           </div>
         </aside>
-      </section>
-
-      <section id="upgrade-screen" class="overlay modal-overlay hidden" aria-labelledby="upgrade-title">
-        <div class="upgrade-container">
-          <p class="eyebrow">SINCRONIZZAZIONE COMPLETATA</p>
-          <h2 id="upgrade-title">SCEGLI UN POTENZIAMENTO</h2>
-          <p>Il tempo nell’arena è sospeso. Premi 1, 2 o 3.</p>
-          <div id="upgrade-choices" class="upgrade-choices"></div>
-        </div>
       </section>
 
       <section id="pause-screen" class="overlay modal-overlay hidden" aria-labelledby="pause-title">

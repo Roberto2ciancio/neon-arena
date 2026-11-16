@@ -13,6 +13,7 @@ export interface ZombieStats {
 
 export const FINAL_WAVE = 15
 export const WAVE_BREAK_SECONDS = 8
+export const SPEED_SCALE_CAP = 1.35
 
 const BASE_STATS: Record<EnemyKind, ZombieStats> = {
   walker: { name: 'Errante', health: 58, speed: 1.85, damage: 12, radius: 0.52, score: 100, xp: 24, attackInterval: 0.9 },
@@ -25,15 +26,16 @@ const BASE_STATS: Record<EnemyKind, ZombieStats> = {
 }
 
 export function getWaveSpawnCount(wave: number): number {
-  return 4 + Math.max(1, wave) * 2
+  const normalizedWave = Math.max(1, wave)
+  return 6 + normalizedWave * 3 + Math.floor(normalizedWave / 4) * 2
 }
 
 export function getZombieStats(kind: EnemyKind, wave: number): ZombieStats {
   const base = BASE_STATS[kind]
   const normalizedWave = Math.max(1, wave)
-  const healthScale = 1 + (normalizedWave - 1) * 0.085
-  const damageScale = 1 + (normalizedWave - 1) * 0.04
-  const speedScale = Math.min(1.25, 1 + (normalizedWave - 1) * 0.016)
+  const healthScale = 1 + (normalizedWave - 1) * 0.12
+  const damageScale = 1 + (normalizedWave - 1) * 0.065
+  const speedScale = Math.min(SPEED_SCALE_CAP, 1 + (normalizedWave - 1) * 0.024)
   const bossScale = kind === 'brute' ? 1 + (normalizedWave / 5 - 1) * 0.3 : 1
 
   return {

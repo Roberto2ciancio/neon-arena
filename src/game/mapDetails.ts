@@ -96,33 +96,27 @@ function addDistrict(group: THREE.Group, map: MapDefinition): void {
   }
   addInstances(group, new THREE.BoxGeometry(1, 1, 1), concrete, sidewalks)
 
-  const glass = new THREE.MeshStandardMaterial({ color: 0x172c36, metalness: 0.65, roughness: 0.2, emissive: 0x102733, emissiveIntensity: 0.25 })
-  const windows: InstanceTransform[] = []
-  for (const wall of map.obstacles.filter((obstacle) => obstacle.id.includes('building'))) {
-    const alongX = wall.width > wall.depth
-    const length = alongX ? wall.width : wall.depth
-    const count = Math.max(1, Math.floor(length / 2.2))
-    for (let index = 0; index < count; index += 1) {
-      const offset = (index - (count - 1) / 2) * (length / count)
-      for (const side of [-1, 1]) {
-        windows.push({
-          position: [wall.x + (alongX ? offset : side * (wall.width / 2 + 0.025)), 2.05, wall.z + (alongX ? side * (wall.depth / 2 + 0.025) : offset)],
-          scale: alongX ? [1.1, 0.95, 0.045] : [0.045, 0.95, 1.1],
-        })
-      }
-    }
-  }
-  addInstances(group, new RoundedBoxGeometry(1, 1, 1, 2, 0.06), glass, windows)
-
   const poles: InstanceTransform[] = []
   const lamps: InstanceTransform[] = []
-  for (const [x, z] of [[-6, -8], [6, -8], [-6, 8], [6, 8]]) {
+  const lampSpots: [number, number][] = [[-6, -8], [6, -8], [-6, 8], [6, 8]]
+  for (const distance of [16, 26]) lampSpots.push([-5.6, -distance], [5.6, distance], [-distance, 5.6], [distance, -5.6])
+  lampSpots.forEach(([x, z], index) => {
     poles.push({ position: [x, 2.1, z], scale: [1, 4.2, 1] })
     lamps.push({ position: [x, 4.25, z], scale: [0.5, 0.16, 0.5] })
-    const light = new THREE.PointLight(0xffd5a0, 22, 12)
+    if (index >= 4) return
+    const light = new THREE.PointLight(0xffd5a0, 26, 14)
     light.position.set(x, 4.1, z)
     group.add(light)
+  })
+  // Strisce pedonali all'incrocio.
+  const stripes: InstanceTransform[] = []
+  for (const side of [-1, 1]) {
+    for (let offset = -3.5; offset <= 3.5; offset += 1) {
+      stripes.push({ position: [offset, -0.035, side * 6.2], scale: [0.5, 0.02, 1.6] })
+      stripes.push({ position: [side * 6.2, -0.035, offset], scale: [1.6, 0.02, 0.5] })
+    }
   }
+  addInstances(group, new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0xd9d9d0, roughness: 0.8 }), stripes)
   addInstances(group, new THREE.CylinderGeometry(0.07, 0.1, 1, 10), new THREE.MeshStandardMaterial({ color: 0x242b2d, metalness: 0.8, roughness: 0.42 }), poles)
   addInstances(group, new RoundedBoxGeometry(1, 1, 1, 2, 0.08), new THREE.MeshStandardMaterial({ color: 0xffd9a8, emissive: 0xffb85d, emissiveIntensity: 2 }), lamps)
 }

@@ -12,6 +12,10 @@ import type { GraphicsQuality } from './game/graphics'
 import { META_COSTS, META_UPGRADES, MAX_META_LEVEL, getMetaBonuses, loadProgress, purchaseMetaUpgrade, recordRun, saveProgress } from './game/progression'
 import { UPGRADE_BY_ID } from './game/upgrades'
 import { WEAPONS } from './game/weapons'
+import { NetSession, NetSessionError } from './game/net/NetSession'
+import { generateRoomCode, NET_ERROR_MESSAGES, normalizeRoomCode, otherTeam } from './game/net/protocol'
+import type { HostMessage } from './game/net/protocol'
+import { getTransportKind } from './game/net/transport'
 import type { WeaponId } from './game/weapons'
 import type { GameState, HudData, RunResult, TctHudData } from './game/types'
 
@@ -36,7 +40,7 @@ const menuScreen = byId('menu-screen')
 const hud = byId('hud')
 const combatFooter = byId('combat-footer')
 const pauseScreen = byId('pause-screen')
-const upgradeScreen = byId('upgrade-screen')
+const upgradePanel = byId('upgrade-panel')
 const gameoverScreen = byId('gameover-screen')
 const upgradeChoices = byId('upgrade-choices')
 const waveBanner = byId('wave-banner')
@@ -59,7 +63,9 @@ let currentState: GameState = 'menu'
 let selectedMode: 'zombies' | 'tct' = 'zombies'
 let selectedMap = STATION_13
 let selectedPrimary: WeaponId = 'ar-07'
-let availableUpgradeIds: string[] = []
+let session: NetSession | null = null
+let lobbyBusy = false
+const transportKind = getTransportKind()
 let waveBannerTimer = 0
 let damageFlashTimer = 0
 let hitmarkerTimer = 0
@@ -107,14 +113,13 @@ function updateState(state: GameState): void {
   byId('door-prompt').classList.toggle('hidden', state !== 'playing')
   if (state !== 'playing') hitmarker.classList.remove('active')
   pauseScreen.classList.toggle('hidden', state !== 'paused')
-  upgradeScreen.classList.toggle('hidden', state !== 'upgrade')
+  if (state !== 'playing' && state !== 'paused') upgradePanel.classList.add('hidden')
   gameoverScreen.classList.toggle('hidden', state !== 'gameover' && state !== 'victory')
 
   const status: Record<GameState, string> = {
     menu: 'SISTEMA PRONTO',
     playing: 'COMBATTIMENTO ATTIVO',
     paused: 'SIMULAZIONE SOSPESA',
-    upgrade: 'SINCRONIZZAZIONE',
     gameover: 'SEGNALE INTERROTTO',
     victory: 'STAZIONE SICURA',
   }
@@ -133,9 +138,9 @@ function updateHud(data: HudData): void {
   byId('health-fill').classList.toggle('critical', healthPercentage < 30)
   byId('xp-fill').style.width = `${Math.min(100, (data.xp / data.xpNext) * 100)}%`
   byId('level-text').textContent = String(data.level)
-  byId('score-label').textContent = data.tct ? 'ALPHA // AVVERSARI' : 'PUNTEGGIO'
+  byId('score-label').textContent = data.tct ? `${data.tct.team.toUpperCase()} // AVVERSARI` : 'PUNTEGGIO'
   byId('score-text').textContent = data.tct
-    ? `${data.tct.alphaScore} : ${data.tct.enemyScore}`
+    ? `${data.tct.teamScore} : ${data.tct.enemyScore}`
     : String(data.score).padStart(6, '0')
   byId('map-name').textContent = data.mapName.toUpperCase()
   byId('wave-text').textContent = data.tct
@@ -162,14 +167,34 @@ function updateHud(data: HudData): void {
   turretStatus.textContent = data.turretCooldown > 0 ? `${Math.ceil(data.turretCooldown)}s` : 'PRONTA'
   turretStatus.classList.toggle('cooldown', data.turretCooldown > 0)
   const doorPrompt = byId('door-prompt')
-  doorPrompt.classList.toggle('hidden', !data.door || currentState !== 'playing')
-  doorPrompt.classList.toggle('denied', data.door?.denied ?? false)
-  if (data.door) {
-    byId('door-prompt-text').textContent = data.door.denied
-      ? `SERVONO ${data.door.cost} FRAMMENTI`
-      : `APRI PORTA // ◆ ${data.door.cost}`
+  doorPrompt.classList.toggle('hidden', !data.interaction || currentState !== 'playing')
+  doorPrompt.classList.toggle('denied', data.interaction?.denied ?? false)
+  if (data.interaction) {
+    byId('door-prompt-text').textContent = data.interaction.denied
+      ? `SERVONO ${data.interaction.cost} FRAMMENTI`
+      : `${data.interaction.label} // ◆ ${data.interaction.cost}`
   }
+  crosshair.classList.toggle('crouched', data.stance !== 'stand')
+  renderWeaponSlots(data.weaponSlots)
   if (data.tct) updateTctOverlay(data.tct)
+}
+
+let weaponSlotsKey = ''
+
+function renderWeaponSlots(slots: HudData['weaponSlots']): void {
+  const key = slots.map((slot) => `${slot.owned ? 1 : 0}${slot.active ? 1 : 0}`).join('')
+  if (key === weaponSlotsKey) return
+  weaponSlotsKey = key
+  const items = slots.map((slot) => {
+    const item = document.createElement('span')
+    item.className = 'weapon-slot'
+    item.classList.toggle('owned', slot.owned)
+    item.classList.toggle('active', slot.active)
+    item.textContent = `${slot.key} ${slot.name}`
+    item.title = slot.owned ? slot.name : `${slot.name}: acquistabile a una postazione`
+    return item
+  })
+  byId('weapon-slots').replaceChildren(...items)
 }
 
 function updateTctOverlay(data: TctHudData): void {
@@ -190,10 +215,10 @@ function updateTctOverlay(data: TctHudData): void {
     const position = point(obstacle.x - obstacle.width / 2, obstacle.z - obstacle.depth / 2)
     context.fillRect(position.x, position.y, obstacle.width * scale, obstacle.depth * scale)
   }
-  for (const bot of minimap.bots) {
-    if (!bot.alive) continue
-    const position = point(bot.x, bot.z)
-    context.fillStyle = bot.team === 'alpha' ? '#58f5e5' : '#ff4f87'
+  for (const entry of minimap.players) {
+    if (!entry.alive) continue
+    const position = point(entry.x, entry.z)
+    context.fillStyle = entry.ally ? '#58f5e5' : '#ff4f87'
     context.beginPath()
     context.arc(position.x, position.y, 3, 0, Math.PI * 2)
     context.fill()
@@ -216,14 +241,19 @@ function updateTctOverlay(data: TctHudData): void {
     marker.className = 'ally-marker'
     marker.style.left = `${ally.x}%`
     marker.style.top = `${ally.y}%`
-    marker.innerHTML = `${ally.role.toUpperCase()}<span class="ally-health"><i style="width:${Math.max(0, ally.health)}%"></i></span>`
+    marker.textContent = ally.name
+    const health = document.createElement('span')
+    health.className = 'ally-health'
+    health.innerHTML = `<i style="width:${Math.max(0, ally.health)}%"></i>`
+    marker.append(health)
     return marker
   })
   byId('ally-markers').replaceChildren(...markers)
 }
 
-function showUpgradeChoices(ids: string[]): void {
-  availableUpgradeIds = ids
+const UPGRADE_KEY_LABELS = ['Z', 'X', 'V']
+
+function showUpgradeChoices(ids: string[], pending: number): void {
   const buttons: HTMLButtonElement[] = []
   ids.forEach((id, index) => {
     const upgrade = UPGRADE_BY_ID.get(id)
@@ -231,17 +261,18 @@ function showUpgradeChoices(ids: string[]): void {
     const button = document.createElement('button')
     button.type = 'button'
     button.className = 'upgrade-choice'
+    button.title = upgrade.description
     button.innerHTML = `
-      <span class="upgrade-key">${index + 1}</span>
+      <span class="upgrade-key">${UPGRADE_KEY_LABELS[index] ?? ''}</span>
       <span class="upgrade-icon" aria-hidden="true">${upgrade.icon}</span>
-      <strong>${upgrade.name}</strong>
-      <p>${upgrade.description}</p>
-      <small>${upgrade.tag}</small>
+      <span><strong>${upgrade.name}</strong><small>${upgrade.description}</small></span>
     `
     button.addEventListener('click', () => game.chooseUpgrade(id))
     buttons.push(button)
   })
   upgradeChoices.replaceChildren(...buttons)
+  byId('upgrade-pending').textContent = pending > 1 ? `+${pending - 1} IN CODA` : ''
+  upgradePanel.classList.toggle('hidden', buttons.length === 0)
 }
 
 function syncCloudProfile(): void {
@@ -294,6 +325,8 @@ async function initializeCloud(): Promise<void> {
 }
 
 function completeRun(result: RunResult): void {
+  byId('restart-button').textContent = 'NUOVA RUN'
+  byId('menu-button').textContent = 'TORNA ALL’OFFICINA'
   byId('result-score-label').textContent = 'PUNTEGGIO'
   byId('result-wave-label').textContent = 'ONDATA'
   byId('result-kills-label').textContent = 'ELIMINAZIONI'
@@ -316,15 +349,17 @@ function completeRun(result: RunResult): void {
 }
 
 function completeTctMatch(result: TctResult): void {
-  byId('result-score-label').textContent = 'ALPHA'
+  byId('result-score-label').textContent = 'SQUADRA'
   byId('result-wave-label').textContent = 'AVVERSARI'
   byId('result-kills-label').textContent = 'ELIMINAZIONI / MORTI'
-  byId('result-score').textContent = String(result.alphaScore)
+  byId('result-score').textContent = String(result.teamScore)
   byId('result-wave').textContent = String(result.enemyScore)
   byId('result-kills').textContent = `${result.kills} / ${result.deaths}`
   byId('result-shards').parentElement?.classList.add('hidden')
-  byId('gameover-title').textContent = result.winner === 'draw' ? 'PAREGGIO' : result.winner === 'alpha' ? 'VITTORIA ALPHA' : 'SCONFITTA'
-  byId('gameover-message').textContent = 'Match TCT terminato. La progressione zombie non è stata modificata.'
+  byId('gameover-title').textContent = result.outcome === 'draw' ? 'PAREGGIO' : result.outcome === 'win' ? 'VITTORIA' : 'SCONFITTA'
+  byId('gameover-message').textContent = 'Match TCT online terminato. La progressione zombie non è stata modificata.'
+  byId('restart-button').textContent = 'TORNA ALLA LOBBY'
+  byId('menu-button').textContent = 'ESCI DALLA STANZA'
 }
 
 function renderMenu(): void {
@@ -410,8 +445,155 @@ function flashDamage(): void {
 }
 
 function startRun(): void {
-  if (selectedMode === 'tct') tctGame.start(selectedMap, selectedPrimary)
+  if (selectedMode === 'tct') returnToLobby()
   else game.start(getMetaBonuses(progress), selectedMap)
+}
+
+// ---------------------------------------------------------------------------
+// TCT online: stanza P2P con host autorevole
+// ---------------------------------------------------------------------------
+
+const LOBBY_IDLE_TEXT = 'Crea una stanza o inserisci il codice di un amico.'
+
+function setLobbyStatus(text: string, error = false): void {
+  const status = byId('lobby-status')
+  status.textContent = text
+  status.classList.toggle('error', error)
+}
+
+function describeError(error: unknown): string {
+  return error instanceof NetSessionError ? error.message : NET_ERROR_MESSAGES.network
+}
+
+async function createRoom(): Promise<void> {
+  if (session || lobbyBusy) return
+  lobbyBusy = true
+  setLobbyStatus('Creazione della stanza...')
+  renderLobby()
+  try {
+    for (let attempt = 0; attempt < 3 && !session; attempt += 1) {
+      try {
+        attachSession(await NetSession.host(generateRoomCode(), identity.callsign, selectedMap.id, transportKind))
+      } catch (error) {
+        if (!(error instanceof NetSessionError && error.code === 'code-taken') || attempt === 2) throw error
+      }
+    }
+  } catch (error) {
+    setLobbyStatus(describeError(error), true)
+  } finally {
+    lobbyBusy = false
+    renderLobby()
+  }
+}
+
+async function joinRoom(): Promise<void> {
+  if (session || lobbyBusy) return
+  const input = byId<HTMLInputElement>('room-code')
+  const code = normalizeRoomCode(input.value)
+  if (!code) {
+    setLobbyStatus('Il codice è composto da 5 caratteri.', true)
+    return
+  }
+  lobbyBusy = true
+  setLobbyStatus(`Connessione alla stanza ${code}...`)
+  renderLobby()
+  try {
+    attachSession(await NetSession.join(code, identity.callsign, transportKind))
+    setLobbyStatus('Connesso. In attesa che l’host avvii la partita.')
+  } catch (error) {
+    setLobbyStatus(describeError(error), true)
+  } finally {
+    lobbyBusy = false
+    renderLobby()
+  }
+}
+
+function attachSession(next: NetSession): void {
+  session = next
+  next.subscribe(onSessionMessage)
+  next.onClose((code) => {
+    session = null
+    if (selectedMode === 'tct' && currentState !== 'menu') tctGame.returnToMenu()
+    setLobbyStatus(NET_ERROR_MESSAGES[code], true)
+    renderLobby()
+  })
+  if (next.mapId) syncLobbyMap(next.mapId)
+}
+
+function onSessionMessage(message: HostMessage): void {
+  if (!session) return
+  if (message.t === 'lobby') {
+    syncLobbyMap(message.mapId)
+    renderLobby()
+  }
+  if (message.t === 'start' && selectedMode === 'tct') {
+    tctGame.start(session, message.mapId, message.players, selectedPrimary)
+  }
+}
+
+function syncLobbyMap(mapId: string): void {
+  const map = MAPS.find((candidate) => candidate.id === mapId)
+  if (!map) return
+  selectedMap = map
+  document.querySelectorAll<HTMLButtonElement>('[data-map]').forEach((option) => {
+    const selected = option.dataset.map === mapId
+    option.classList.toggle('selected', selected)
+    option.setAttribute('aria-pressed', String(selected))
+  })
+  tctGame.previewMap(mapId)
+}
+
+function leaveRoom(): void {
+  if (!session) return
+  session.close()
+  session = null
+  setLobbyStatus(LOBBY_IDLE_TEXT)
+  renderLobby()
+}
+
+function returnToLobby(): void {
+  if (session?.isHost) session.backToLobby()
+  tctGame.returnToMenu()
+  renderLobby()
+}
+
+function renderLobby(): void {
+  const inRoom = session !== null
+  byId('lobby-connect').classList.toggle('hidden', inRoom)
+  byId('lobby-room').classList.toggle('hidden', !inRoom)
+  byId<HTMLButtonElement>('create-room').disabled = lobbyBusy
+  byId<HTMLButtonElement>('join-room').disabled = lobbyBusy
+  const guestInRoom = inRoom && !session?.isHost
+  document.querySelectorAll<HTMLButtonElement>('[data-map]').forEach((option) => {
+    option.disabled = selectedMode === 'tct' && guestInRoom
+  })
+  if (!session) return
+  const current = session
+  byId('room-code-display').textContent = current.code
+  const players = current.lobby
+  for (const team of ['alpha', 'bravo'] as const) {
+    const items = players.filter((player) => player.team === team).sort((a, b) => a.slot - b.slot).map((player) => {
+      const item = document.createElement('li')
+      item.textContent = player.name
+      item.classList.toggle('me', player.id === current.localId)
+      const tags = [player.id === current.localId ? 'TU' : '', player.id === 'host' ? 'HOST' : ''].filter(Boolean)
+      if (tags.length > 0) {
+        const small = document.createElement('small')
+        small.textContent = ` ${tags.join(' · ')}`
+        item.append(small)
+      }
+      return item
+    })
+    byId(`team-${team}`).replaceChildren(...items)
+  }
+  const startButton = byId<HTMLButtonElement>('start-match')
+  startButton.classList.toggle('hidden', !current.isHost)
+  startButton.disabled = !current.canStart
+  if (current.isHost) {
+    setLobbyStatus(current.canStart
+      ? `${players.length} giocatori pronti. Avvia quando vuoi.`
+      : 'Stanza pronta. Serve almeno un giocatore per squadra per avviare.')
+  }
 }
 
 function activeGame(): Game | TctGame {
@@ -436,6 +618,10 @@ document.querySelectorAll<HTMLButtonElement>('[data-map]').forEach((button) => {
     const map = MAPS.find((candidate) => candidate.id === button.dataset.map)
     if (!map) return
     selectedMap = map
+    if (selectedMode === 'tct') {
+      session?.setMap(map.id)
+      tctGame.previewMap(map.id)
+    }
     document.querySelectorAll<HTMLButtonElement>('[data-map]').forEach((option) => {
       const selected = option === button
       option.classList.toggle('selected', selected)
@@ -450,7 +636,12 @@ document.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((button) => 
     game.setActive(selectedMode === 'zombies')
     tctGame.setActive(selectedMode === 'tct')
     byId('tct-loadout').classList.toggle('hidden', selectedMode !== 'tct')
+    byId('tct-lobby').classList.toggle('hidden', selectedMode !== 'tct')
+    byId('start-button').classList.toggle('hidden', selectedMode === 'tct')
+    byId('abandon-button').textContent = selectedMode === 'tct' ? 'ESCI DALLA PARTITA' : 'TERMINA RUN'
     if (selectedMode === 'tct') document.querySelector<HTMLButtonElement>('[data-map="depot-06"]')?.click()
+    else leaveRoom()
+    renderLobby()
     document.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((option) => {
       const selected = option === button
       option.classList.toggle('selected', selected)
@@ -499,8 +690,28 @@ byId<HTMLButtonElement>('start-button').addEventListener('click', startRun)
 byId<HTMLButtonElement>('restart-button').addEventListener('click', startRun)
 byId<HTMLButtonElement>('pause-button').addEventListener('click', () => activeGame().pause())
 byId<HTMLButtonElement>('resume-button').addEventListener('click', () => activeGame().resume())
-byId<HTMLButtonElement>('abandon-button').addEventListener('click', () => activeGame().abandon())
-byId<HTMLButtonElement>('menu-button').addEventListener('click', () => activeGame().returnToMenu())
+byId<HTMLButtonElement>('abandon-button').addEventListener('click', () => {
+  if (selectedMode === 'tct') leaveRoom()
+  activeGame().abandon()
+})
+byId<HTMLButtonElement>('menu-button').addEventListener('click', () => {
+  if (selectedMode === 'tct') leaveRoom()
+  activeGame().returnToMenu()
+})
+byId<HTMLButtonElement>('create-room').addEventListener('click', () => void createRoom())
+byId<HTMLButtonElement>('join-room').addEventListener('click', () => void joinRoom())
+byId<HTMLInputElement>('room-code').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') void joinRoom()
+})
+byId<HTMLButtonElement>('leave-room').addEventListener('click', leaveRoom)
+byId<HTMLButtonElement>('start-match').addEventListener('click', () => {
+  if (!session?.startMatch()) setLobbyStatus('Serve almeno un giocatore per squadra per avviare.', true)
+})
+byId<HTMLButtonElement>('switch-team').addEventListener('click', () => {
+  if (!session) return
+  const me = session.lobby.find((player) => player.id === session?.localId)
+  if (me) session.send({ t: 'team', team: otherTeam(me.team) })
+})
 soundButton.addEventListener('click', () => {
   const current = activeGame()
   current.setAudioMuted(!current.isAudioMuted)
@@ -508,16 +719,13 @@ soundButton.addEventListener('click', () => {
   soundButton.setAttribute('aria-label', current.isAudioMuted ? 'Attiva audio' : 'Disattiva audio')
 })
 
-window.addEventListener('keydown', (event) => {
-  if (currentState !== 'upgrade' || !['Digit1', 'Digit2', 'Digit3'].includes(event.code)) return
-  const index = Number(event.code.at(-1)) - 1
-  const upgradeId = availableUpgradeIds[index]
-  if (upgradeId) game.chooseUpgrade(upgradeId)
-})
-
 renderMenu()
 void initializeCloud()
+window.addEventListener('pagehide', () => session?.close())
+// Accesso di debug per i test visivi, solo in sviluppo.
+if (import.meta.env.DEV) Object.assign(window, { __neonArena: { game, tctGame } })
 if (import.meta.hot) import.meta.hot.dispose(() => {
+  session?.close()
   game.destroy()
   tctGame.destroy()
 })

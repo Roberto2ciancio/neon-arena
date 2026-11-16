@@ -138,6 +138,14 @@ export const UPGRADE_DEFINITIONS: readonly UpgradeDefinition[] = [
   },
 ]
 
+export const FIRST_LEVEL_XP = 90
+export const LEVEL_XP_GROWTH = 1.45
+export const UPGRADE_KEYS: readonly string[] = ['KeyZ', 'KeyX', 'KeyV']
+
+export function getNextLevelXp(current: number): number {
+  return Math.floor(current * LEVEL_XP_GROWTH)
+}
+
 export const UPGRADE_BY_ID = new Map(UPGRADE_DEFINITIONS.map((upgrade) => [upgrade.id, upgrade]))
 
 export function createBaseStats(bonuses: MetaBonuses = { vitality: 0, power: 0, mobility: 0 }): PlayerStats {

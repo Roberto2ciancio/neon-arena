@@ -4,31 +4,51 @@ import { RenderPipeline } from './RenderPipeline'
 import { DecalEffects } from './decals'
 import { getGraphicsSettings } from './graphics'
 import type { GraphicsQuality } from './graphics'
-import { raycastObstacles, resolveCircleCollisions, steerAroundObstacles } from './collision'
+import { raycastObstacles } from './collision'
+import type { CollisionObstacle } from './collision'
+import { getGroundHeight, resolveBodyCollisions, stepBouncingProjectile } from './world'
+import { PlayerController, readMovementInput } from './PlayerController'
+import { WeaponAnimator } from './WeaponAnimator'
+import { CombatEffects } from './effects'
+import { createGrenadeModel, createTurretModel, disposeObject, TurretAnimator } from './equipmentModels'
+import type { GrenadeModel } from './equipmentModels'
 import { buildMap } from './mapBuilder'
-import { DEPOT_06 } from './maps'
+import { DEPOT_06, MAPS } from './maps'
 import type { MapDefinition } from './maps'
 import { createEnemyModel, createWeaponModel } from './models'
 import type { EnemyModel } from './models'
-import { BOT_ROLES, getMatchWinner, getTeamSpawn, TCT_CONFIG } from './tctRules'
-import type { BotRole, TctTeam } from './tctRules'
+import { getTeamSpawn, TCT_CONFIG } from './tctRules'
+import type { TctTeam } from './tctRules'
 import type { AccessibilitySettings } from './accessibility'
 import type { GameState, HudData } from './types'
 import { createMagazine, reloadMagazine, WEAPON_ORDER, WEAPONS } from './weapons'
 import type { MagazineState, WeaponId } from './weapons'
+import type { NetSession } from './net/NetSession'
+import type { HostMessage, LobbyPlayer, PlayerSnapshot, TeamScores, Vec3 } from './net/protocol'
 
-interface Bot {
-  model: EnemyModel
+const ALLY_COLOR = 0x58f5e5
+const ENEMY_COLOR = 0xff4f87
+const STATE_SEND_INTERVAL = 1 / 20
+const DEATH_ANIMATION = 0.65
+const GRENADE_RADIUS = 4.5
+const GRENADE_DAMAGE = 90
+const TURRET_DAMAGE = 14
+const TURRET_LIFE = 14
+const GRENADE_FUSE = 1.6
+
+interface RemotePlayer {
+  id: string
+  name: string
   team: TctTeam
-  role: BotRole
+  crouch: boolean
+  model: EnemyModel
+  target: THREE.Vector3
+  targetYaw: number
   health: number
-  maxHealth: number
+  alive: boolean
+  deathTimer: number
   hitFlash: number
-  healTimer: number
-  fireTimer: number
-  respawnTimer: number
   phase: number
-  spawnIndex: number
 }
 
 interface Tracer {
@@ -37,23 +57,28 @@ interface Tracer {
 }
 
 interface Grenade {
-  mesh: THREE.Mesh<THREE.SphereGeometry, THREE.MeshStandardMaterial>
+  model: GrenadeModel
   velocity: THREE.Vector3
   timer: number
+  trailTimer: number
+  owned: boolean
 }
 
 interface Turret {
-  group: THREE.Group
+  animator: TurretAnimator
   life: number
   fireTimer: number
+  owned: boolean
+  /** Squadra del proprietario: le torrette remote mirano solo visivamente. */
+  team: TctTeam
 }
 
 export interface TctResult {
-  alphaScore: number
+  teamScore: number
   enemyScore: number
   kills: number
   deaths: number
-  winner: TctTeam | 'draw'
+  outcome: 'win' | 'loss' | 'draw'
 }
 
 interface TctEvents {
@@ -67,50 +92,56 @@ interface TctEvents {
 export class TctGame {
   private readonly scene = new THREE.Scene()
   private readonly decals = new DecalEffects(this.scene)
-  private readonly camera = new THREE.PerspectiveCamera(75, 1, 0.05, 100)
+  private readonly effects = new CombatEffects(this.scene)
+  private readonly camera = new THREE.PerspectiveCamera(75, 1, 0.05, 240)
   private readonly renderer: THREE.WebGLRenderer
   private readonly pipeline: RenderPipeline
   private readonly audio = new GameAudio()
   private readonly keys = new Set<string>()
-  private readonly player = new THREE.Vector3()
-  private readonly bots: Bot[] = []
+  private readonly controller = new PlayerController()
+  private readonly player = this.controller.body.position
+  private readonly weaponAnimator = new WeaponAnimator()
+  private readonly remotes = new Map<string, RemotePlayer>()
   private readonly tracers: Tracer[] = []
   private readonly grenades: Grenade[] = []
   private readonly turrets: Turret[] = []
   private readonly weapon = createWeaponModel()
   private map: MapDefinition = DEPOT_06
   private mapContent = buildMap(this.map)
-  private obstacles = this.mapContent.obstacles
+  private obstacles = this.openDoors()
   private state: GameState = 'menu'
   private graphicsQuality: GraphicsQuality = 'medium'
   private active = true
   private reducedMotion = false
   private mouseSensitivity = 0.002
+  private session: NetSession | null = null
+  private unsubscribe: (() => void) | null = null
+  private localId = ''
+  private team: TctTeam = 'alpha'
+  private slot = 0
   private health = 100
+  private alive = true
   private primaryId: WeaponId = 'ar-07'
   private weaponDefinition = WEAPONS['ar-07']
   private magazines = Object.fromEntries(WEAPON_ORDER.map((id) => [id, createMagazine(WEAPONS[id])])) as Record<WeaponId, MagazineState>
   private ammo = this.weaponDefinition.magazineSize
   private reserveAmmo: number | null = this.weaponDefinition.reserveAmmo
-  private alphaScore = 0
-  private enemyScore = 0
+  private scores: TeamScores = { alpha: 0, bravo: 0 }
   private kills = 0
   private deaths = 0
   private timeRemaining: number = TCT_CONFIG.matchDuration
   private playerRespawn = 0
-  private invulnerability = 0
   private fireTimer = 0
   private reloadTimer = 0
   private firing = false
   private aiming = false
   private yaw = 0
   private pitch = 0
-  private jumpHeight = 0
-  private verticalVelocity = 0
-  private grounded = true
+  private recoil = 0
   private muzzleTimer = 0
   private grenadeCooldown = 0
   private turretCooldown = 0
+  private stateTimer = 0
   private hudTimer = 0
   private animationId = 0
   private lastTime = performance.now()
@@ -125,11 +156,11 @@ export class TctGame {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
     this.renderer.toneMappingExposure = 1.2
-    this.renderer.domElement.setAttribute('aria-label', 'Neon Arena: scontro tattico 4 contro 4')
+    this.renderer.domElement.setAttribute('aria-label', 'Neon Arena: scontro tattico a squadre online')
     this.renderer.domElement.setAttribute('role', 'img')
     container.appendChild(this.renderer.domElement)
     this.scene.background = new THREE.Color(0x070810)
-    this.scene.fog = new THREE.FogExp2(0x070810, 0.018)
+    this.scene.fog = new THREE.FogExp2(0x0b0d1a, 0.0115)
     this.camera.rotation.order = 'YXZ'
     this.camera.add(this.weapon.group)
     const light = new THREE.PointLight(0xd8e6ff, 3, 4)
@@ -154,6 +185,7 @@ export class TctGame {
     this.resize()
     this.renderer.shadowMap.enabled = settings.shadows
     this.renderer.shadowMap.needsUpdate = true
+    this.effects.setLightsEnabled(quality !== 'low')
     this.mapContent.group.traverse((object) => {
       if (object instanceof THREE.PointLight) object.visible = quality !== 'low'
       if (!(object instanceof THREE.Mesh)) return
@@ -187,35 +219,42 @@ export class TctGame {
     this.lastTime = performance.now()
   }
 
-  start(map: MapDefinition = DEPOT_06, primary: WeaponId = 'ar-07'): void {
-    this.clearBots()
-    this.clearEquipment()
-    this.setMap(map)
+  /** Mostra la mappa scelta nella lobby come sfondo del menu. */
+  previewMap(mapId: string): void {
+    const map = MAPS.find((candidate) => candidate.id === mapId)
+    if (map && this.state === 'menu') this.setMap(map)
+  }
+
+  start(session: NetSession, mapId: string, players: readonly LobbyPlayer[], primary: WeaponId): void {
+    const me = players.find((player) => player.id === session.localId)
+    if (!me) return
+    this.stop()
+    this.session = session
+    this.localId = session.localId
+    this.team = me.team
+    this.slot = me.slot
+    this.setMap(MAPS.find((map) => map.id === mapId) ?? DEPOT_06)
+    for (const player of players) {
+      if (player.id !== this.localId) this.addRemote(player)
+    }
     this.health = 100
+    this.alive = true
     this.primaryId = primary
     this.weaponDefinition = WEAPONS[primary]
-    for (const id of WEAPON_ORDER) this.magazines[id] = createMagazine(WEAPONS[id])
-    this.ammo = this.magazines[primary].ammo
-    this.reserveAmmo = this.magazines[primary].reserveAmmo
-    this.alphaScore = 0
-    this.enemyScore = 0
+    this.refillMagazines()
+    this.scores = { alpha: 0, bravo: 0 }
     this.kills = 0
     this.deaths = 0
     this.timeRemaining = TCT_CONFIG.matchDuration
     this.playerRespawn = 0
-    this.invulnerability = 1
     this.fireTimer = 0
     this.reloadTimer = 0
     this.grenadeCooldown = 0
     this.turretCooldown = 0
     this.firing = false
     this.aiming = false
-    this.yaw = 0
-    this.pitch = 0
-    this.jumpHeight = 0
-    this.verticalVelocity = 0
-    this.player.set(this.map.playerSpawn.x, 0, this.map.playerSpawn.z)
-    this.spawnBots()
+    this.moveToSpawn()
+    this.unsubscribe = session.subscribe(this.onNetMessage)
     this.updateCamera()
     this.audio.resume()
     this.setState('playing')
@@ -238,17 +277,13 @@ export class TctGame {
     this.requestMouse()
   }
 
+  /** Abbandona la partita in corso; la chiusura della sessione è gestita dal menu. */
   abandon(): void {
-    if (this.state !== 'playing' && this.state !== 'paused') return
-    this.events.onMatchEnd(this.createResult(this.alphaScore >= this.enemyScore ? 'alpha' : 'enemy'))
     this.returnToMenu()
   }
 
   returnToMenu(): void {
-    this.clearBots()
-    this.clearEquipment()
-    this.firing = false
-    this.keys.clear()
+    this.stop()
     this.setState('menu')
   }
 
@@ -258,18 +293,30 @@ export class TctGame {
     window.removeEventListener('keydown', this.onKeyDown)
     window.removeEventListener('keyup', this.onKeyUp)
     window.removeEventListener('blur', this.onBlur)
-    window.removeEventListener('pointerup', this.onPointerUp)
+    window.removeEventListener('mouseup', this.onMouseButtonUp)
     document.removeEventListener('mousemove', this.onMouseMove)
     document.removeEventListener('pointerlockchange', this.onPointerLockChange)
-    this.renderer.domElement.removeEventListener('pointerdown', this.onPointerDown)
+    this.renderer.domElement.removeEventListener('mousedown', this.onMouseButtonDown)
     this.renderer.domElement.removeEventListener('contextmenu', this.onContextMenu)
     if (document.pointerLockElement === this.renderer.domElement) document.exitPointerLock()
-    this.clearBots()
-    this.clearEquipment()
+    this.stop()
     this.decals.dispose()
+    this.effects.dispose()
     this.pipeline.dispose()
     this.renderer.dispose()
     this.renderer.domElement.remove()
+  }
+
+  private stop(): void {
+    this.unsubscribe?.()
+    this.unsubscribe = null
+    this.session = null
+    this.clearRemotes()
+    this.clearEquipment()
+    this.effects.clear()
+    this.firing = false
+    this.aiming = false
+    this.keys.clear()
   }
 
   private setMap(map: MapDefinition): void {
@@ -283,14 +330,21 @@ export class TctGame {
     })
     this.map = map
     this.mapContent = buildMap(map)
-    this.obstacles = this.mapContent.obstacles
+    this.obstacles = this.openDoors()
     this.scene.add(this.mapContent.group)
     this.setGraphicsQuality(this.graphicsQuality)
   }
 
+  /** Nel TCT le porte acquistabili della modalità zombie sono sempre aperte. */
+  private openDoors(): CollisionObstacle[] {
+    for (const door of this.mapContent.doors) door.group.visible = false
+    const doorSolids = new Set(this.mapContent.doors.map((door) => door.obstacle))
+    return this.mapContent.obstacles.filter((obstacle) => !doorSolids.has(obstacle))
+  }
+
   private setState(state: GameState): void {
     this.state = state
-    this.weapon.group.visible = state !== 'menu' && this.playerRespawn <= 0
+    this.weapon.group.visible = state !== 'menu' && this.alive
     if (state !== 'playing' && document.pointerLockElement === this.renderer.domElement) document.exitPointerLock()
     this.events.onStateChange(state)
   }
@@ -303,58 +357,169 @@ export class TctGame {
     } catch {}
   }
 
-  private spawnBots(): void {
-    const teams: { team: TctTeam; count: number; firstIndex: number }[] = [
-      { team: 'alpha', count: TCT_CONFIG.allyBots, firstIndex: 1 },
-      { team: 'enemy', count: TCT_CONFIG.enemyBots, firstIndex: 0 },
-    ]
-    for (const entry of teams) {
-      for (let offset = 0; offset < entry.count; offset += 1) {
-        const spawnIndex = entry.firstIndex + offset
-        const role: BotRole = entry.team === 'alpha'
-          ? (['assault', 'support', 'cover'] as const)[offset] ?? 'assault'
-          : (['assault', 'cover', 'support', 'sniper'] as const)[offset] ?? 'assault'
-        const roleStats = BOT_ROLES[role]
-        const model = createEnemyModel('walker', entry.team === 'alpha' ? 0x58f5e5 : 0xff4f87, 'soldier')
-        const gun = new THREE.Mesh(
-          new THREE.BoxGeometry(0.12, 0.14, 0.75),
-          new THREE.MeshStandardMaterial({ color: 0x293542, metalness: 0.8, roughness: 0.3 }),
-        )
-        gun.position.set(0.4, 1.15, -0.42)
-        model.group.add(gun)
-        model.details.push(gun)
-        const spawn = getTeamSpawn(entry.team, spawnIndex, this.map.arenaLimit)
-        model.group.position.set(spawn.x, 0, spawn.z)
-        this.scene.add(model.group)
-        this.bots.push({
-          model,
-          team: entry.team,
-          role,
-          health: roleStats.health,
-          maxHealth: roleStats.health,
-          hitFlash: 0,
-          healTimer: 2,
-          fireTimer: 0.5 + Math.random(),
-          respawnTimer: 0,
-          phase: Math.random() * Math.PI * 2,
-          spawnIndex,
-        })
-      }
+  private get inMatch(): boolean {
+    return this.state === 'playing' || this.state === 'paused'
+  }
+
+  // -------------------------------------------------------------------------
+  // Rete
+  // -------------------------------------------------------------------------
+
+  private readonly onNetMessage = (message: HostMessage): void => {
+    if (!this.inMatch) return
+    switch (message.t) {
+      case 'snapshot':
+        this.applySnapshot(message.time, message.scores, message.players)
+        break
+      case 'shot':
+        if (message.by !== this.localId) {
+          const shooter = this.remotes.get(message.by)
+          this.spawnTracer(toVector(message.from), toVector(message.to), shooter?.team === this.team ? ALLY_COLOR : 0xff668e)
+          this.effects.muzzle(toVector(message.from), shooter?.team === this.team ? 0x8effd9 : 0xff9ab6)
+          this.audio.playAt('enemyShoot', toVector(message.from), this.player, this.yaw)
+        }
+        break
+      case 'grenade':
+        if (message.by !== this.localId) this.spawnGrenade(toVector(message.pos), toVector(message.vel), false)
+        break
+      case 'turret':
+        if (message.by !== this.localId) this.spawnTurret(toVector(message.pos), false, this.remotes.get(message.by)?.team ?? (this.team === 'alpha' ? 'bravo' : 'alpha'))
+        break
+      case 'damage':
+        if (message.target === this.localId) {
+          this.events.onDamage()
+          this.audio.play('damage')
+        } else {
+          const remote = this.remotes.get(message.target)
+          if (remote) remote.hitFlash = 0.09
+        }
+        break
+      case 'kill':
+        if (message.killer === this.localId) this.kills += 1
+        if (message.victim === this.localId) this.deaths += 1
+        else {
+          const victim = this.remotes.get(message.victim)
+          if (victim) this.audio.playAt('kill', victim.model.group.position, this.player, this.yaw)
+        }
+        break
+      case 'end':
+        this.scores = message.scores
+        this.finish(message.winner === 'draw' ? 'draw' : message.winner === this.team ? 'win' : 'loss')
+        break
+      default:
+        break
     }
   }
 
-  private clearBots(): void {
-    this.decals.clear()
-    for (const bot of this.bots) {
-      this.scene.remove(bot.model.group)
-      bot.model.group.traverse((object) => {
-        if (!(object instanceof THREE.Mesh)) return
-        object.geometry.dispose()
-        const materials = Array.isArray(object.material) ? object.material : [object.material]
-        materials.forEach((material) => material.dispose())
-      })
+  private applySnapshot(time: number, scores: TeamScores, players: readonly PlayerSnapshot[]): void {
+    this.timeRemaining = time
+    this.scores = scores
+    const seen = new Set<string>()
+    for (const snapshot of players) {
+      seen.add(snapshot.id)
+      if (snapshot.id === this.localId) {
+        this.applyLocalSnapshot(snapshot)
+        continue
+      }
+      const remote = this.remotes.get(snapshot.id) ?? this.addRemote(snapshot)
+      const respawned = !remote.alive && snapshot.alive
+      remote.health = snapshot.health
+      remote.crouch = snapshot.crouch
+      remote.target.set(snapshot.x, snapshot.y, snapshot.z)
+      remote.targetYaw = snapshot.yaw
+      if (respawned || remote.model.group.position.distanceTo(remote.target) > 6) {
+        remote.model.group.position.copy(remote.target)
+        remote.model.group.rotation.set(0, snapshot.yaw, 0)
+        remote.model.group.visible = true
+      }
+      if (remote.alive && !snapshot.alive) remote.deathTimer = 0
+      remote.alive = snapshot.alive
     }
-    this.bots.length = 0
+    for (const id of [...this.remotes.keys()]) {
+      if (!seen.has(id)) this.removeRemote(id)
+    }
+  }
+
+  private applyLocalSnapshot(snapshot: PlayerSnapshot): void {
+    this.health = snapshot.health
+    this.playerRespawn = snapshot.alive ? 0 : snapshot.respawn
+    if (this.alive && !snapshot.alive) {
+      this.alive = false
+      this.firing = false
+      this.aiming = false
+      this.weapon.group.visible = false
+    } else if (!this.alive && snapshot.alive) {
+      this.alive = true
+      this.refillMagazines()
+      this.moveToSpawn()
+      this.weapon.group.visible = true
+    }
+  }
+
+  private sendState(): void {
+    this.session?.send({
+      t: 'state',
+      x: round(this.player.x),
+      y: round(this.player.y),
+      z: round(this.player.z),
+      yaw: round(this.yaw, 3),
+      pitch: round(this.pitch, 3),
+      crouch: this.controller.crouched,
+    })
+  }
+
+  // -------------------------------------------------------------------------
+  // Giocatori remoti
+  // -------------------------------------------------------------------------
+
+  private addRemote(player: LobbyPlayer): RemotePlayer {
+    const model = createEnemyModel('walker', player.team === this.team ? ALLY_COLOR : ENEMY_COLOR, 'soldier')
+    const gun = new THREE.Mesh(
+      new THREE.BoxGeometry(0.12, 0.14, 0.75),
+      new THREE.MeshStandardMaterial({ color: 0x293542, metalness: 0.8, roughness: 0.3 }),
+    )
+    gun.position.set(0.4, 1.15, -0.42)
+    model.group.add(gun)
+    model.details.push(gun)
+    model.leftArm.rotation.x = -1.05
+    model.rightArm.rotation.x = -1.05
+    const spawn = getTeamSpawn(player.team, player.slot, this.map.arenaLimit)
+    model.group.position.set(spawn.x, 0, spawn.z)
+    this.scene.add(model.group)
+    const remote: RemotePlayer = {
+      id: player.id,
+      name: player.name,
+      team: player.team,
+      crouch: false,
+      model,
+      target: model.group.position.clone(),
+      targetYaw: player.team === 'alpha' ? 0 : Math.PI,
+      health: 100,
+      alive: true,
+      deathTimer: 0,
+      hitFlash: 0,
+      phase: Math.random() * Math.PI * 2,
+    }
+    this.remotes.set(player.id, remote)
+    return remote
+  }
+
+  private removeRemote(id: string): void {
+    const remote = this.remotes.get(id)
+    if (!remote) return
+    this.scene.remove(remote.model.group)
+    remote.model.group.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return
+      object.geometry.dispose()
+      const materials = Array.isArray(object.material) ? object.material : [object.material]
+      materials.forEach((material) => material.dispose())
+    })
+    this.remotes.delete(id)
+  }
+
+  private clearRemotes(): void {
+    this.decals.clear()
+    for (const id of [...this.remotes.keys()]) this.removeRemote(id)
     for (const tracer of this.tracers) {
       this.scene.remove(tracer.line)
       tracer.line.geometry.dispose()
@@ -363,39 +528,75 @@ export class TctGame {
     this.tracers.length = 0
   }
 
-  private respawnBot(bot: Bot): void {
-    const spawn = getTeamSpawn(bot.team, bot.spawnIndex, this.map.arenaLimit)
-    bot.model.group.position.set(spawn.x, 0, spawn.z)
-    bot.model.group.rotation.z = 0
-    bot.health = bot.maxHealth
-    bot.fireTimer = 0.7
-    bot.hitFlash = 0
-    bot.healTimer = 2
-    bot.model.group.visible = true
+  private updateRemotes(delta: number): void {
+    const blend = 1 - Math.exp(-14 * delta)
+    for (const remote of this.remotes.values()) {
+      const { model } = remote
+      if (!remote.alive) {
+        remote.deathTimer += delta
+        model.group.visible = remote.deathTimer <= DEATH_ANIMATION
+        if (model.group.visible) {
+          const progress = Math.min(1, remote.deathTimer / DEATH_ANIMATION)
+          model.group.rotation.z = (Math.sin(remote.phase) > 0 ? 1 : -1) * progress * 1.45
+          model.group.position.y = -progress * 0.22
+        }
+        continue
+      }
+      model.group.rotation.z = 0
+      model.group.scale.y = THREE.MathUtils.lerp(model.group.scale.y, remote.crouch ? 0.68 : 1, 1 - Math.exp(-delta * 12))
+      const previous = model.group.position.clone()
+      model.group.position.lerp(remote.target, blend)
+      const yawDelta = Math.atan2(Math.sin(remote.targetYaw - model.group.rotation.y), Math.cos(remote.targetYaw - model.group.rotation.y))
+      model.group.rotation.y += yawDelta * blend
+      const speed = previous.setY(0).distanceTo(model.group.position.clone().setY(0)) / Math.max(delta, 0.001)
+      remote.phase += delta * Math.min(10, speed * 1.4)
+      const walk = speed > 0.3 ? Math.sin(remote.phase) * 0.45 : 0
+      model.leftLeg.rotation.x = walk
+      model.rightLeg.rotation.x = -walk
+      remote.hitFlash = Math.max(0, remote.hitFlash - delta)
+      model.body.material.emissive.setHex(remote.hitFlash > 0 ? 0xffffff : 0x000000)
+      model.body.material.emissiveIntensity = remote.hitFlash > 0 ? 0.8 : 0.08
+      const detailed = model.group.position.distanceTo(this.player) < 16
+      model.leftLeg.visible = detailed
+      model.rightLeg.visible = detailed
+      model.leftArm.visible = detailed
+      model.rightArm.visible = detailed
+      model.weakPoint.visible = detailed
+      for (const detail of model.details) detail.visible = detailed
+    }
+  }
+
+  private livingEnemies(): RemotePlayer[] {
+    return [...this.remotes.values()].filter((remote) => remote.team !== this.team && remote.alive)
+  }
+
+  // -------------------------------------------------------------------------
+  // Giocatore locale
+  // -------------------------------------------------------------------------
+
+  private moveToSpawn(): void {
+    const spawn = getTeamSpawn(this.team, this.slot, this.map.arenaLimit)
+    this.controller.reset(spawn.x, 0, spawn.z)
+    this.weaponAnimator.reset()
+    this.yaw = this.team === 'alpha' ? 0 : Math.PI
+    this.pitch = 0
+    this.reloadTimer = 0
+  }
+
+  private refillMagazines(): void {
+    for (const id of WEAPON_ORDER) this.magazines[id] = createMagazine(WEAPONS[id])
+    this.ammo = this.magazines[this.weaponDefinition.id].ammo
+    this.reserveAmmo = this.magazines[this.weaponDefinition.id].reserveAmmo
   }
 
   private updatePlayer(delta: number): void {
-    this.invulnerability = Math.max(0, this.invulnerability - delta)
     this.fireTimer -= delta
     this.muzzleTimer = Math.max(0, this.muzzleTimer - delta)
     this.weapon.flash.visible = this.muzzleTimer > 0
-    if (this.playerRespawn > 0) {
-      this.playerRespawn -= delta
-      if (this.playerRespawn <= 0) {
-        this.playerRespawn = 0
-        this.health = 100
-        for (const id of WEAPON_ORDER) this.magazines[id] = createMagazine(WEAPONS[id])
-        this.ammo = this.magazines[this.weaponDefinition.id].ammo
-        this.reserveAmmo = this.magazines[this.weaponDefinition.id].reserveAmmo
-        this.reloadTimer = 0
-        this.invulnerability = 1
-        this.player.set(this.map.playerSpawn.x, 0, this.map.playerSpawn.z)
-        this.weapon.group.visible = true
-      }
+    if (!this.alive) {
       this.updateCamera()
       return
     }
-
     if (this.reloadTimer > 0) {
       this.reloadTimer -= delta
       if (this.reloadTimer <= 0) {
@@ -405,40 +606,40 @@ export class TctGame {
         this.reserveAmmo = magazine.reserveAmmo
       }
     }
-    const forward = Number(this.keys.has('KeyW')) - Number(this.keys.has('KeyS'))
-    const right = Number(this.keys.has('KeyD')) - Number(this.keys.has('KeyA'))
-    const movement = new THREE.Vector3(
-      right * Math.cos(this.yaw) - forward * Math.sin(this.yaw),
-      0,
-      -right * Math.sin(this.yaw) - forward * Math.cos(this.yaw),
-    )
-    if (movement.lengthSq() > 0) movement.normalize()
-    const sprinting = (this.keys.has('ShiftLeft') || this.keys.has('ShiftRight')) && !this.aiming
-    this.player.addScaledVector(movement, 7 * this.weaponDefinition.moveMultiplier * (sprinting ? 1.4 : 1) * delta)
-    resolveCircleCollisions(this.player, 0.42, this.obstacles)
-    this.player.x = THREE.MathUtils.clamp(this.player.x, -this.map.arenaLimit, this.map.arenaLimit)
-    this.player.z = THREE.MathUtils.clamp(this.player.z, -this.map.arenaLimit, this.map.arenaLimit)
-    this.verticalVelocity -= 18 * delta
-    this.jumpHeight += this.verticalVelocity * delta
-    if (this.jumpHeight <= 0) {
-      this.jumpHeight = 0
-      this.verticalVelocity = 0
-      this.grounded = true
-    }
-    this.updateCamera()
-    if (this.firing && this.fireTimer <= 0 && this.reloadTimer <= 0) {
+    const controllable = this.state === 'playing'
+    const input = readMovementInput(controllable ? this.keys : new Set<string>(), this.aiming || this.firing || this.reloadTimer > 0)
+    this.controller.update(delta, input, this.yaw, {
+      speed: 7 * this.weaponDefinition.moveMultiplier,
+      solids: this.obstacles,
+      arenaLimit: this.map.arenaLimit,
+    })
+    this.recoil = Math.max(0, this.recoil - delta * 4)
+    this.updateCamera(delta)
+    if (controllable && this.firing && this.fireTimer <= 0 && this.reloadTimer <= 0 && !this.weaponAnimator.switching && !this.controller.sprinting) {
       if (this.ammo > 0) this.fireWeapon()
       else this.startReload()
     }
   }
 
-  private updateCamera(): void {
-    this.camera.position.set(this.player.x, 1.65 + this.jumpHeight, this.player.z)
-    this.camera.rotation.set(this.pitch, this.yaw, 0)
-    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, this.aiming ? 55 : 75, 0.2)
+  private updateCamera(delta = 0): void {
+    this.controller.getEyePosition(this.camera.position, this.reducedMotion)
+    this.camera.rotation.set(this.pitch, this.yaw, this.reducedMotion ? 0 : this.controller.roll)
+    const targetFov = this.aiming ? 55 : this.controller.sliding ? 84 : this.controller.sprinting ? 80 : 75
+    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, 1 - Math.exp(-delta * 12))
     this.camera.updateProjectionMatrix()
-    this.weapon.group.position.lerp(this.aiming ? new THREE.Vector3(0, -0.17, -0.85) : new THREE.Vector3(0.32, -0.29, -0.8), 0.2)
-    this.weapon.group.rotation.x = !this.reducedMotion && this.reloadTimer > 0 ? Math.sin((1 - this.reloadTimer / this.weaponDefinition.reloadDuration) * Math.PI) * 0.65 : 0
+    this.weaponAnimator.apply(this.weapon.group, delta, {
+      aiming: this.aiming,
+      sprinting: this.controller.sprinting,
+      sliding: this.controller.sliding,
+      crouchAmount: this.controller.crouchAmount,
+      bob: this.controller.getBob(this.reducedMotion),
+      strafe: this.controller.strafeAmount,
+      reloadProgress: this.reloadTimer > 0 ? 1 - this.reloadTimer / this.weaponDefinition.reloadDuration : -1,
+      recoil: this.recoil,
+      landingKick: this.controller.landingKick,
+      airborne: !this.controller.body.grounded,
+      reducedMotion: this.reducedMotion,
+    })
   }
 
   private switchWeapon(id: WeaponId): void {
@@ -451,12 +652,13 @@ export class TctGame {
     this.fireTimer = 0.2
     this.firing = false
     this.aiming = false
+    this.weaponAnimator.startSwitch()
     this.audio.play('pickup')
     this.emitHud()
   }
 
   private startReload(): void {
-    if (this.reloadTimer > 0 || this.ammo === this.weaponDefinition.magazineSize || this.playerRespawn > 0) return
+    if (this.reloadTimer > 0 || this.ammo === this.weaponDefinition.magazineSize || !this.alive) return
     this.reloadTimer = this.weaponDefinition.reloadDuration
     this.firing = false
   }
@@ -466,93 +668,124 @@ export class TctGame {
     this.ammo -= 1
     this.fireTimer = 1 / definition.fireRate
     this.muzzleTimer = 0.045
+    this.recoil = Math.min(0.16, this.recoil + 0.045)
+    this.pitch = THREE.MathUtils.clamp(this.pitch + definition.recoil * (this.aiming ? 0.55 : 1), -1.45, 1.45)
     this.audio.play('shoot')
     const origin = this.camera.getWorldPosition(new THREE.Vector3())
-    const direction = this.camera.getWorldDirection(new THREE.Vector3())
-    const spread = this.aiming ? definition.adsSpread : definition.hipSpread
-    direction.x += (Math.random() - 0.5) * spread
-    direction.y += (Math.random() - 0.5) * spread
-    direction.normalize()
-    const wallDistance = raycastObstacles(origin, direction, definition.range, this.obstacles)
-    const ray = new THREE.Ray(origin, direction)
-    let target: Bot | null = null
-    let hitPoint: THREE.Vector3 | null = null
-    let hitDistance = wallDistance ?? definition.range
-    let headshot = false
-    for (const bot of this.bots) {
-      if (bot.team !== 'enemy' || bot.health <= 0) continue
-      for (const zone of [true, false]) {
-        const object = zone ? bot.model.head : bot.model.body
-        const point = ray.intersectSphere(new THREE.Sphere(object.getWorldPosition(new THREE.Vector3()), zone ? 0.3 : 0.55), new THREE.Vector3())
-        if (!point) continue
-        const distance = origin.distanceTo(point)
-        if (distance < hitDistance) {
-          target = bot
-          hitPoint = point
-          hitDistance = distance
-          headshot = zone
+    const forward = this.camera.getWorldDirection(new THREE.Vector3())
+    const spread = (this.aiming ? definition.adsSpread : definition.hipSpread) * (this.controller.crouched ? 0.7 : 1)
+    const muzzle = this.weapon.muzzle.getWorldPosition(new THREE.Vector3())
+    const damageByTarget = new Map<string, { damage: number; headshot: boolean }>()
+    let anyHeadshot = false
+    for (let pellet = 0; pellet < definition.pellets; pellet += 1) {
+      const direction = forward.clone()
+      direction.x += (Math.random() - 0.5) * spread
+      direction.y += (Math.random() - 0.5) * spread
+      direction.normalize()
+      const wallDistance = raycastObstacles(origin, direction, definition.range, this.obstacles)
+      const ray = new THREE.Ray(origin, direction)
+      let target: RemotePlayer | null = null
+      let hitPoint: THREE.Vector3 | null = null
+      let hitDistance = wallDistance ?? definition.range
+      let headshot = false
+      for (const remote of this.livingEnemies()) {
+        for (const zone of [true, false]) {
+          const object = zone ? remote.model.head : remote.model.body
+          const point = ray.intersectSphere(new THREE.Sphere(object.getWorldPosition(new THREE.Vector3()), zone ? 0.3 : 0.55), new THREE.Vector3())
+          if (!point) continue
+          const distance = origin.distanceTo(point)
+          if (distance < hitDistance) {
+            target = remote
+            hitPoint = point
+            hitDistance = distance
+            headshot = zone
+          }
         }
       }
+      if (target) {
+        const entry = damageByTarget.get(target.id) ?? { damage: 0, headshot: false }
+        entry.damage += definition.damage * (headshot ? definition.headshotMultiplier : 1)
+        entry.headshot ||= headshot
+        anyHeadshot ||= headshot
+        damageByTarget.set(target.id, entry)
+      }
+      const end = hitPoint ?? origin.clone().addScaledVector(direction, hitDistance)
+      if (!target && wallDistance !== null) {
+        this.decals.spawn(end, origin)
+        if (pellet === 0) this.effects.sparks(end, origin.clone().sub(end).normalize(), 0xffd59a, 4)
+      }
+      this.spawnTracer(muzzle, end, 0x8effd9)
+      if (pellet === 0) this.session?.send({ t: 'shot', from: toTuple(muzzle), to: toTuple(end) })
     }
-    if (target && hitPoint) {
-      this.damageBot(target, definition.damage * (headshot ? definition.headshotMultiplier : 1), 'alpha', true)
-      this.events.onHit(headshot)
+    for (const [target, entry] of damageByTarget) {
+      this.session?.send({ t: 'hit', target, damage: round(entry.damage), headshot: entry.headshot, source: 'gun', weapon: definition.id })
+    }
+    if (damageByTarget.size > 0) {
+      this.events.onHit(anyHeadshot)
       this.audio.play('hit')
     }
-    const muzzle = this.weapon.muzzle.getWorldPosition(new THREE.Vector3())
-    const end = hitPoint ?? origin.clone().addScaledVector(direction, hitDistance)
-    if (!target && wallDistance !== null) this.decals.spawn(end, origin)
-    this.spawnTracer(muzzle, end, 0x8effd9)
     if (!definition.automatic) this.firing = false
   }
 
+  // -------------------------------------------------------------------------
+  // Equipaggiamenti
+  // -------------------------------------------------------------------------
+
   private throwGrenade(): void {
-    if (this.state !== 'playing' || this.playerRespawn > 0 || this.grenadeCooldown > 0) return
+    if (this.state !== 'playing' || !this.alive || this.grenadeCooldown > 0) return
     const direction = this.camera.getWorldDirection(new THREE.Vector3())
-    const mesh = new THREE.Mesh(
-      new THREE.SphereGeometry(0.16, 8, 6),
-      new THREE.MeshStandardMaterial({ color: 0x36423d, emissive: 0x6affea, emissiveIntensity: 0.7 }),
-    )
-    mesh.position.copy(this.camera.position).addScaledVector(direction, 0.6)
-    const velocity = direction.multiplyScalar(10)
-    velocity.y += 4
-    this.scene.add(mesh)
-    this.grenades.push({ mesh, velocity, timer: 1.5 })
+    const position = this.camera.position.clone().addScaledVector(direction, 0.6)
+    const velocity = direction.multiplyScalar(13)
+    velocity.y += 3.5
+    velocity.add(this.controller.velocity.clone().multiplyScalar(0.5))
+    this.spawnGrenade(position, velocity, true)
+    this.session?.send({ t: 'grenade', pos: toTuple(position), vel: toTuple(velocity) })
     this.grenadeCooldown = 7
+    this.weaponAnimator.startSwitch()
+  }
+
+  private spawnGrenade(position: THREE.Vector3, velocity: THREE.Vector3, owned: boolean): void {
+    const model = createGrenadeModel(owned ? 0x6affea : 0xff6f9a)
+    model.group.position.copy(position)
+    this.scene.add(model.group)
+    this.grenades.push({ model, velocity: velocity.clone(), timer: GRENADE_FUSE, trailTimer: 0, owned })
   }
 
   private explodeGrenade(grenade: Grenade): void {
-    const position = grenade.mesh.position.clone()
-    for (const bot of this.bots) {
-      if (bot.team !== 'enemy' || bot.health <= 0) continue
-      const distance = bot.model.group.position.distanceTo(position)
-      if (distance <= 4.5) this.damageBot(bot, 90 * Math.max(0.25, 1 - distance / 4.5), 'alpha', true)
+    const position = grenade.model.group.position.clone()
+    const ground = getGroundHeight(position.x, position.z, position.y + 0.2, 0.2, this.obstacles)
+    this.effects.explosion(position, GRENADE_RADIUS, grenade.owned ? 0xff9a4a : 0xff6f9a, ground)
+    if (grenade.owned) {
+      for (const remote of this.livingEnemies()) {
+        const center = remote.model.group.position.clone().setY(remote.model.group.position.y + 0.9)
+        const distance = center.distanceTo(position)
+        if (distance > GRENADE_RADIUS) continue
+        if (raycastObstacles(position, center.clone().sub(position).normalize(), distance, this.obstacles) !== null) continue
+        const damage = GRENADE_DAMAGE * Math.max(0.25, 1 - distance / GRENADE_RADIUS)
+        this.session?.send({ t: 'hit', target: remote.id, damage: round(damage), headshot: false, source: 'grenade', weapon: this.weaponDefinition.id })
+      }
     }
     this.audio.playAt('damage', position, this.player, this.yaw)
   }
 
   private deployTurret(): void {
-    if (this.state !== 'playing' || this.playerRespawn > 0 || this.turretCooldown > 0) return
+    if (this.state !== 'playing' || !this.alive || this.turretCooldown > 0) return
     const direction = this.camera.getWorldDirection(new THREE.Vector3()).setY(0).normalize()
-    const position = this.player.clone().addScaledVector(direction, 2)
-    resolveCircleCollisions(position, 0.5, this.obstacles)
-    const group = new THREE.Group()
-    const baseMaterial = new THREE.MeshStandardMaterial({ color: 0x283a42, metalness: 0.7, roughness: 0.35 })
-    const glowMaterial = new THREE.MeshStandardMaterial({ color: 0x6affea, emissive: 0x25bbaa, emissiveIntensity: 1.2 })
-    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.6, 0.35, 8), baseMaterial)
-    base.position.y = 0.18
-    group.add(base)
-    const head = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.35, 0.7), baseMaterial)
-    head.position.y = 0.65
-    group.add(head)
-    const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.75), glowMaterial)
-    barrel.position.set(0, 0.65, -0.6)
-    group.add(barrel)
-    group.position.copy(position)
-    this.scene.add(group)
-    this.turrets.push({ group, life: 14, fireTimer: 0.2 })
+    const position = this.player.clone().addScaledVector(direction, 1.8)
+    resolveBodyCollisions(position, 0.5, 1, this.obstacles)
+    position.y = getGroundHeight(position.x, position.z, this.player.y + 0.3, 0.5, this.obstacles)
+    this.spawnTurret(position, true, this.team)
+    this.session?.send({ t: 'turret', pos: toTuple(position) })
     this.turretCooldown = 18
     this.audio.play('upgrade')
+  }
+
+  private spawnTurret(position: THREE.Vector3, owned: boolean, team: TctTeam): void {
+    const model = createTurretModel(owned || team === this.team ? 0x6affea : 0xff6f9a)
+    model.group.position.copy(position)
+    this.scene.add(model.group)
+    this.turrets.push({ animator: new TurretAnimator(model), life: TURRET_LIFE, fireTimer: 0.6, owned, team })
+    this.effects.pulse(position, owned ? 0x6affea : 0xff6f9a, 1.8)
   }
 
   private updateEquipment(delta: number): void {
@@ -562,15 +795,20 @@ export class TctGame {
       const grenade = this.grenades[index]
       if (!grenade) continue
       grenade.timer -= delta
-      grenade.velocity.y -= 12 * delta
-      const direction = grenade.velocity.clone().normalize()
-      const wallDistance = raycastObstacles(grenade.mesh.position, direction, grenade.velocity.length() * delta, this.obstacles)
-      grenade.mesh.position.addScaledVector(grenade.velocity, delta)
-      if (wallDistance !== null || grenade.mesh.position.y <= 0.16 || grenade.timer <= 0) {
+      const position = grenade.model.group.position
+      stepBouncingProjectile(position, grenade.velocity, delta, this.obstacles)
+      grenade.model.group.rotation.x += grenade.velocity.length() * delta * 2
+      const elapsed = GRENADE_FUSE - grenade.timer
+      grenade.model.light.material.emissiveIntensity = Math.sin(elapsed * (8 + elapsed * 22)) > 0 ? 3.5 : 0.3
+      grenade.trailTimer -= delta
+      if (grenade.trailTimer <= 0 && grenade.velocity.lengthSq() > 4) {
+        this.effects.trail(position, grenade.owned ? 0x6affea : 0xff6f9a)
+        grenade.trailTimer = 0.03
+      }
+      if (grenade.timer <= 0) {
         this.explodeGrenade(grenade)
-        this.scene.remove(grenade.mesh)
-        grenade.mesh.geometry.dispose()
-        grenade.mesh.material.dispose()
+        this.scene.remove(grenade.model.group)
+        disposeObject(grenade.model.group)
         this.grenades.splice(index, 1)
       }
     }
@@ -579,186 +817,84 @@ export class TctGame {
       if (!turret) continue
       turret.life -= delta
       turret.fireTimer -= delta
-      let target: Bot | null = null
-      let targetDistance = 14
-      const origin = turret.group.position.clone().setY(0.7)
-      for (const bot of this.bots) {
-        if (bot.team !== 'enemy' || bot.health <= 0) continue
-        const targetPosition = bot.model.body.getWorldPosition(new THREE.Vector3())
-        const distance = targetPosition.distanceTo(origin)
-        if (distance >= targetDistance) continue
-        const blocked = raycastObstacles(origin, targetPosition.clone().sub(origin).normalize(), distance, this.obstacles) !== null
-        if (!blocked) {
-          target = bot
-          targetDistance = distance
-        }
+      this.updateTurret(turret, delta)
+      if (turret.life <= 0) {
+        const group = turret.animator.model.group
+        this.effects.explosion(group.position.clone().setY(group.position.y + 0.8), 1.6, turret.owned ? 0x6affea : 0xff6f9a, group.position.y)
+        this.removeTurret(index)
       }
-      if (target) {
-        const targetPosition = target.model.body.getWorldPosition(new THREE.Vector3())
-        turret.group.lookAt(targetPosition.x, 0.65, targetPosition.z)
-        turret.group.rotation.y += Math.PI
-        if (turret.fireTimer <= 0) {
-          this.damageBot(target, 14, 'alpha', true)
-          this.spawnTracer(origin, targetPosition, 0x8effd9)
-          turret.fireTimer = 0.24
-          this.audio.play('shoot')
-        }
-      }
-      if (turret.life <= 0) this.removeTurret(index)
     }
+  }
+
+  /** Torrette remote: solo animazione verso il bersaglio più vicino; i colpi arrivano dalla rete. */
+  private updateTurret(turret: Turret, delta: number): void {
+    if (turret.owned) {
+      this.updateOwnedTurret(turret, delta)
+      return
+    }
+    const origin = turret.animator.model.group.position.clone().setY(turret.animator.model.group.position.y + 0.85)
+    let target: THREE.Vector3 | null = null
+    let best = 14
+    const candidates: THREE.Vector3[] = []
+    if (turret.team !== this.team && this.alive) candidates.push(this.camera.position.clone().setY(this.player.y + 1.1))
+    for (const remote of this.remotes.values()) if (remote.alive && remote.team !== turret.team) candidates.push(remote.model.body.getWorldPosition(new THREE.Vector3()))
+    for (const candidate of candidates) {
+      const distance = candidate.distanceTo(origin)
+      if (distance < best) {
+        best = distance
+        target = candidate
+      }
+    }
+    turret.animator.update(delta, target, turret.life / TURRET_LIFE)
+  }
+
+  private updateOwnedTurret(turret: Turret, delta: number): void {
+    let target: RemotePlayer | null = null
+    let targetDistance = 14
+    const group = turret.animator.model.group
+    const origin = group.position.clone().setY(group.position.y + 0.85)
+    for (const remote of this.livingEnemies()) {
+      const targetPosition = remote.model.body.getWorldPosition(new THREE.Vector3())
+      const distance = targetPosition.distanceTo(origin)
+      if (distance >= targetDistance) continue
+      const blocked = raycastObstacles(origin, targetPosition.clone().sub(origin).normalize(), distance, this.obstacles) !== null
+      if (!blocked) {
+        target = remote
+        targetDistance = distance
+      }
+    }
+    const targetPosition = target ? target.model.body.getWorldPosition(new THREE.Vector3()) : null
+    turret.animator.update(delta, targetPosition, turret.life / TURRET_LIFE)
+    if (!target || !targetPosition || turret.fireTimer > 0) return
+    turret.fireTimer = 0.24
+    const muzzle = turret.animator.fire().getWorldPosition(new THREE.Vector3())
+    this.session?.send({ t: 'hit', target: target.id, damage: TURRET_DAMAGE, headshot: false, source: 'turret', weapon: this.weaponDefinition.id })
+    this.session?.send({ t: 'shot', from: toTuple(muzzle), to: toTuple(targetPosition) })
+    this.spawnTracer(muzzle, targetPosition, 0x8effd9)
+    this.effects.muzzle(muzzle, 0x8effd9)
+    this.audio.play('shoot')
   }
 
   private removeTurret(index: number): void {
     const turret = this.turrets[index]
     if (!turret) return
-    this.scene.remove(turret.group)
-    turret.group.traverse((object) => {
-      if (!(object instanceof THREE.Mesh)) return
-      object.geometry.dispose()
-      const materials = Array.isArray(object.material) ? object.material : [object.material]
-      materials.forEach((material) => material.dispose())
-    })
+    this.scene.remove(turret.animator.model.group)
+    disposeObject(turret.animator.model.group)
     this.turrets.splice(index, 1)
   }
 
   private clearEquipment(): void {
     for (const grenade of this.grenades) {
-      this.scene.remove(grenade.mesh)
-      grenade.mesh.geometry.dispose()
-      grenade.mesh.material.dispose()
+      this.scene.remove(grenade.model.group)
+      disposeObject(grenade.model.group)
     }
     this.grenades.length = 0
     for (let index = this.turrets.length - 1; index >= 0; index -= 1) this.removeTurret(index)
   }
 
-  private updateBots(delta: number): void {
-    for (const bot of this.bots) {
-      if (bot.health <= 0) {
-        bot.respawnTimer -= delta
-        const deathElapsed = TCT_CONFIG.respawnDelay - bot.respawnTimer
-        bot.model.group.visible = deathElapsed <= 0.65
-        if (bot.model.group.visible) {
-          const progress = Math.min(1, deathElapsed / 0.65)
-          bot.model.group.rotation.z = (Math.sin(bot.phase) > 0 ? 1 : -1) * progress * 1.45
-          bot.model.group.position.y = -progress * 0.22
-        }
-        if (bot.respawnTimer <= 0) this.respawnBot(bot)
-        continue
-      }
-      const roleStats = BOT_ROLES[bot.role]
-      bot.fireTimer -= delta
-      bot.hitFlash = Math.max(0, bot.hitFlash - delta)
-      bot.model.body.material.emissiveIntensity = bot.hitFlash > 0 ? 0.8 : 0.08
-      if (bot.role === 'support') {
-        bot.healTimer -= delta
-        if (bot.healTimer <= 0) {
-          const ally = this.bots.find((candidate) => candidate.team === bot.team && candidate.health > 0 && candidate.health < candidate.maxHealth && candidate.model.group.position.distanceTo(bot.model.group.position) < 8)
-          if (ally) {
-            ally.health = Math.min(ally.maxHealth, ally.health + 20)
-            this.spawnTracer(bot.model.group.position.clone().setY(1.3), ally.model.group.position.clone().setY(1.3), 0x72ff8b)
-          }
-          bot.healTimer = 4
-        }
-      }
-      const target = this.findTarget(bot.team, bot.model.group.position)
-      if (!target) continue
-      const targetPosition = this.getTargetPosition(target)
-      const direction = targetPosition.clone().sub(bot.model.group.position).setY(0)
-      const distance = Math.max(0.01, direction.length())
-      direction.divideScalar(distance)
-      const detailed = distance < 16
-      bot.model.leftLeg.visible = detailed
-      bot.model.rightLeg.visible = detailed
-      bot.model.leftArm.visible = detailed
-      bot.model.rightArm.visible = detailed
-      bot.model.weakPoint.visible = detailed
-      for (const detail of bot.model.details) detail.visible = detailed
-      const origin = bot.model.group.position.clone().setY(1.2)
-      const aimPoint = this.getTargetAimPoint(target)
-      const aimDirection = aimPoint.clone().sub(origin)
-      const blocked = raycastObstacles(origin, aimDirection.clone().normalize(), origin.distanceTo(aimPoint), this.obstacles) !== null
-      const movement = direction.clone()
-      if (!blocked && distance < roleStats.preferredDistance - 3) movement.multiplyScalar(-1)
-      else if (!blocked && distance < roleStats.preferredDistance + 3) movement.set(-direction.z, 0, direction.x).multiplyScalar(Math.sin(bot.phase + this.timeRemaining * 0.7))
-      const steering = steerAroundObstacles(bot.model.group.position, movement, 0.48, this.obstacles)
-      bot.model.group.position.addScaledVector(steering, roleStats.speed * delta)
-      resolveCircleCollisions(bot.model.group.position, 0.48, this.obstacles)
-      bot.model.group.position.x = THREE.MathUtils.clamp(bot.model.group.position.x, -this.map.arenaLimit, this.map.arenaLimit)
-      bot.model.group.position.z = THREE.MathUtils.clamp(bot.model.group.position.z, -this.map.arenaLimit, this.map.arenaLimit)
-      bot.model.group.rotation.y = Math.atan2(-direction.x, -direction.z)
-      const walk = Math.sin(this.timeRemaining * 7 + bot.phase) * 0.45
-      bot.model.leftLeg.rotation.x = walk
-      bot.model.rightLeg.rotation.x = -walk
-      bot.model.leftArm.rotation.x = -1.05
-      bot.model.rightArm.rotation.x = -1.05
-      if (!blocked && distance < roleStats.range && bot.fireTimer <= 0) {
-        bot.fireTimer = roleStats.fireInterval * (0.85 + Math.random() * 0.3)
-        const hit = Math.random() < roleStats.accuracy
-        const end = hit ? aimPoint : aimPoint.clone().add(new THREE.Vector3((Math.random() - 0.5) * 2, Math.random(), (Math.random() - 0.5) * 2))
-        this.spawnTracer(origin, end, bot.team === 'alpha' ? 0x58f5e5 : 0xff668e)
-        this.audio.playAt('enemyShoot', bot.model.group.position, this.player, this.yaw)
-        if (hit) this.damageTarget(target, roleStats.damage, bot.team)
-      }
-    }
-  }
-
-  private findTarget(team: TctTeam, position: THREE.Vector3): Bot | 'player' | null {
-    const targets: (Bot | 'player')[] = this.bots.filter((bot) => bot.team !== team && bot.health > 0)
-    if (team === 'enemy' && this.playerRespawn <= 0) targets.push('player')
-    let nearest: Bot | 'player' | null = null
-    let nearestDistance = Number.POSITIVE_INFINITY
-    for (const target of targets) {
-      const distance = position.distanceToSquared(this.getTargetPosition(target))
-      if (distance < nearestDistance) {
-        nearest = target
-        nearestDistance = distance
-      }
-    }
-    return nearest
-  }
-
-  private getTargetPosition(target: Bot | 'player'): THREE.Vector3 {
-    return target === 'player' ? this.player : target.model.group.position
-  }
-
-  private getTargetAimPoint(target: Bot | 'player'): THREE.Vector3 {
-    return this.getTargetPosition(target).clone().setY(target === 'player' ? 1.4 + this.jumpHeight : 1.2)
-  }
-
-  private damageTarget(target: Bot | 'player', damage: number, attacker: TctTeam): void {
-    if (target === 'player') this.damagePlayer(damage, attacker)
-    else this.damageBot(target, damage, attacker, false)
-  }
-
-  private damageBot(bot: Bot, damage: number, attacker: TctTeam, byPlayer: boolean): void {
-    if (bot.health <= 0 || bot.team === attacker) return
-    bot.health -= damage
-    bot.hitFlash = 0.09
-    bot.model.body.material.emissive.setHex(0xffffff)
-    bot.model.body.material.emissiveIntensity = 0.8
-    if (bot.health > 0) return
-    bot.health = 0
-    bot.respawnTimer = TCT_CONFIG.respawnDelay
-    bot.model.group.visible = true
-    if (bot.team === 'alpha') this.enemyScore += 1
-    else this.alphaScore += 1
-    if (byPlayer) this.kills += 1
-    this.audio.playAt('kill', bot.model.group.position, this.player, this.yaw)
-  }
-
-  private damagePlayer(damage: number, attacker: TctTeam): void {
-    if (this.playerRespawn > 0 || this.invulnerability > 0 || attacker === 'alpha') return
-    this.health = Math.max(0, this.health - damage)
-    this.invulnerability = 0.25
-    this.events.onDamage()
-    this.audio.play('damage')
-    if (this.health > 0) return
-    this.enemyScore += 1
-    this.deaths += 1
-    this.playerRespawn = TCT_CONFIG.respawnDelay
-    this.firing = false
-    this.weapon.group.visible = false
-  }
+  // -------------------------------------------------------------------------
+  // Effetti, HUD e ciclo
+  // -------------------------------------------------------------------------
 
   private spawnTracer(start: THREE.Vector3, end: THREE.Vector3, color: number): void {
     const line = new THREE.Line(
@@ -771,6 +907,7 @@ export class TctGame {
 
   private updateTracers(delta: number): void {
     this.decals.update(delta)
+    this.effects.update(delta)
     for (let index = this.tracers.length - 1; index >= 0; index -= 1) {
       const tracer = this.tracers[index]
       if (!tracer) continue
@@ -785,25 +922,29 @@ export class TctGame {
     }
   }
 
-  private createResult(winner: TctTeam | 'draw'): TctResult {
-    return { alphaScore: this.alphaScore, enemyScore: this.enemyScore, kills: this.kills, deaths: this.deaths, winner }
+  private get teamScore(): number {
+    return this.scores[this.team]
   }
 
-  private finish(winner: TctTeam | 'draw'): void {
-    if (this.state !== 'playing') return
-    this.firing = false
-    this.keys.clear()
-    this.events.onMatchEnd(this.createResult(winner))
-    this.setState(winner === 'alpha' ? 'victory' : 'gameover')
+  private get enemyScore(): number {
+    return this.scores[this.team === 'alpha' ? 'bravo' : 'alpha']
+  }
+
+  private finish(outcome: TctResult['outcome']): void {
+    if (!this.inMatch) return
+    const result: TctResult = { teamScore: this.teamScore, enemyScore: this.enemyScore, kills: this.kills, deaths: this.deaths, outcome }
+    this.stop()
+    this.events.onMatchEnd(result)
+    this.setState(outcome === 'win' ? 'victory' : 'gameover')
   }
 
   private emitHud(): void {
     this.camera.updateMatrixWorld()
-    const allies = this.bots.flatMap((bot, index) => {
-      if (bot.team !== 'alpha' || bot.health <= 0) return []
-      const projected = bot.model.group.position.clone().setY(2.15).project(this.camera)
+    const allies = [...this.remotes.values()].flatMap((remote) => {
+      if (remote.team !== this.team || !remote.alive) return []
+      const projected = remote.model.group.position.clone().setY(2.15).project(this.camera)
       if (projected.z < -1 || projected.z > 1 || Math.abs(projected.x) > 1 || Math.abs(projected.y) > 1) return []
-      return [{ id: index, x: (projected.x + 1) * 50, y: (1 - projected.y) * 50, health: bot.health / bot.maxHealth * 100, role: bot.role }]
+      return [{ id: remote.id, x: (projected.x + 1) * 50, y: (1 - projected.y) * 50, health: remote.health, name: remote.name }]
     })
     this.events.onHud({
       health: this.health,
@@ -823,14 +964,17 @@ export class TctGame {
       reloading: this.reloadTimer > 0,
       aiming: this.aiming,
       waveBreak: 0,
-      enemiesRemaining: this.bots.filter((bot) => bot.team === 'enemy' && bot.health > 0).length,
+      enemiesRemaining: this.livingEnemies().length,
       grenadeCooldown: this.grenadeCooldown,
       turretCooldown: this.turretCooldown,
-      door: null,
+      interaction: null,
+      weaponSlots: [],
+      stance: this.controller.sliding ? 'slide' : this.controller.crouched ? 'crouch' : 'stand',
       performance: { fps: this.fps, drawCalls: this.renderer.info.render.calls },
       tct: {
-        alphaScore: this.alphaScore,
+        teamScore: this.teamScore,
         enemyScore: this.enemyScore,
+        team: this.team,
         timeRemaining: this.timeRemaining,
         playerRespawn: this.playerRespawn,
         minimap: {
@@ -839,7 +983,12 @@ export class TctGame {
           yaw: this.yaw,
           arenaLimit: this.map.arenaLimit,
           obstacles: this.map.obstacles.map((obstacle) => ({ x: obstacle.x, z: obstacle.z, width: obstacle.width, depth: obstacle.depth })),
-          bots: this.bots.map((bot) => ({ x: bot.model.group.position.x, z: bot.model.group.position.z, team: bot.team, alive: bot.health > 0 })),
+          players: [...this.remotes.values()].map((remote) => ({
+            x: remote.model.group.position.x,
+            z: remote.model.group.position.z,
+            ally: remote.team === this.team,
+            alive: remote.alive,
+          })),
         },
         allies,
       },
@@ -848,16 +997,15 @@ export class TctGame {
 
   private update(delta: number): void {
     this.mapContent.ambient.rotation.y += delta * 0.015
-    this.timeRemaining = Math.max(0, this.timeRemaining - delta)
-    const winner = getMatchWinner(this.alphaScore, this.enemyScore, this.timeRemaining)
-    if (winner) {
-      this.finish(winner)
-      return
-    }
     this.updatePlayer(delta)
-    this.updateBots(delta)
+    this.updateRemotes(delta)
     this.updateEquipment(delta)
     this.updateTracers(delta)
+    this.stateTimer -= delta
+    if (this.stateTimer <= 0 && this.alive) {
+      this.stateTimer = STATE_SEND_INTERVAL
+      this.sendState()
+    }
     this.hudTimer -= delta
     if (this.hudTimer <= 0) {
       this.emitHud()
@@ -877,11 +1025,14 @@ export class TctGame {
         this.fpsTimer = 0
         this.fpsFrames = 0
       }
-      if (this.state === 'playing') this.update(delta)
+      // La partita online non si ferma: in pausa il mondo continua ad aggiornarsi senza input.
+      if (this.inMatch) this.update(delta)
       else if (this.state === 'menu') {
         this.mapContent.ambient.rotation.y = time * 0.000015
-        this.camera.position.set(Math.sin(time * 0.0001) * 8, 4.5, 14 + Math.cos(time * 0.0001) * 3)
-        this.camera.lookAt(0, 1.2, 0)
+        const radius = this.map.arenaLimit * 0.75
+        this.camera.position.set(Math.sin(time * 0.00008) * radius, 7 + Math.sin(time * 0.00005) * 1.5, Math.cos(time * 0.00008) * radius)
+        this.camera.rotation.z = 0
+        this.camera.lookAt(0, 2, 0)
       }
       this.pipeline.render()
     }
@@ -906,7 +1057,7 @@ export class TctGame {
       else if (this.state === 'paused') this.resume()
       return
     }
-    if (this.state !== 'playing' || this.playerRespawn > 0) return
+    if (this.state !== 'playing' || !this.alive) return
     if (event.code === 'Space') event.preventDefault()
     this.keys.add(event.code)
     if (event.code === 'Digit1') this.switchWeapon(this.primaryId)
@@ -914,10 +1065,8 @@ export class TctGame {
     if (event.code === 'KeyR') this.startReload()
     if (event.code === 'KeyG') this.throwGrenade()
     if (event.code === 'KeyT') this.deployTurret()
-    if (event.code === 'Space' && !event.repeat && this.grounded) {
-      this.verticalVelocity = 6.5
-      this.grounded = false
-    }
+    if (event.code === 'Space' && !event.repeat) this.controller.jump(this.obstacles)
+    if (event.code === 'KeyC' && !event.repeat) this.controller.pressCrouch()
   }
 
   private readonly onKeyUp = (event: KeyboardEvent): void => {
@@ -925,13 +1074,14 @@ export class TctGame {
   }
 
   private readonly onMouseMove = (event: MouseEvent): void => {
-    if (!this.active || this.state !== 'playing' || this.playerRespawn > 0 || document.pointerLockElement !== this.renderer.domElement) return
+    if (!this.active || this.state !== 'playing' || !this.alive || document.pointerLockElement !== this.renderer.domElement) return
     this.yaw -= event.movementX * this.mouseSensitivity
     this.pitch = THREE.MathUtils.clamp(this.pitch - event.movementY * this.mouseSensitivity, -1.45, 1.45)
+    this.weaponAnimator.addLook(event.movementX, event.movementY)
   }
 
-  private readonly onPointerDown = (event: PointerEvent): void => {
-    if (this.state !== 'playing' || this.playerRespawn > 0) return
+  private readonly onMouseButtonDown = (event: MouseEvent): void => {
+    if (this.state !== 'playing' || !this.alive) return
     this.audio.resume()
     if (document.pointerLockElement !== this.renderer.domElement) {
       this.requestMouse()
@@ -941,7 +1091,7 @@ export class TctGame {
     if (event.button === 2) this.aiming = true
   }
 
-  private readonly onPointerUp = (event: PointerEvent): void => {
+  private readonly onMouseButtonUp = (event: MouseEvent): void => {
     if (event.button === 0) this.firing = false
     if (event.button === 2) this.aiming = false
   }
@@ -964,10 +1114,23 @@ export class TctGame {
     window.addEventListener('keydown', this.onKeyDown)
     window.addEventListener('keyup', this.onKeyUp)
     window.addEventListener('blur', this.onBlur)
-    window.addEventListener('pointerup', this.onPointerUp)
+    window.addEventListener('mouseup', this.onMouseButtonUp)
     document.addEventListener('mousemove', this.onMouseMove)
     document.addEventListener('pointerlockchange', this.onPointerLockChange)
-    this.renderer.domElement.addEventListener('pointerdown', this.onPointerDown)
+    this.renderer.domElement.addEventListener('mousedown', this.onMouseButtonDown)
     this.renderer.domElement.addEventListener('contextmenu', this.onContextMenu)
   }
+}
+
+function toVector(value: Vec3): THREE.Vector3 {
+  return new THREE.Vector3(value[0], value[1], value[2])
+}
+
+function toTuple(vector: THREE.Vector3): Vec3 {
+  return [round(vector.x), round(vector.y), round(vector.z)]
+}
+
+function round(value: number, digits = 2): number {
+  const factor = 10 ** digits
+  return Math.round(value * factor) / factor
 }

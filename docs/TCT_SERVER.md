@@ -41,4 +41,4 @@ Supabase resta adatto a identità, profili e classifiche persistenti. Non deve e
 4. Aggiungere autenticazione, persistenza del risultato e rate limit.
 5. Eseguire soak test e test di latenza prima della pubblicazione online.
 
-Il client attuale con bot resta la modalità offline; il server online non è ancora implementato.
+Stato attuale: la TCT usa una stanza P2P (PeerJS/WebRTC) con il browser dell'host autorevole (`src/game/net/MatchHost.ts`). Protocollo e validazione in `src/game/net/protocol.ts` sono già senza dipendenze DOM e riutilizzabili da un futuro server Node dedicato, che resta necessario per anti-cheat e partite pubbliche.
