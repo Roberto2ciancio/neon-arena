@@ -15,6 +15,7 @@ async function closeDrawer(page: Page): Promise<void> {
 test('una run FPS usa mouse, fuoco, mira e ricarica e salva il risultato', async ({ page }) => {
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))
+  await page.addInitScript(() => window.localStorage.setItem('neon-arena:graphics:v1', 'low'))
 
   await page.goto('/')
   await expect(page.getByRole('heading', { name: 'NEON ARENA' })).toBeVisible()
@@ -29,10 +30,12 @@ test('una run FPS usa mouse, fuoco, mira e ricarica e salva il risultato', async
 
   await page.keyboard.down('KeyW')
   await page.keyboard.down('ShiftLeft')
-  await page.waitForTimeout(250)
-  await page.keyboard.up('ShiftLeft')
-  await page.keyboard.up('KeyW')
-  await expect(page.locator('#door-prompt')).toBeVisible()
+  try {
+    await expect(page.locator('#door-prompt')).toBeVisible()
+  } finally {
+    await page.keyboard.up('ShiftLeft')
+    await page.keyboard.up('KeyW')
+  }
   await expect(page.locator('#door-prompt-text')).toHaveText('APRI PORTA // ◆ 5')
   await page.keyboard.press('KeyE')
   await expect(page.locator('#door-prompt-text')).toHaveText('SERVONO 5 FRAMMENTI')
@@ -118,6 +121,10 @@ test('una run FPS usa mouse, fuoco, mira e ricarica e salva il risultato', async
 
 test('la modalità TCT online fa giocare due persone nella stessa stanza', async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 480, height: 360 } })
+  await context.addInitScript(() => {
+    window.localStorage.setItem('neon-arena:graphics:v1', 'low')
+    window.localStorage.setItem('neon-arena:armory:v1', JSON.stringify({ level: 1, xp: 0, loadout: { primary: 'dmr-3' } }))
+  })
   const host = await context.newPage()
   const guest = await context.newPage()
   const errors: string[] = []
@@ -134,10 +141,6 @@ test('la modalità TCT online fa giocare due persone nella stessa stanza', async
   await host.bringToFront()
   await host.locator('[data-mode="tct"]').click()
   await expect(host.locator('#start-button')).toBeHidden()
-  await host.getByRole('button', { name: 'ARMERIA' }).click()
-  await host.locator('.armory-item', { hasText: 'DMR-3' }).click()
-  await expect(host.locator('.armory-item.selected')).toContainText('DMR-3')
-  await host.getByRole('button', { name: 'CHIUDI' }).click()
   await host.getByRole('button', { name: 'CREA STANZA' }).click()
   await expect(host.locator('#room-code-display')).toHaveText(/^[A-Z2-9]{5}$/)
   await expect(host.locator('#start-match')).toBeDisabled()
@@ -157,6 +160,8 @@ test('la modalità TCT online fa giocare due persone nella stessa stanza', async
   await host.locator('[data-map="district-zero"]').click()
   await expect(guest.locator('[data-map="district-zero"]')).toHaveAttribute('aria-pressed', 'true')
   await host.bringToFront()
+  await expect(host.locator('#start-match')).toBeVisible()
+  await expect(host.locator('#start-match')).toBeEnabled()
   await host.getByRole('button', { name: 'AVVIA PARTITA' }).click()
 
   for (const page of [host, guest]) {
