@@ -1,7 +1,7 @@
 export type GameState = 'menu' | 'playing' | 'paused' | 'gameover' | 'victory'
 
-export type EnemyKind = 'walker' | 'runner' | 'armored' | 'brute' | 'crawler' | 'spitter' | 'screamer'
-export type HitZone = 'body' | 'head' | 'legs' | 'generator' | 'core' | 'spine' | 'throat'
+export type EnemyKind = 'walker' | 'runner' | 'armored' | 'brute' | 'crawler' | 'spitter' | 'screamer' | 'leaper' | 'bloater' | 'stalker' | 'shielder'
+export type HitZone = 'body' | 'head' | 'legs' | 'generator' | 'core' | 'spine' | 'throat' | 'back' | 'belly'
 
 export interface PlayerStats {
   maxHealth: number

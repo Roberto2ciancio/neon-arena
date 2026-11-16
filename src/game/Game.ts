@@ -37,7 +37,7 @@ import type { EnemyModel } from './models'
 import { applyUpgrade, createBaseStats, FIRST_LEVEL_XP, getNextLevelXp, getUpgradeChoices, UPGRADE_KEYS } from './upgrades'
 import { WEAPONS } from './weapons'
 import { BURN_DURATION, CHAIN_LIGHTNING_RADIUS, getBurnDamagePerSecond, getChainLightningDamage, getChainTargetCount, getHeadshotExplosionDamage, HEADSHOT_EXPLOSION_RADIUS } from './specialEffects'
-import { FINAL_WAVE, getEliteChance, getWaveSpawnCount, getZombieColor, getZombieStats, WAVE_BREAK_SECONDS } from './zombies'
+import { BLOATER_BLAST, FINAL_WAVE, getEliteChance, getMeleeDamage, getSpawnPool, getWaveSpawnCount, getZombieColor, getZombieStats, SHIELD_FRONT_REDUCTION, WAVE_BREAK_SECONDS } from './zombies'
 import { INSTA_KILL_BOSS_MULTIPLIER, POWER_UP_LIFETIME, POWER_UPS, rollPowerUp, SHOCKWAVE_RADIUS } from './powerups'
 import type { PowerUpId } from './powerups'
 import type { EnemyKind, GameEvents, GameState, HitZone, MetaBonuses, RunResult } from './types'
@@ -53,6 +53,7 @@ interface PowerUpPickup {
 interface Enemy {
   model: EnemyModel
   elite: boolean
+  maxHealth: number
   /** Il corpo condivide la posizione del modello: `y` è la quota dei piedi. */
   body: Body
   path: NavPoint[]
@@ -159,6 +160,9 @@ function getWeakPointZone(kind: EnemyKind): HitZone {
     case 'spitter':
     case 'screamer': return 'throat'
     case 'brute': return 'core'
+    case 'bloater': return 'belly'
+    case 'shielder': return 'back'
+    case 'leaper': return 'spine'
     default: return 'head'
   }
 }
@@ -636,12 +640,7 @@ export class Game {
   }
 
   private randomEnemyKind(): EnemyKind {
-    const pool: EnemyKind[] = ['walker', 'walker', 'walker']
-    if (this.wave >= 2) pool.push('runner', 'runner')
-    if (this.wave >= 3) pool.push('armored', 'crawler')
-    if (this.wave >= 4) pool.push('crawler', 'spitter')
-    if (this.wave >= 6) pool.push('screamer', 'runner', 'armored')
-    if (this.wave >= 9) pool.push('armored', 'spitter', 'screamer')
+    const pool = getSpawnPool(this.wave)
     return pool[Math.floor(Math.random() * pool.length)] ?? 'walker'
   }
 
@@ -709,6 +708,7 @@ export class Game {
       marker,
       kind,
       health: stats.health,
+      maxHealth: stats.health,
       speed: stats.speed,
       damage: stats.damage,
       radius: stats.radius,
@@ -819,7 +819,9 @@ export class Game {
       const distance = offset.length()
       if (distance > melee.range + enemy.radius) continue
       if (distance > 0.3 && offset.divideScalar(distance).dot(forward) < minimumDot) continue
-      enemy.health -= this.scaleDamage(enemy, melee.damage * (this.stats.damage / 20))
+      // Dopo l'ondata 4 un fendente non basta più a uccidere: toglie al massimo il 60% della vita.
+      const shieldFactor = enemy.kind === 'shielder' && this.isShieldFacing(enemy, this.player) ? 0.3 : 1
+      enemy.health -= this.scaleDamage(enemy, getMeleeDamage(melee.damage * (this.stats.damage / 20), this.wave, enemy.maxHealth) * shieldFactor)
       enemy.hitFlash = 0.12
       enemy.flinch = 1
       enemy.knockback.addScaledVector(forward, enemy.kind === 'brute' ? 1 : 4)
@@ -885,6 +887,7 @@ export class Game {
         }
         const hasWeakPoint = enemy.kind === 'armored' || enemy.kind === 'crawler'
           || enemy.kind === 'spitter' || enemy.kind === 'screamer'
+          || enemy.kind === 'bloater' || enemy.kind === 'shielder' || enemy.kind === 'leaper'
           || (enemy.kind === 'brute' && enemy.coreExposedTimer > 0)
         if (hasWeakPoint) {
           zones.push({
@@ -951,6 +954,16 @@ export class Game {
       else multiplier = hit.zone === 'head' ? 0.65 : 0.3
     }
     if (enemy.kind === 'crawler' && hit.zone === 'spine') multiplier = 2.2
+    if (enemy.kind === 'leaper' && hit.zone === 'spine') multiplier = 2.2
+    if (enemy.kind === 'bloater' && hit.zone === 'belly') multiplier = 2.4
+    if (enemy.kind === 'shielder') {
+      if (hit.zone === 'back') multiplier = 2.4
+      else if (this.isShieldFacing(enemy, this.camera.position)) {
+        // Lo scudo assorbe i colpi frontali: bisogna aggirarlo.
+        multiplier *= 1 - SHIELD_FRONT_REDUCTION
+        this.effects.sparks(hit.point, this.camera.position.clone().sub(hit.point).normalize(), 0xffe0a0, 5)
+      }
+    }
     if (enemy.kind === 'spitter' && hit.zone === 'throat') multiplier = 2.5
     if (enemy.kind === 'screamer' && hit.zone === 'throat') {
       multiplier = 2.3
@@ -1314,7 +1327,23 @@ export class Game {
         if (enemy.coreExposedTimer > 0) movement.set(0, 0, 0)
       }
 
-      const speed = enemy.speed * (enemy.slowTimer > 0 ? 0.45 : 1) * (enemy.buffTimer > 0 ? 1.3 : 1)
+      if (enemy.kind === 'leaper' && enemy.body.grounded && enemy.specialCooldown <= 0 && distance > 4.5 && distance < 12 && sameLevel && !followingPath) {
+        // Balzo verso il giocatore: può superare coperture basse.
+        enemy.body.velocityY = 7.4
+        enemy.body.grounded = false
+        enemy.chargeDirection.copy(direction)
+        enemy.specialCooldown = 3.8
+        this.effects.pulse(enemy.body.position, getZombieColor('leaper'), 1)
+      }
+      const leaping = enemy.kind === 'leaper' && !enemy.body.grounded && enemy.specialCooldown > 3
+      if (leaping) movement.copy(enemy.chargeDirection)
+      if (enemy.kind === 'stalker') {
+        // L'Ombra è quasi invisibile finché non è vicina o viene colpita.
+        const opacity = enemy.hitFlash > 0 ? 1 : THREE.MathUtils.clamp((14 - playerDistance) / 7, 0.1, 1)
+        for (const material of (enemy.model.group.userData.fadeMaterials as THREE.Material[] | undefined) ?? []) material.opacity = opacity
+      }
+      if (enemy.kind === 'bloater' && playerDistance < 1.8 && sameLevel) enemy.health = 0
+      const speed = leaping ? 8.5 : enemy.speed * (enemy.slowTimer > 0 ? 0.45 : 1) * (enemy.buffTimer > 0 ? 1.3 : 1)
         * (charging ? (enemy.kind === 'brute' ? 5.2 : 3.2) : 1)
       const bodyHeight = Math.min(enemy.model.height, 1.9)
       const steering = movement.lengthSq() > 0 ? steerBody(enemy.body.position, movement, enemy.radius, bodyHeight, this.obstacles) : movement
@@ -1451,10 +1480,35 @@ export class Game {
     }
   }
 
+  /** Vero se lo scudo dello Scudiero è rivolto verso il punto indicato. */
+  private isShieldFacing(enemy: Enemy, point: THREE.Vector3): boolean {
+    const forward = new THREE.Vector3(-Math.sin(enemy.model.group.rotation.y), 0, -Math.cos(enemy.model.group.rotation.y))
+    const toPoint = point.clone().sub(enemy.body.position).setY(0)
+    return toPoint.lengthSq() > 0 && forward.dot(toPoint.normalize()) > 0.25
+  }
+
+  /** Il Gonfio esplode in una nube acida che ferisce il giocatore e gli zombie vicini. */
+  private explodeBloater(position: THREE.Vector3): void {
+    const center = position.clone().setY(position.y + 1)
+    this.effects.explosion(center, BLOATER_BLAST.radius, getZombieColor('bloater'), position.y)
+    this.spawnHazard(position)
+    this.audio.playAt('damage', position, this.player, this.yaw)
+    const playerDistance = this.player.distanceTo(position)
+    if (playerDistance < BLOATER_BLAST.radius && Math.abs(this.player.y - position.y) < 1.6) {
+      this.damagePlayer(BLOATER_BLAST.playerDamage * Math.max(0.3, 1 - playerDistance / BLOATER_BLAST.radius))
+    }
+    for (const other of this.enemies) {
+      if (other.health <= 0 || other.body.position.distanceTo(position) > BLOATER_BLAST.radius) continue
+      other.health -= BLOATER_BLAST.zombieDamage
+      other.hitFlash = 0.12
+    }
+  }
+
   private killEnemy(index: number): void {
     const enemy = this.enemies[index]
     if (!enemy) return
     const position = enemy.model.group.position.clone()
+    if (enemy.kind === 'bloater') this.explodeBloater(position)
     const color = getZombieColor(enemy.kind)
     this.score += enemy.score * this.wave * this.lootMultiplier
     this.kills += 1

@@ -99,7 +99,7 @@ function addDistrict(group: THREE.Group, map: MapDefinition): void {
   const poles: InstanceTransform[] = []
   const lamps: InstanceTransform[] = []
   const lampSpots: [number, number][] = [[-6, -8], [6, -8], [-6, 8], [6, 8]]
-  for (const distance of [16, 26]) lampSpots.push([-5.6, -distance], [5.6, distance], [-distance, 5.6], [distance, -5.6])
+  for (const distance of [16, 26, 36]) lampSpots.push([-5.6, -distance], [5.6, distance], [-distance, 5.6], [distance, -5.6])
   lampSpots.forEach(([x, z], index) => {
     poles.push({ position: [x, 2.1, z], scale: [1, 4.2, 1] })
     lamps.push({ position: [x, 4.25, z], scale: [0.5, 0.16, 0.5] })

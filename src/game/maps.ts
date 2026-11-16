@@ -10,7 +10,7 @@ export interface MapObstacleDefinition {
   width: number
   height: number
   depth: number
-  style: 'cover' | 'wall' | 'pillar' | 'container' | 'car'
+  style: 'cover' | 'wall' | 'pillar' | 'container' | 'car' | 'crate' | 'barrel'
 }
 
 export interface MapDoorDefinition {
@@ -105,6 +105,32 @@ const weapon = (id: string, weaponId: PurchasableWeapon, x: number, y: number, z
   id, kind: 'weapon', weapon: weaponId, x, y, z, cost: STATION_COSTS[weaponId], attachments: FIELD_ATTACHMENTS[weaponId],
 })
 
+/** Pila di casse a gradino: dalla bassa (1,1 m) si salta sull'alta (2,2 m) per guadagnare quota. */
+function crateStack(id: string, x: number, z: number, alongX = true): MapObstacleDefinition[] {
+  return [
+    { id: `${id}-low`, x, z, width: 1.2, height: 1.1, depth: 1.2, style: 'crate' },
+    { id: `${id}-high`, x: alongX ? x + 1.2 : x, z: alongX ? z : z + 1.2, width: 1.2, height: 2.2, depth: 1.2, style: 'crate' },
+  ]
+}
+
+/** Gruppo di tre barili industriali. */
+function barrels(id: string, x: number, z: number): MapObstacleDefinition[] {
+  return [
+    { id: `${id}-a`, x, z, width: 0.7, height: 1, depth: 0.7, style: 'barrel' },
+    { id: `${id}-b`, x: x + 0.75, z: z + 0.15, width: 0.7, height: 1, depth: 0.7, style: 'barrel' },
+    { id: `${id}-c`, x: x + 0.35, z: z - 0.65, width: 0.7, height: 1, depth: 0.7, style: 'barrel' },
+  ]
+}
+
+function cornerPillars(distance: number, height: number): MapObstacleDefinition[] {
+  return [
+    { id: 'pillar-nw', x: -distance, z: -distance, width: 1, height, depth: 1, style: 'pillar' },
+    { id: 'pillar-ne', x: distance, z: -distance, width: 1, height, depth: 1, style: 'pillar' },
+    { id: 'pillar-sw', x: -distance, z: distance, width: 1, height, depth: 1, style: 'pillar' },
+    { id: 'pillar-se', x: distance, z: distance, width: 1, height, depth: 1, style: 'pillar' },
+  ]
+}
+
 // ---------------------------------------------------------------------------
 // Stazione 13: binari, biglietteria a due piani, torre di controllo e passerella.
 // ---------------------------------------------------------------------------
@@ -114,14 +140,18 @@ const STATION_BUILDINGS: BuildingDefinition[] = [
   { id: 'control-tower', name: 'CONTROLLO', kind: 'building', x: 16, z: -13, width: 7, depth: 8, floors: 3, doors: ['south'], style: 'concrete' },
   { id: 'luggage-depot', name: 'DEPOSITO BAGAGLI', kind: 'building', x: 15, z: 13, width: 10, depth: 8, floors: 1, doors: ['north'], style: 'industrial' },
   { id: 'footbridge', kind: 'tower', x: 0, z: -12, width: 10, depth: 7, floors: 1, doors: [], style: 'industrial' },
+  { id: 'waiting-room', name: 'SALA D’ATTESA', kind: 'building', x: -24, z: 22, width: 12, depth: 9, floors: 1, doors: ['north', 'east'], style: 'glass' },
+  { id: 'water-tower', kind: 'tower', x: -29, z: -3, width: 7, depth: 8, floors: 2, doors: [], style: 'industrial' },
+  { id: 'maintenance-shed', name: 'MANUTENZIONE', kind: 'building', x: 29, z: -15, width: 8, depth: 9, floors: 1, doors: ['south'], style: 'industrial' },
+  { id: 'signal-box', name: 'CABINA SEGNALI', kind: 'building', x: 26, z: 26, width: 8, depth: 8, floors: 2, doors: ['north'], style: 'brick' },
 ]
 
 export const STATION_13: MapDefinition = {
   id: 'station-13',
   name: 'Stazione 13',
-  arenaLimit: 26,
+  arenaLimit: 34,
   playerSpawn: { x: 0, z: 6 },
-  enemySpawnRadius: 25,
+  enemySpawnRadius: 33,
   buildings: STATION_BUILDINGS,
   obstacles: [
     { id: 'gate-west-wing', x: -4.5, z: 2, width: 6, height: 2.6, depth: 0.5, style: 'wall' },
@@ -137,10 +167,19 @@ export const STATION_13: MapDefinition = {
     { id: 'freight-car-east', x: 23, z: -1, width: 3, height: 2.7, depth: 8, style: 'container' },
     { id: 'barrier-west', x: -10, z: 2, width: 0.6, height: 1.2, depth: 5, style: 'wall' },
     { id: 'barrier-east', x: 10, z: -4, width: 0.6, height: 1.2, depth: 5, style: 'wall' },
-    { id: 'pillar-nw', x: -24, z: -24, width: 1, height: 7, depth: 1, style: 'pillar' },
-    { id: 'pillar-ne', x: 24, z: -24, width: 1, height: 7, depth: 1, style: 'pillar' },
-    { id: 'pillar-sw', x: -24, z: 24, width: 1, height: 7, depth: 1, style: 'pillar' },
-    { id: 'pillar-se', x: 24, z: 24, width: 1, height: 7, depth: 1, style: 'pillar' },
+    { id: 'wagon-north', x: 3.3, z: -21.5, width: 3, height: 2.9, depth: 9, style: 'container' },
+    { id: 'wagon-south', x: -3.3, z: 22, width: 3, height: 2.9, depth: 9, style: 'container' },
+    { id: 'barricade-north', x: -9, z: -28, width: 4, height: 1.2, depth: 0.4, style: 'cover' },
+    { id: 'barricade-south', x: 10, z: 28, width: 4, height: 1.2, depth: 0.4, style: 'cover' },
+    { id: 'platform-bench-west', x: -13, z: 2, width: 2.6, height: 0.9, depth: 0.7, style: 'cover' },
+    { id: 'kiosk-east', x: 13, z: 2, width: 2.2, height: 2.4, depth: 2.2, style: 'container' },
+    ...crateStack('crates-west', -12.5, 14),
+    ...crateStack('crates-east', 12, -21),
+    ...crateStack('crates-south', 18, 21, false),
+    ...barrels('barrels-shed', 19, -19),
+    ...barrels('barrels-tower', -22, -15),
+    ...barrels('barrels-yard', 28, 8),
+    ...cornerPillars(32, 7),
   ],
   doors: [
     { id: 'supply-gate', x: 0, z: 2, width: 3, height: 2.4, depth: 0.4, cost: 5 },
@@ -167,14 +206,17 @@ const DEPOT_BUILDINGS: BuildingDefinition[] = [
   { id: 'office-block', name: 'UFFICI', kind: 'building', x: -21, z: 8, width: 9, depth: 9, floors: 2, doors: ['east', 'south'], style: 'concrete' },
   { id: 'crane-tower', kind: 'tower', x: 21, z: -4, width: 6, depth: 8, floors: 2, doors: [], style: 'industrial' },
   { id: 'gatehouse', name: 'GUARDIOLA', kind: 'building', x: 20, z: 18, width: 8, depth: 8, floors: 1, doors: ['north'], style: 'brick' },
+  { id: 'workshop', name: 'OFFICINA MEZZI', kind: 'building', x: -28, z: -24, width: 10, depth: 9, floors: 1, doors: ['east'], style: 'industrial' },
+  { id: 'silo', kind: 'tower', x: 30, z: 28, width: 7, depth: 8, floors: 3, doors: [], style: 'industrial' },
+  { id: 'loading-office', name: 'CARICO MERCI', kind: 'building', x: 29, z: -27, width: 9, depth: 8, floors: 2, doors: ['south'], style: 'concrete' },
 ]
 
 export const DEPOT_06: MapDefinition = {
   id: 'depot-06',
   name: 'Deposito 06',
-  arenaLimit: 30,
+  arenaLimit: 38,
   playerSpawn: { x: 0, z: 22 },
-  enemySpawnRadius: 29,
+  enemySpawnRadius: 37,
   buildings: DEPOT_BUILDINGS,
   obstacles: [
     { id: 'west-container-south', x: -12, z: 14, width: 4.5, height: 2.6, depth: 2.2, style: 'container' },
@@ -188,14 +230,24 @@ export const DEPOT_06: MapDefinition = {
     { id: 'center-cover-south', x: 0, z: 12, width: 3.4, height: 1.1, depth: 0.8, style: 'cover' },
     { id: 'center-cover-center', x: 0, z: 2, width: 3.4, height: 1.1, depth: 0.8, style: 'cover' },
     { id: 'center-cover-north', x: 0, z: -6, width: 3.4, height: 1.1, depth: 0.8, style: 'cover' },
-    { id: 'stack-north-west', x: -24, z: -22, width: 6, height: 5.2, depth: 2.4, style: 'container' },
+    { id: 'stack-north-west', x: -14, z: -28, width: 6, height: 5.2, depth: 2.4, style: 'container' },
     { id: 'stack-south-east', x: 24, z: 6, width: 2.4, height: 5.2, depth: 6, style: 'container' },
     { id: 'forklift-west', x: -18, z: -6, width: 1.6, height: 1.4, depth: 2.8, style: 'car' },
     { id: 'forklift-east', x: 16, z: -16, width: 1.6, height: 1.4, depth: 2.8, style: 'car' },
-    { id: 'pillar-nw', x: -28, z: -28, width: 1, height: 7, depth: 1, style: 'pillar' },
-    { id: 'pillar-ne', x: 28, z: -28, width: 1, height: 7, depth: 1, style: 'pillar' },
-    { id: 'pillar-sw', x: -28, z: 28, width: 1, height: 7, depth: 1, style: 'pillar' },
-    { id: 'pillar-se', x: 28, z: 28, width: 1, height: 7, depth: 1, style: 'pillar' },
+    { id: 'container-row-west-a', x: -24, z: 24, width: 6, height: 2.6, depth: 2.4, style: 'container' },
+    { id: 'container-row-west-b', x: -24, z: 30, width: 6, height: 2.6, depth: 2.4, style: 'container' },
+    { id: 'container-row-east', x: 12, z: 30, width: 6, height: 2.6, depth: 2.4, style: 'container' },
+    { id: 'truck-west', x: -31, z: 0, width: 2.6, height: 2.4, depth: 6, style: 'car' },
+    { id: 'truck-north', x: 22, z: -16, width: 6, height: 2.4, depth: 2.6, style: 'car' },
+    { id: 'fence-north', x: -2, z: -30, width: 8, height: 1.4, depth: 0.3, style: 'wall' },
+    { id: 'fence-east', x: 32, z: 6, width: 0.3, height: 1.4, depth: 8, style: 'wall' },
+    ...crateStack('crates-yard', -18, 18),
+    ...crateStack('crates-dock', 18, 4, false),
+    ...crateStack('crates-north', -4, -26),
+    ...barrels('barrels-workshop', -21, -18),
+    ...barrels('barrels-silo', 24, 33),
+    ...barrels('barrels-west', -32, 12),
+    ...cornerPillars(36, 7),
   ],
   doors: [buildingDoor('gatehouse-door', DEPOT_BUILDINGS[3]!, 'north', 8)],
   stations: [
@@ -219,14 +271,18 @@ const DISTRICT_BUILDINGS: BuildingDefinition[] = [
   { id: 'offices', name: 'UFFICI ZERO', kind: 'building', x: 20, z: -20, width: 11, depth: 10, floors: 2, doors: ['south', 'east'], style: 'glass' },
   { id: 'market', name: 'MERCATO', kind: 'building', x: -20, z: 20, width: 12, depth: 9, floors: 1, doors: ['north', 'east'], style: 'concrete' },
   { id: 'garage', kind: 'tower', x: 20, z: 20, width: 12, depth: 10, floors: 2, doors: [], style: 'concrete' },
+  { id: 'hotel', name: 'HOTEL NEON', kind: 'building', x: -34, z: -20, width: 10, depth: 14, floors: 3, doors: ['east'], style: 'glass' },
+  { id: 'cinema', name: 'CINEMA', kind: 'building', x: 34, z: 20, width: 10, depth: 12, floors: 2, doors: ['north'], style: 'brick' },
+  { id: 'radio-tower', kind: 'tower', x: 34, z: -34, width: 7, depth: 8, floors: 3, doors: [], style: 'industrial' },
+  { id: 'school', name: 'SCUOLA', kind: 'building', x: -34, z: 30, width: 12, depth: 9, floors: 2, doors: ['north', 'east'], style: 'concrete' },
 ]
 
 export const DISTRICT_ZERO: MapDefinition = {
   id: 'district-zero',
   name: 'Distretto Zero',
-  arenaLimit: 36,
+  arenaLimit: 44,
   playerSpawn: { x: 0, z: 30 },
-  enemySpawnRadius: 35,
+  enemySpawnRadius: 43,
   buildings: DISTRICT_BUILDINGS,
   obstacles: [
     { id: 'west-alley-wall', x: -9, z: -8, width: 0.5, height: 2.8, depth: 7, style: 'wall' },
@@ -242,10 +298,22 @@ export const DISTRICT_ZERO: MapDefinition = {
     { id: 'car-south', x: 2.4, z: 16, width: 2, height: 1.3, depth: 4, style: 'car' },
     { id: 'bus-stop', x: -27, z: -5.6, width: 5, height: 2.4, depth: 0.4, style: 'wall' },
     { id: 'kiosk', x: 6.5, z: 6.5, width: 2.2, height: 2.6, depth: 2.2, style: 'container' },
-    { id: 'pillar-nw', x: -34, z: -34, width: 1, height: 8, depth: 1, style: 'pillar' },
-    { id: 'pillar-ne', x: 34, z: -34, width: 1, height: 8, depth: 1, style: 'pillar' },
-    { id: 'pillar-sw', x: -34, z: 34, width: 1, height: 8, depth: 1, style: 'pillar' },
-    { id: 'pillar-se', x: 34, z: 34, width: 1, height: 8, depth: 1, style: 'pillar' },
+    { id: 'bus-north', x: -8, z: -34, width: 2.6, height: 2.8, depth: 9, style: 'car' },
+    { id: 'bus-south', x: 8, z: 36, width: 2.6, height: 2.8, depth: 9, style: 'car' },
+    { id: 'car-far-west', x: -30, z: 2.4, width: 4, height: 1.3, depth: 2, style: 'car' },
+    { id: 'car-far-east', x: 30, z: -2.4, width: 4, height: 1.3, depth: 2, style: 'car' },
+    { id: 'barricade-west', x: -20, z: 0, width: 0.4, height: 1.2, depth: 4, style: 'cover' },
+    { id: 'barricade-east', x: 20, z: 0, width: 0.4, height: 1.2, depth: 4, style: 'cover' },
+    { id: 'planter-north-west', x: -10, z: -24, width: 2.4, height: 0.9, depth: 2.4, style: 'cover' },
+    { id: 'planter-south-east', x: 10, z: 26, width: 2.4, height: 0.9, depth: 2.4, style: 'cover' },
+    { id: 'newsstand', x: -6.5, z: 14, width: 2, height: 2.4, depth: 1.6, style: 'container' },
+    ...crateStack('crates-market', -12, 28),
+    ...crateStack('crates-garage', 28, 10, false),
+    ...crateStack('crates-alley', -24, -6),
+    ...barrels('barrels-radio', 27, -30),
+    ...barrels('barrels-hotel', -27, -32),
+    ...barrels('barrels-school', -25, 38),
+    ...cornerPillars(42, 8),
   ],
   doors: [buildingDoor('offices-door', DISTRICT_BUILDINGS[1]!, 'south', 10)],
   stations: [

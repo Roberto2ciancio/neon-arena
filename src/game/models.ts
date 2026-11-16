@@ -117,10 +117,10 @@ export function createEnemyModel(kind: EnemyKind, color: number, appearance: 'zo
   const group = new THREE.Group()
   const details: THREE.Object3D[] = []
   const soldier = appearance === 'soldier'
-  const height = kind === 'brute' ? 2.65 : kind === 'armored' ? 2.05 : kind === 'crawler' ? 1.05 : kind === 'runner' ? 1.75 : 1.85
+  const height = kind === 'brute' ? 2.65 : kind === 'armored' || kind === 'shielder' ? 2.05 : kind === 'crawler' ? 1.05 : kind === 'runner' ? 1.75 : kind === 'leaper' ? 1.6 : kind === 'bloater' || kind === 'stalker' ? 1.95 : 1.85
   const scale = height / 1.8
-  const width = (kind === 'armored' ? 0.95 : kind === 'brute' ? 1.05 : kind === 'runner' ? 0.52 : 0.66) * scale
-  const skinColor = new THREE.Color(soldier ? 0x8b6b57 : 0x727768).lerp(new THREE.Color(color), soldier ? 0 : 0.28)
+  const width = (kind === 'armored' || kind === 'shielder' ? 0.95 : kind === 'brute' ? 1.05 : kind === 'bloater' ? 1.2 : kind === 'runner' || kind === 'stalker' ? 0.52 : kind === 'leaper' ? 0.6 : 0.66) * scale
+  const skinColor = new THREE.Color(soldier ? 0x8b6b57 : 0x727768).lerp(new THREE.Color(color), soldier ? 0 : kind === 'stalker' ? 0.75 : 0.28)
   const skin = new THREE.MeshStandardMaterial({ color: 0xffffff, map: createOrganicTexture(skinColor.getHex()), roughness: 0.8 })
   const clothesColor = soldier ? outfit?.suit ?? 0x1d252b : kind === 'runner' ? 0x39262a : 0x252a2c
   const clothes = new THREE.MeshStandardMaterial({ color: 0xffffff, map: createFabricTexture(clothesColor), roughness: 0.96, side: THREE.DoubleSide })
@@ -132,6 +132,7 @@ export function createEnemyModel(kind: EnemyKind, color: number, appearance: 'zo
   const body = new THREE.Mesh(new RoundedBoxGeometry(width, 0.72 * scale, 0.4 * scale, 4, 0.08 * scale), clothes)
   body.position.y = 1.12 * scale
   if (kind === 'runner') body.rotation.x = -0.28
+  if (kind === 'leaper') body.rotation.x = -0.5
   if (kind === 'crawler') {
     body.rotation.x = 1.05
     body.position.y = 0.58
@@ -289,6 +290,50 @@ export function createEnemyModel(kind: EnemyKind, color: number, appearance: 'zo
     weakPoint.rotation.x = Math.PI / 2
     weakPoint.position.set(0, 1.2 * scale, 0.34 * scale)
     group.add(weakPoint)
+  } else if (kind === 'bloater') {
+    // Ventre gonfio e pustole luminose: il punto debole esplode.
+    const belly = new THREE.Mesh(new THREE.SphereGeometry(0.55 * scale, 18, 14), skin)
+    belly.scale.set(1.15, 1, 1)
+    belly.position.set(0, 0.95 * scale, -0.12)
+    group.add(belly)
+    for (const [x, y] of [[-0.3, 1.25], [0.32, 1.05], [-0.15, 0.75], [0.2, 1.4]] as const) {
+      const pustule = new THREE.Mesh(new THREE.SphereGeometry(0.08 * scale, 10, 8), glow)
+      pustule.position.set(x * scale, y * scale, -0.58 * scale)
+      group.add(pustule)
+      details.push(pustule)
+    }
+    weakPoint = new THREE.Mesh(new THREE.SphereGeometry(0.24 * scale, 14, 10), glow)
+    weakPoint.position.set(0, 0.95 * scale, -0.6 * scale)
+    group.add(weakPoint)
+  } else if (kind === 'shielder') {
+    // Scudo antisommossa improvvisato sul davanti, generatore sulla schiena.
+    const shield = new THREE.Mesh(new RoundedBoxGeometry(1.1 * scale, 1.35 * scale, 0.08, 3, 0.04), armor)
+    shield.position.set(0, 1.05 * scale, -0.62 * scale)
+    group.add(shield)
+    const slit = new THREE.Mesh(new THREE.BoxGeometry(0.4 * scale, 0.06, 0.09), new THREE.MeshStandardMaterial({ color: 0x0c0f12, roughness: 0.4 }))
+    slit.position.set(0, 1.5 * scale, -0.62 * scale)
+    group.add(slit)
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(1.12 * scale, 0.08, 0.09), new THREE.MeshStandardMaterial({ color: 0xd8a43c, emissive: 0x3a2508, emissiveIntensity: 0.6 }))
+    stripe.position.set(0, 0.62 * scale, -0.62 * scale)
+    group.add(stripe)
+    details.push(slit, stripe)
+    weakPoint = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.24, 16), glow)
+    weakPoint.rotation.x = Math.PI / 2
+    weakPoint.position.set(0, 1.2 * scale, 0.36 * scale)
+    group.add(weakPoint)
+  } else if (kind === 'leaper') {
+    // Spina dorsale esposta e luminosa sopra il busto piegato in avanti.
+    for (const z of [-0.18, 0.02, 0.22]) {
+      const spike = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.24, 6), toothMaterial)
+      spike.position.set(0, 1.45 * scale, z)
+      spike.rotation.x = -0.6
+      group.add(spike)
+      details.push(spike)
+    }
+    weakPoint = new THREE.Mesh(new THREE.CapsuleGeometry(0.09, 0.45, 5, 10), glow)
+    weakPoint.rotation.x = Math.PI / 2 - 0.5
+    weakPoint.position.set(0, 1.3 * scale, 0.12)
+    group.add(weakPoint)
   } else if (kind === 'brute') {
     weakPoint = new THREE.Mesh(new THREE.IcosahedronGeometry(0.25, 2), glow)
     weakPoint.position.set(0, 1.25 * scale, -0.31 * scale)
@@ -314,6 +359,21 @@ export function createEnemyModel(kind: EnemyKind, color: number, appearance: 'zo
   floorRing.position.y = 0.02
   group.add(floorRing)
   details.push(floorRing)
+
+  if (kind === 'stalker') {
+    // L'Ombra sfuma quasi invisibile da lontano: tutti i materiali devono poter essere trasparenti.
+    const fade: THREE.Material[] = []
+    group.traverse((object) => {
+      if (!(object instanceof THREE.Mesh)) return
+      const materials = Array.isArray(object.material) ? object.material : [object.material]
+      for (const material of materials) {
+        if (fade.includes(material)) continue
+        material.transparent = true
+        fade.push(material)
+      }
+    })
+    group.userData.fadeMaterials = fade
+  }
 
   return { group, body, head, leftLeg, rightLeg, leftArm, rightArm, weakPoint, details, height }
 }

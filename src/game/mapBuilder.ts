@@ -46,6 +46,51 @@ function createContainerTexture(): THREE.CanvasTexture {
   return texture
 }
 
+function createCrateTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas')
+  canvas.width = 128
+  canvas.height = 128
+  const context = canvas.getContext('2d')
+  if (context) {
+    context.fillStyle = '#8a6a42'
+    context.fillRect(0, 0, 128, 128)
+    for (let y = 0; y < 128; y += 21) {
+      context.fillStyle = y % 42 === 0 ? '#7a5c38' : '#93734a'
+      context.fillRect(0, y, 128, 19)
+      context.fillStyle = 'rgba(0,0,0,0.3)'
+      context.fillRect(0, y + 19, 128, 2)
+    }
+    context.strokeStyle = '#5a4128'
+    context.lineWidth = 10
+    context.strokeRect(5, 5, 118, 118)
+    context.beginPath()
+    context.moveTo(10, 10)
+    context.lineTo(118, 118)
+    context.stroke()
+  }
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  return texture
+}
+
+function createBarrelTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas')
+  canvas.width = 128
+  canvas.height = 64
+  const context = canvas.getContext('2d')
+  if (context) {
+    context.fillStyle = '#d9d9d9'
+    context.fillRect(0, 0, 128, 64)
+    context.fillStyle = 'rgba(0,0,0,0.3)'
+    for (const y of [10, 32, 54]) context.fillRect(0, y, 128, 3)
+    context.fillStyle = 'rgba(0,0,0,0.18)'
+    for (let index = 0; index < 30; index += 1) context.fillRect((index * 37) % 128, (index * 13) % 64, 3, 2)
+  }
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.colorSpace = THREE.SRGBColorSpace
+  return texture
+}
+
 export function buildMap(map: MapDefinition): BuiltMap {
   const group = new THREE.Group()
   const obstacles = createStaticSolids(map)
@@ -148,6 +193,41 @@ export function buildMap(map: MapDefinition): BuiltMap {
     instances.instanceMatrix.needsUpdate = true
     if (instances.instanceColor) instances.instanceColor.needsUpdate = true
     group.add(instances)
+  }
+
+  // Casse di legno con assi e barili industriali colorati.
+  const crates = map.obstacles.filter((definition) => definition.style === 'crate')
+  if (crates.length > 0) {
+    const crateMesh = new THREE.InstancedMesh(boxGeometry, new THREE.MeshStandardMaterial({ color: 0xffffff, map: createCrateTexture(), roughness: 0.85 }), crates.length)
+    crateMesh.castShadow = true
+    crateMesh.receiveShadow = true
+    crates.forEach((definition, index) => {
+      transform.position.set(definition.x, definition.height / 2, definition.z)
+      transform.scale.set(definition.width, definition.height, definition.depth)
+      transform.rotation.set(0, 0, 0)
+      transform.updateMatrix()
+      crateMesh.setMatrixAt(index, transform.matrix)
+    })
+    crateMesh.instanceMatrix.needsUpdate = true
+    group.add(crateMesh)
+  }
+  const barrelDefinitions = map.obstacles.filter((definition) => definition.style === 'barrel')
+  if (barrelDefinitions.length > 0) {
+    const barrelMesh = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.5, 0.5, 1, 14), new THREE.MeshStandardMaterial({ color: 0xffffff, map: createBarrelTexture(), metalness: 0.5, roughness: 0.5 }), barrelDefinitions.length)
+    barrelMesh.castShadow = true
+    barrelMesh.receiveShadow = true
+    const barrelColors = [0x8c2f2a, 0x2d5f7a, 0xb08a2a, 0x3f6e3a]
+    barrelDefinitions.forEach((definition, index) => {
+      transform.position.set(definition.x, definition.height / 2, definition.z)
+      transform.scale.set(definition.width, definition.height, definition.depth)
+      transform.rotation.set(0, index * 0.7, 0)
+      transform.updateMatrix()
+      barrelMesh.setMatrixAt(index, transform.matrix)
+      barrelMesh.setColorAt(index, new THREE.Color(barrelColors[index % barrelColors.length]!))
+    })
+    barrelMesh.instanceMatrix.needsUpdate = true
+    if (barrelMesh.instanceColor) barrelMesh.instanceColor.needsUpdate = true
+    group.add(barrelMesh)
   }
 
   // Auto e muletti: carrozzeria, abitacolo, fari.

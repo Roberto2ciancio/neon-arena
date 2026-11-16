@@ -26,6 +26,10 @@ const BASE_STATS: Record<EnemyKind, ZombieStats> = {
   crawler: { name: 'Strisciante', health: 42, speed: 2.35, damage: 14, radius: 0.5, score: 190, xp: 38, attackInterval: 0.8 },
   spitter: { name: 'Sputatore', health: 72, speed: 1.7, damage: 9, radius: 0.54, score: 240, xp: 48, attackInterval: 1.4 },
   screamer: { name: 'Urlatore', health: 88, speed: 1.55, damage: 8, radius: 0.55, score: 300, xp: 60, attackInterval: 1.5 },
+  leaper: { name: 'Saltatore', health: 60, speed: 2.6, damage: 15, radius: 0.5, score: 280, xp: 56, attackInterval: 0.8 },
+  bloater: { name: 'Gonfio', health: 140, speed: 1.25, damage: 10, radius: 0.75, score: 260, xp: 50, attackInterval: 1.3 },
+  stalker: { name: 'Ombra', health: 70, speed: 3.2, damage: 16, radius: 0.48, score: 320, xp: 64, attackInterval: 0.7 },
+  shielder: { name: 'Scudiero', health: 150, speed: 1.5, damage: 18, radius: 0.7, score: 340, xp: 66, attackInterval: 1.1 },
 }
 
 export function getWaveSpawnCount(wave: number): number {
@@ -67,5 +71,50 @@ export function getZombieColor(kind: EnemyKind): number {
     case 'crawler': return 0x81905b
     case 'spitter': return 0x72bd68
     case 'screamer': return 0xa06db4
+    case 'leaper': return 0x6f8f9e
+    case 'bloater': return 0x9ea84a
+    case 'stalker': return 0x3b3f4a
+    case 'shielder': return 0x8a7a64
   }
 }
+
+/** Ondata in cui ogni tipo di zombie entra in gioco (il Bruto è il boss delle ondate multiple di 5). */
+export const ENEMY_FIRST_WAVE: Record<Exclude<EnemyKind, 'brute'>, number> = {
+  walker: 1,
+  runner: 2,
+  armored: 3,
+  crawler: 3,
+  leaper: 4,
+  spitter: 4,
+  bloater: 5,
+  screamer: 6,
+  stalker: 7,
+  shielder: 9,
+}
+
+/** Composizione pesata dell'ondata: i tipi nuovi si aggiungono e quelli vecchi pesano sempre meno. */
+export function getSpawnPool(wave: number): EnemyKind[] {
+  const pool: EnemyKind[] = []
+  for (const [kind, first] of Object.entries(ENEMY_FIRST_WAVE) as [Exclude<EnemyKind, 'brute'>, number][]) {
+    if (wave < first) continue
+    const weight = kind === 'walker' ? Math.max(1, 4 - Math.floor(wave / 4)) : wave - first < 2 ? 1 : 2
+    for (let index = 0; index < weight; index += 1) pool.push(kind)
+  }
+  return pool
+}
+
+export const MELEE_ONE_SHOT_LAST_WAVE = 4
+/** Quota massima della vita che un singolo colpo corpo a corpo può togliere dopo le prime ondate. */
+export const MELEE_MAX_HEALTH_SHARE = 0.6
+
+/** Danno corpo a corpo: fino all'ondata 4 può uccidere in un colpo, poi ne servono almeno due. */
+export function getMeleeDamage(damage: number, wave: number, targetMaxHealth: number): number {
+  if (wave <= MELEE_ONE_SHOT_LAST_WAVE) return damage
+  return Math.min(damage, targetMaxHealth * MELEE_MAX_HEALTH_SHARE)
+}
+
+/** Esplosione del Gonfio: raggio e danni a giocatore e zombie vicini. */
+export const BLOATER_BLAST = { radius: 3.4, playerDamage: 30, zombieDamage: 70 } as const
+/** Lo scudo dello Scudiero blocca questa quota del danno frontale. */
+export const SHIELD_FRONT_REDUCTION = 0.85
+
