@@ -66,6 +66,12 @@ export class AccountPanel {
     return this.options.auth?.session != null
   }
 
+  /** Credenziali dell'account per le richieste a nome dell'utente (classifica online), o null da ospite. */
+  async accountCredentials(): Promise<{ accessToken: string; userId: string } | null> {
+    const session = await this.options.auth?.getValidSession()
+    return session ? { accessToken: session.accessToken, userId: session.user.id } : null
+  }
+
   get email(): string {
     return this.options.auth?.session?.user.email ?? ''
   }

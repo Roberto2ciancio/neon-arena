@@ -346,12 +346,9 @@ function showUpgradeChoices(ids: string[], pending: number): void {
   if (wasHidden && buttons.length > 0) byId('upgrade-title').textContent = pending > 1 ? `LIVELLO SU! SCEGLI UN POTENZIAMENTO (${pending})` : 'LIVELLO SU! SCEGLI UN POTENZIAMENTO'
 }
 
+/** I progressi degli ospiti restano sul dispositivo; quelli degli account vanno in player_saves. */
 function syncCloudProfile(): void {
   accountPanel?.scheduleSave()
-  if (!cloud) return
-  void cloud.saveProfile(identity, progress).catch(() => {
-    byId('cloud-status').textContent = 'OFFLINE // SALVATAGGIO LOCALE'
-  })
 }
 
 async function refreshOnlineLeaderboard(): Promise<void> {
@@ -369,30 +366,22 @@ async function refreshOnlineLeaderboard(): Promise<void> {
 async function initializeCloud(): Promise<void> {
   if (!cloud) return
   byId('cloud-status').textContent = 'SINCRONIZZAZIONE...'
+  await refreshOnlineLeaderboard()
+}
+
+/** Classifica online: solo per gli account, con validazione lato server. Da ospite resta locale. */
+async function submitOnlineRun(result: RunResult): Promise<void> {
+  if (!cloud) return
+  const account = await accountPanel?.accountCredentials()
+  if (!account) {
+    byId('cloud-status').textContent = 'OSPITE // ACCEDI PER LA CLASSIFICA ONLINE'
+    return
+  }
   try {
-    const remote = await cloud.loadProfile(identity)
-    if (remote) {
-      progress = {
-        ...remote,
-        cores: Math.max(progress.cores, remote.cores),
-        bestScore: Math.max(progress.bestScore, remote.bestScore),
-        bestWave: Math.max(progress.bestWave, remote.bestWave),
-        totalKills: Math.max(progress.totalKills, remote.totalKills),
-        runs: Math.max(progress.runs, remote.runs),
-        leaderboard: progress.leaderboard,
-        upgrades: {
-          vitality: Math.max(progress.upgrades.vitality, remote.upgrades.vitality),
-          power: Math.max(progress.upgrades.power, remote.upgrades.power),
-          mobility: Math.max(progress.upgrades.mobility, remote.upgrades.mobility),
-        },
-      }
-      saveProgress(window.localStorage, progress)
-      renderMenu()
-    }
-    syncCloudProfile()
+    await cloud.submitRun(account, identity.callsign, result)
     await refreshOnlineLeaderboard()
   } catch {
-    byId('cloud-status').textContent = 'OFFLINE // DATI LOCALI'
+    byId('cloud-status').textContent = 'OFFLINE // RUN SALVATA IN LOCALE'
   }
 }
 
@@ -500,9 +489,7 @@ function completeRun(result: RunResult): void {
   progress = recordRun(progress, result)
   saveProgress(window.localStorage, progress)
   syncCloudProfile()
-  if (cloud) void cloud.submitRun(identity, result).then(refreshOnlineLeaderboard).catch(() => {
-    byId('cloud-status').textContent = 'OFFLINE // RUN SALVATA IN LOCALE'
-  })
+  void submitOnlineRun(result)
   byId('result-score').textContent = result.score.toLocaleString('it-IT')
   byId('result-wave').textContent = String(result.wave)
   byId('result-kills').textContent = String(result.kills)
