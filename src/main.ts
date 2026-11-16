@@ -9,6 +9,7 @@ import type { TctResult } from './game/TctGame'
 import { MAPS, STATION_13 } from './game/maps'
 import { normalizeGraphicsQuality } from './game/graphics'
 import type { GraphicsQuality } from './game/graphics'
+import { AutomaticQuality } from './game/automaticQuality'
 import { META_COSTS, META_UPGRADES, MAX_META_LEVEL, getMetaBonuses, loadProgress, purchaseMetaUpgrade, recordRun, saveProgress } from './game/progression'
 import { UPGRADE_BY_ID } from './game/upgrades'
 import { WEAPONS } from './game/weapons'
@@ -80,6 +81,8 @@ const transportKind = getTransportKind()
 let waveBannerTimer = 0
 let damageFlashTimer = 0
 let hitmarkerTimer = 0
+let qualityNoticeTimer = 0
+const automaticQuality = new AutomaticQuality()
 
 const game = new Game(byId('scene'), {
   onStateChange: updateState,
@@ -112,8 +115,26 @@ byId<HTMLInputElement>('high-contrast').checked = accessibility.highContrast
 byId<HTMLInputElement>('mouse-sensitivity').value = String(accessibility.sensitivity)
 byId<HTMLOutputElement>('sensitivity-value').textContent = `${accessibility.sensitivity.toFixed(1).replace('.', ',')}×`
 
+function applyGraphicsQuality(quality: GraphicsQuality, notify = false): void {
+  graphicsQuality = quality
+  game.setGraphicsQuality(quality)
+  tctGame.setGraphicsQuality(quality)
+  byId<HTMLSelectElement>('graphics-quality').value = quality
+  automaticQuality.reset()
+  try {
+    window.localStorage.setItem(GRAPHICS_STORAGE_KEY, quality)
+  } catch {}
+  if (!notify) return
+  const notice = byId('quality-notice')
+  notice.textContent = `FPS BASSI // QUALITÀ ${quality === 'medium' ? 'MEDIA' : 'BASSA'} ATTIVATA`
+  notice.classList.remove('hidden')
+  window.clearTimeout(qualityNoticeTimer)
+  qualityNoticeTimer = window.setTimeout(() => notice.classList.add('hidden'), 4000)
+}
+
 function updateState(state: GameState): void {
   currentState = state
+  if (state !== 'playing') automaticQuality.reset()
   app.dataset.state = state
   menuScreen.classList.toggle('hidden', state !== 'menu')
   hud.classList.toggle('hidden', state === 'menu')
@@ -179,7 +200,13 @@ function renderPowerUps(powerUps: HudData['powerUps']): void {
 function updateHud(data: HudData): void {
   const healthPercentage = Math.max(0, (data.health / data.maxHealth) * 100)
   setText(hudEl('health-text'), `${Math.ceil(data.health)} / ${data.maxHealth}`)
-  if (data.performance) setText(hudEl('performance-stats'), `${data.performance.fps} FPS · ${data.performance.drawCalls} DC`)
+  if (data.performance) {
+    setText(hudEl('performance-stats'), `${data.performance.fps} FPS · ${data.performance.drawCalls} DC`)
+    if (currentState === 'playing') {
+      const nextQuality = automaticQuality.sample(graphicsQuality, data.performance.fps, performance.now())
+      if (nextQuality) applyGraphicsQuality(nextQuality, true)
+    }
+  }
   hudEl('health-fill').style.width = `${healthPercentage}%`
   hudEl('health-fill').classList.toggle('critical', healthPercentage < 30)
   hudEl('xp-fill').style.width = `${Math.min(100, (data.xp / data.xpNext) * 100)}%`
@@ -872,12 +899,7 @@ byId<HTMLInputElement>('callsign').addEventListener('change', (event) => {
 })
 
 byId<HTMLSelectElement>('graphics-quality').addEventListener('change', (event) => {
-  graphicsQuality = normalizeGraphicsQuality((event.target as HTMLSelectElement).value)
-  game.setGraphicsQuality(graphicsQuality)
-  tctGame.setGraphicsQuality(graphicsQuality)
-  try {
-    window.localStorage.setItem(GRAPHICS_STORAGE_KEY, graphicsQuality)
-  } catch {}
+  applyGraphicsQuality(normalizeGraphicsQuality((event.target as HTMLSelectElement).value))
 })
 
 byId<HTMLButtonElement>('start-button').addEventListener('click', startRun)

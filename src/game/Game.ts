@@ -245,6 +245,21 @@ export class Game {
   private fps = 60
   private fpsTimer = 0
   private fpsFrames = 0
+  private readonly frameVectors = {
+    effect: new THREE.Vector3(),
+    stun: new THREE.Vector3(),
+    target: new THREE.Vector3(),
+    toPlayer: new THREE.Vector3(),
+    direction: new THREE.Vector3(),
+    travel: new THREE.Vector3(),
+    movement: new THREE.Vector3(),
+    strafe: new THREE.Vector3(),
+    eye: new THREE.Vector3(),
+    aim: new THREE.Vector3(),
+    separation: new THREE.Vector3(),
+    projectilePrevious: new THREE.Vector3(),
+    projectileDirection: new THREE.Vector3(),
+  }
 
   constructor(
     private readonly container: HTMLElement,
@@ -1236,7 +1251,7 @@ export class Game {
         if (enemy.burnTick <= 0) {
           enemy.health -= enemy.burnDamagePerSecond * 0.5
           enemy.burnTick += 0.5
-          this.spawnBurst(enemy.model.body.getWorldPosition(new THREE.Vector3()), 0xff7b38, 2)
+          this.spawnBurst(enemy.model.body.getWorldPosition(this.frameVectors.effect), 0xff7b38, 2)
         }
       }
       if (enemy.health <= 0) continue
@@ -1269,7 +1284,7 @@ export class Game {
         enemy.model.group.rotation.z = Math.sin(this.elapsed * 11 + enemy.phase) * 0.16
         enemy.model.leftArm.rotation.x = -0.3
         enemy.model.rightArm.rotation.x = -0.5
-        moveBody(enemy.body, enemy.knockback.clone().multiplyScalar(delta), delta, enemy.radius, Math.min(enemy.model.height, 1.9), this.obstacles, this.map.arenaLimit)
+        moveBody(enemy.body, this.frameVectors.stun.copy(enemy.knockback).multiplyScalar(delta), delta, enemy.radius, Math.min(enemy.model.height, 1.9), this.obstacles, this.map.arenaLimit)
         enemy.knockback.multiplyScalar(Math.exp(-delta * 8))
         continue
       }
@@ -1277,17 +1292,19 @@ export class Game {
       let targetPoint: THREE.Vector3 = this.player
       if (this.decoy && enemy.body.position.distanceTo(this.decoy.position) < 22) targetPoint = this.decoy.position
       else if (this.equipment.isInSmoke(this.camera.position) && enemy.body.position.distanceTo(this.player) > 3) {
-        targetPoint = this.player.clone().add(new THREE.Vector3(Math.sin(enemy.phase) * 6, 0, Math.cos(enemy.phase) * 6))
+        targetPoint = this.frameVectors.target.copy(this.player)
+        targetPoint.x += Math.sin(enemy.phase) * 6
+        targetPoint.z += Math.cos(enemy.phase) * 6
       }
       const verticalGap = this.player.y - enemy.body.position.y
       const sameLevel = Math.abs(verticalGap) < 1.3
       const playerDistance = Math.hypot(this.player.x - enemy.body.position.x, this.player.z - enemy.body.position.z)
-      const detailDistance = this.graphicsQuality === 'low' ? 14 : this.graphicsQuality === 'high' ? 24 : 18
+      const detailDistance = this.graphicsQuality === 'low' ? 14 : 18
       const detailed = playerDistance < detailDistance
       for (const detail of enemy.model.details) detail.visible = detailed
-      const toPlayer = targetPoint.clone().sub(enemy.model.group.position).setY(0)
+      const toPlayer = this.frameVectors.toPlayer.copy(targetPoint).sub(enemy.model.group.position).setY(0)
       const distance = Math.max(toPlayer.length(), 0.001)
-      const direction = toPlayer.clone().divideScalar(distance)
+      const direction = this.frameVectors.direction.copy(toPlayer).divideScalar(distance)
       // Percorso fra piani e porte; inseguimento diretto quando si è nella stessa area.
       enemy.pathTimer -= delta
       if (enemy.pathTimer <= 0 && this.pathBudget > 0 && !(this.navigation.isOnStairs(enemy.body.position) && enemy.path.length > 0)) {
@@ -1299,13 +1316,13 @@ export class Game {
       const waypoint = enemy.path[0]
       const followingPath = waypoint !== undefined
       const travelDirection = followingPath
-        ? new THREE.Vector3(waypoint.x - enemy.body.position.x, 0, waypoint.z - enemy.body.position.z).normalize()
-        : direction.clone()
-      const movement = travelDirection.clone()
+        ? this.frameVectors.travel.set(waypoint.x - enemy.body.position.x, 0, waypoint.z - enemy.body.position.z).normalize()
+        : this.frameVectors.travel.copy(direction)
+      const movement = this.frameVectors.movement.copy(travelDirection)
       let charging = enemy.chargeTimer > 0
 
       if (enemy.kind === 'runner' && !followingPath) {
-        movement.add(new THREE.Vector3(-direction.z, 0, direction.x).multiplyScalar(Math.sin(this.elapsed * 4 + enemy.phase) * 0.7)).normalize()
+        movement.add(this.frameVectors.strafe.set(-direction.z, 0, direction.x).multiplyScalar(Math.sin(this.elapsed * 4 + enemy.phase) * 0.7)).normalize()
       }
       if (enemy.kind === 'crawler') {
         if (charging) {
@@ -1321,8 +1338,9 @@ export class Game {
       if (enemy.kind === 'spitter') {
         if (!followingPath && distance < 7) movement.multiplyScalar(-1)
         else if (!followingPath && distance < 11) movement.set(-direction.z, 0, direction.x)
-        const eye = enemy.model.group.position.clone().setY(enemy.body.position.y + enemy.model.height * 0.72)
-        const clearShot = raycastObstacles(eye, this.camera.position.clone().sub(eye).normalize(), eye.distanceTo(this.camera.position), this.obstacles) === null
+        const eye = this.frameVectors.eye.copy(enemy.model.group.position).setY(enemy.body.position.y + enemy.model.height * 0.72)
+        const aim = this.frameVectors.aim.copy(this.camera.position).sub(eye).normalize()
+        const clearShot = raycastObstacles(eye, aim, eye.distanceTo(this.camera.position), this.obstacles) === null
         if (distance < 17 && enemy.specialCooldown <= 0 && clearShot) {
           this.fireAcid(enemy)
           enemy.specialCooldown = 2.4
@@ -1336,7 +1354,7 @@ export class Game {
             if (ally !== enemy && ally.model.group.position.distanceTo(enemy.model.group.position) < 9) ally.buffTimer = 4
           }
           enemy.specialCooldown = 7
-          this.spawnBurst(enemy.model.group.position.clone().setY(enemy.model.height * 0.7), 0xc486ff, 20)
+          this.spawnBurst(this.frameVectors.effect.copy(enemy.model.group.position).setY(enemy.model.height * 0.7), 0xc486ff, 20)
           this.audio.playAt('enemyShoot', enemy.model.group.position, this.player, this.yaw)
         }
       }
@@ -1436,7 +1454,7 @@ export class Game {
         const b = this.enemies[second]
         if (!a || !b) continue
         if (Math.abs(a.body.position.y - b.body.position.y) > 1) continue
-        const separation = b.model.group.position.clone().sub(a.model.group.position).setY(0)
+        const separation = this.frameVectors.separation.copy(b.model.group.position).sub(a.model.group.position).setY(0)
         const distance = separation.length()
         const minimum = (a.radius + b.radius) * 0.8
         if (distance > 0 && distance < minimum) {
@@ -1456,9 +1474,9 @@ export class Game {
       const projectile = this.projectiles[index]
       if (!projectile) continue
       projectile.life -= delta
-      const previousPosition = projectile.mesh.position.clone()
+      const previousPosition = this.frameVectors.projectilePrevious.copy(projectile.mesh.position)
       const travelDistance = projectile.velocity.length() * delta
-      const travelDirection = projectile.velocity.clone().normalize()
+      const travelDirection = this.frameVectors.projectileDirection.copy(projectile.velocity).normalize()
       const wallDistance = raycastObstacles(previousPosition, travelDirection, travelDistance, this.obstacles)
       if (wallDistance !== null) {
         const impact = previousPosition.addScaledVector(travelDirection, wallDistance)

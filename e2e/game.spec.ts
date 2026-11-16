@@ -413,3 +413,39 @@ test('Deposito 06 è selezionabile e avvia una run nella nuova mappa', async ({ 
   await expect(page.locator('#app')).toHaveAttribute('data-state', 'menu')
   expect(errors).toEqual([])
 })
+
+
+test('un’ondata piena limita i frame oltre 50 ms', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  await page.addInitScript(() => window.localStorage.setItem('neon-arena:graphics:v1', 'low'))
+  await page.goto('/')
+  await page.locator('[data-map="district-zero"]').click()
+  await page.getByRole('button', { name: 'INIZIA RUN' }).click()
+  await expect(page.locator('#app')).toHaveAttribute('data-state', 'playing')
+  await page.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    game.clearEntities()
+    game.activePowerUps.set('barrier', 999)
+    game.wave = 9
+    game.nextWave()
+    game.debugPlace(0, 0, 12, 0, 0)
+  })
+  await page.waitForFunction(() => (window as any).__neonArena.game.enemies.length >= 18)
+  const frames = await page.evaluate(async () => new Promise<number[]>((resolve) => {
+    const deltas: number[] = []
+    let previous = 0
+    const start = performance.now()
+    const frame = (now: number) => {
+      if (previous > 0) deltas.push(now - previous)
+      previous = now
+      if (now - start >= 4000) resolve(deltas)
+      else requestAnimationFrame(frame)
+    }
+    requestAnimationFrame(frame)
+  }))
+  expect(frames.length).toBeGreaterThan(30)
+  const longFrames = frames.filter((duration) => duration > 50).length
+  expect(longFrames / frames.length).toBeLessThanOrEqual(0.05)
+  expect(errors).toEqual([])
+})
