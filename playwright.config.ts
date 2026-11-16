@@ -4,10 +4,12 @@ export default defineConfig({
   testDir: './e2e',
   fullyParallel: false,
   workers: 1,
+  timeout: process.env.CI ? 90000 : 30000,
+  expect: { timeout: process.env.CI ? 15000 : 5000 },
   use: {
     baseURL: 'http://127.0.0.1:5174',
     headless: true,
-    viewport: { width: 1440, height: 900 },
+    viewport: process.env.CI ? { width: 640, height: 400 } : { width: 1440, height: 900 },
   },
   webServer: {
     command: 'npm run dev -- --host 127.0.0.1',
