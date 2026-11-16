@@ -17,7 +17,7 @@ npm test
 npm run test:e2e
 ```
 
-Per i test end-to-end è necessario un browser supportato da Playwright. Il server Vite viene avviato automaticamente dalla configurazione dei test.
+Per i test end-to-end è necessario un browser supportato da Playwright. Il server Vite viene avviato automaticamente dalla configurazione dei test. Per esecuzioni parallele si possono impostare `PLAYWRIGHT_PORT` e `PLAYWRIGHT_OUTPUT_DIR`; i test disattivano deliberatamente Supabase per verificare il fallback locale in modo deterministico.
 
 ## Controlli
 
