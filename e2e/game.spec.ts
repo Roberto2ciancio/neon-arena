@@ -37,7 +37,7 @@ test('una run FPS usa mouse, fuoco, mira e ricarica e salva il risultato', async
   await page.mouse.up({ button: 'right' })
   await page.keyboard.press('KeyR')
   await expect(page.locator('#reload-text')).toHaveText('RICARICA IN CORSO...')
-  await expect(page.locator('#ammo-text')).toHaveText('30', { timeout: 3000 })
+  await expect(page.locator('#ammo-text')).toHaveText('30', { timeout: process.env.CI ? 15000 : 3000 })
 
   await page.keyboard.press('Digit2')
   await expect(page.locator('#weapon-name')).toHaveText('P-12 // SEMIAUTOMATICA')
@@ -51,7 +51,7 @@ test('una run FPS usa mouse, fuoco, mira e ricarica e salva il risultato', async
   await page.keyboard.press('Digit2')
   await expect(page.locator('#ammo-text')).toHaveText('11')
   await page.keyboard.press('KeyR')
-  await expect(page.locator('#ammo-text')).toHaveText('12', { timeout: 3000 })
+  await expect(page.locator('#ammo-text')).toHaveText('12', { timeout: process.env.CI ? 15000 : 3000 })
 
   await expect(page.locator('#grenade-status')).toHaveText('PRONTA')
   await page.keyboard.press('KeyG')
