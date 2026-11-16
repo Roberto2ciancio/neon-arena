@@ -38,7 +38,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--cyan); outline-
 #sound-button { margin-left: 16px; }
 
 .overlay { position: absolute; z-index: 5; inset: 0; }
-.menu-screen { display: grid; grid-template-columns: minmax(0, 1fr) 430px; gap: clamp(40px, 8vw, 150px); align-items: center; padding: 106px clamp(40px, 8vw, 140px) 46px; background: linear-gradient(90deg, rgba(6, 7, 15, 0.94) 0%, rgba(6, 7, 15, 0.68) 42%, rgba(6, 7, 15, 0.3) 100%); }
+.menu-screen { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: clamp(28px, 5vw, 90px); align-items: center; overflow-y: auto; padding: 92px clamp(28px, 6vw, 110px) 36px; background: linear-gradient(90deg, rgba(6, 7, 15, 0.94) 0%, rgba(6, 7, 15, 0.68) 42%, rgba(6, 7, 15, 0.3) 100%); }
 .menu-copy { max-width: 620px; }
 .eyebrow { margin: 0 0 16px; color: var(--cyan); font-family: 'Chakra Petch', sans-serif; font-size: 10px; font-weight: 600; letter-spacing: 0.22em; }
 h1, h2, p { margin-top: 0; }
@@ -341,3 +341,72 @@ kbd { display: inline-block; color: #aab4cb; font-family: 'Chakra Petch', sans-s
   .armory-panel { padding: 14px; }
   #armory-preview { height: 180px; }
 }
+
+/* Menu principale: profilo, passi guidati e sezioni secondarie in un pannello laterale. */
+.menu-main { max-width: 640px; }
+.menu-main h1 { margin: 4px 0 16px; font-size: clamp(44px, 5vw, 80px); }
+.profile-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; margin-bottom: 18px; padding: 10px 12px; border: 1px solid var(--line); background: rgba(8, 10, 21, 0.72); }
+.profile-chip { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
+.profile-avatar { display: grid; place-items: center; width: 36px; height: 36px; color: #071310; background: var(--cyan); font-family: 'Chakra Petch', sans-serif; font-weight: 700; clip-path: polygon(0 0, 100% 0, 100% 70%, 70% 100%, 0 100%); }
+.profile-chip strong { display: block; font-family: 'Chakra Petch', sans-serif; font-size: 14px; letter-spacing: 0.08em; }
+.profile-chip small { display: block; color: #8a93ad; font-size: 10px; }
+.profile-chip.signed small { color: var(--cyan); }
+.profile-level { display: grid; grid-template-columns: auto auto; align-items: baseline; gap: 2px 8px; min-width: 120px; }
+.profile-level strong { color: var(--violet); font-family: 'Chakra Petch', sans-serif; font-size: 20px; font-weight: 500; }
+.profile-level .player-xp, .profile-level small { grid-column: 1 / -1; }
+.profile-level small { color: #8a93ad; font-size: 9px; }
+.account-button { min-height: 38px; padding: 0 14px; font-size: 10px; }
+.welcome-card { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; padding: 10px 14px; border: 1px solid rgba(154, 123, 255, 0.45); background: rgba(154, 123, 255, 0.08); }
+.welcome-card strong { font-family: 'Chakra Petch', sans-serif; font-size: 12px; letter-spacing: 0.1em; }
+.welcome-card p { max-width: 380px; margin: 6px 0 0; color: #a5adc4; font-size: 12px; line-height: 1.5; }
+.welcome-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.welcome-actions .primary-button, .welcome-actions .secondary-button { min-width: 0; min-height: 40px; gap: 16px; margin: 0; font-size: 10px; }
+.step-label { display: block; margin: 0 0 8px; color: #7c84a0; }
+.mode-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; max-width: 560px; margin-bottom: 16px; }
+.mode-cards .mode-card { display: grid; gap: 4px; padding: 11px 14px; color: #aab1c8; text-align: left; border: 1px solid var(--line); background: rgba(8, 10, 21, 0.78); cursor: pointer; }
+.mode-cards .mode-card strong { font-family: 'Chakra Petch', sans-serif; font-size: 14px; letter-spacing: 0.08em; }
+.mode-cards .mode-card span { color: #8790a8; font-size: 11px; line-height: 1.45; }
+.mode-cards .mode-card.selected { color: var(--cyan); border-color: var(--cyan); background: var(--cyan-soft); box-shadow: inset 3px 0 0 var(--cyan); }
+.menu-main .map-selector { max-width: 560px; }
+.menu-main .menu-records { margin-top: 16px; }
+.menu-main .map-selector { margin-bottom: 14px; }
+.menu-side { display: grid; gap: 8px; align-self: center; }
+.side-link { position: relative; display: grid; gap: 4px; padding: 14px 16px; color: #d6dbee; text-align: left; border: 1px solid var(--line); background: rgba(10, 12, 25, 0.82); cursor: pointer; transition: border-color 150ms, transform 150ms; }
+.side-link strong { font-family: 'Chakra Petch', sans-serif; font-size: 13px; letter-spacing: 0.1em; }
+.side-link span { color: #8790a8; font-size: 11px; }
+.side-link b { position: absolute; top: 14px; right: 14px; color: var(--cyan); font-family: 'Chakra Petch', sans-serif; font-size: 12px; font-weight: 500; }
+.side-link:hover { border-color: rgba(88, 245, 229, 0.55); transform: translateX(-3px); }
+.menu-drawer { position: fixed; inset: 0; z-index: 25; display: flex; justify-content: flex-end; background: rgba(4, 6, 12, 0.6); }
+.drawer-panel { width: min(460px, 100%); height: 100%; overflow-y: auto; padding: 24px; border-left: 1px solid var(--line); background: rgba(9, 11, 22, 0.98); animation: drawer-in 180ms ease-out; }
+.drawer-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+.drawer-header h2 { margin: 0; font-family: 'Chakra Petch', sans-serif; font-size: 26px; letter-spacing: 0.06em; }
+.drawer-header .secondary-button { min-height: 38px; }
+.drawer-section { display: none; }
+.drawer-section.active { display: block; }
+.drawer-section h3 { margin: 0; font-family: 'Chakra Petch', sans-serif; font-size: 14px; letter-spacing: 0.08em; }
+.drawer-section .settings-card:first-child, .drawer-section .controls-card { margin-top: 0; padding-top: 0; border-top: 0; }
+@keyframes drawer-in { from { transform: translateX(24px); opacity: 0; } }
+.account-card { width: min(100%, 420px); text-align: left; }
+.account-card h2 { margin-bottom: 14px; }
+.account-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 14px; }
+.account-tabs button { padding: 10px; color: #8a93ad; border: 1px solid var(--line); background: transparent; font-family: 'Chakra Petch', sans-serif; font-size: 11px; letter-spacing: 0.1em; cursor: pointer; }
+.account-tabs button.selected { color: var(--cyan); border-color: var(--cyan); background: var(--cyan-soft); }
+.account-form { display: grid; gap: 6px; }
+.account-form input { padding: 11px 12px; color: #eef1fb; border: 1px solid var(--line); background: #0c1020; font-size: 14px; }
+.account-form input:focus { border-color: var(--cyan); outline: none; }
+.account-form .primary-button { width: 100%; margin-top: 10px; justify-content: space-between; }
+.account-signed p { color: #a5adc4; font-size: 13px; line-height: 1.6; }
+.account-signed .secondary-button, .account-card > .secondary-button { width: 100%; margin-top: 10px; }
+.account-status { min-height: 18px; margin: 10px 0 0; color: #a5adc4; font-size: 12px; line-height: 1.5; }
+.account-status.error { color: #ff6f9a; }
+.account-status.success { color: var(--cyan); }
+@media (max-width: 1000px) {
+  .menu-screen { grid-template-columns: 1fr; }
+  .menu-side { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 720px) {
+  .mode-cards { grid-template-columns: 1fr; }
+  .menu-side { grid-template-columns: 1fr; }
+  .profile-level { min-width: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .drawer-panel { animation: none; } .side-link { transition: none; } }

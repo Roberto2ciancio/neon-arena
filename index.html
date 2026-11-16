@@ -90,20 +90,56 @@
       </div>
 
       <section id="menu-screen" class="overlay menu-screen">
-        <div class="menu-copy">
-          <p class="eyebrow">PROTOCOLLO DI COMBATTIMENTO // 01</p>
-          <div class="mode-selector" aria-label="Seleziona modalità">
-            <button type="button" class="selected" data-mode="zombies" aria-pressed="true">ZOMBIE // ONDATE</button>
-            <button type="button" data-mode="tct" aria-pressed="false">TCT // ONLINE 4V4</button>
+        <div class="menu-main">
+          <div class="profile-bar">
+            <div class="profile-chip">
+              <span id="profile-avatar" class="profile-avatar" aria-hidden="true">P</span>
+              <div>
+                <strong id="profile-name">PLAYER</strong>
+                <small id="profile-kind">OSPITE // PROGRESSI SU QUESTO DISPOSITIVO</small>
+              </div>
+            </div>
+            <div class="profile-level">
+              <span class="hud-label">LIVELLO</span><strong id="player-level">1</strong>
+              <div class="player-xp"><i id="player-xp-fill"></i></div>
+              <small id="player-xp-text">0 / 400 XP</small>
+            </div>
+            <button id="account-button" class="secondary-button account-button" type="button">ACCEDI / REGISTRATI</button>
           </div>
+
+          <div id="welcome-card" class="welcome-card hidden" role="region" aria-labelledby="welcome-title">
+            <div>
+              <strong id="welcome-title">BENVENUTO IN NEON ARENA</strong>
+              <p>Gioca subito come ospite: i progressi restano su questo dispositivo. Con un account li salvi e li ritrovi su qualsiasi browser.</p>
+            </div>
+            <div class="welcome-actions">
+              <button id="welcome-guest" class="secondary-button" type="button">GIOCA COME OSPITE</button>
+              <button id="welcome-account" class="primary-button" type="button"><span>CREA UN ACCOUNT</span><span aria-hidden="true">+</span></button>
+            </div>
+          </div>
+
           <h1>NEON<br /><span>ARENA</span></h1>
-          <p class="tagline">Sopravvivi. Evolviti. Ricomincia più forte.</p>
-          <p class="intro">Scegli l’arena e sopravvivi a 15 ondate di zombie. Colpisci i punti deboli, costruisci la tua configurazione e sconfiggi il Bruto.</p>
-          <div class="map-selector" aria-label="Seleziona mappa">
-            <button type="button" class="map-option selected" data-map="station-13" aria-pressed="true"><strong>STAZIONE 13</strong><span>Stazione industriale // zona centrale</span></button>
-            <button type="button" class="map-option" data-map="depot-06" aria-pressed="false"><strong>DEPOSITO 06</strong><span>Container e corridoi // tre corsie</span></button>
-            <button type="button" class="map-option" data-map="district-zero" aria-pressed="false"><strong>DISTRETTO ZERO</strong><span>Edifici e vicoli // piazza urbana</span></button>
+
+          <span class="hud-label step-label">1 // SCEGLI LA MODALITÀ</span>
+          <div class="mode-selector mode-cards" aria-label="Seleziona modalità">
+            <button type="button" class="mode-card selected" data-mode="zombies" aria-pressed="true">
+              <strong>ZOMBIE // ONDATE</strong>
+              <span>Da solo contro 15 ondate e il Bruto. Raccogli frammenti, potenziati, sopravvivi.</span>
+            </button>
+            <button type="button" class="mode-card" data-mode="tct" aria-pressed="false">
+              <strong>TCT // ONLINE 4V4</strong>
+              <span>Squadra contro squadra con altri giocatori: crea una stanza o entra con un codice.</span>
+            </button>
           </div>
+
+          <span class="hud-label step-label">2 // SCEGLI L'ARENA</span>
+          <div class="map-selector" aria-label="Seleziona mappa">
+            <button type="button" class="map-option selected" data-map="station-13" aria-pressed="true"><strong>STAZIONE 13</strong><span>Binari, biglietteria e torre di controllo</span></button>
+            <button type="button" class="map-option" data-map="depot-06" aria-pressed="false"><strong>DEPOSITO 06</strong><span>Container, magazzino e gru</span></button>
+            <button type="button" class="map-option" data-map="district-zero" aria-pressed="false"><strong>DISTRETTO ZERO</strong><span>Palazzi e parcheggio multipiano</span></button>
+          </div>
+
+          <span id="play-step" class="hud-label step-label">3 // GIOCA</span>
           <section id="tct-lobby" class="tct-lobby hidden" aria-labelledby="lobby-title">
             <span id="lobby-title" class="hud-label">STANZA ONLINE // GIOCATORI REALI</span>
             <div id="lobby-connect" class="lobby-connect">
@@ -137,44 +173,59 @@
             <div><span>MIGLIOR ONDATA</span><strong id="best-wave">0</strong></div>
             <div><span>RUN TOTALI</span><strong id="total-runs">0</strong></div>
           </div>
-          <div class="local-leaderboard">
-            <span id="leaderboard-title" class="hud-label">CLASSIFICA LOCALE // TOP 5</span>
-            <div id="leaderboard-rows"></div>
-          </div>
         </div>
 
-        <aside class="workshop-panel">
-          <div class="player-level-card">
-            <div><span class="hud-label">LIVELLO GIOCATORE</span><strong id="player-level">1</strong></div>
-            <div class="player-xp"><i id="player-xp-fill"></i></div>
-            <small id="player-xp-text">0 / 400 XP</small>
-          </div>
-          <div class="panel-heading">
-            <div><p class="eyebrow">PROGRESSIONE PERMANENTE</p><h2>OFFICINA</h2></div>
+        <nav class="menu-side" aria-label="Altre sezioni">
+          <button type="button" class="side-link" data-drawer="workshop"><strong>OFFICINA</strong><span>Potenziamenti permanenti con i frammenti</span><b><span class="core-icon">◆</span> <span id="core-balance-side">0</span></b></button>
+          <button type="button" class="side-link" data-drawer="leaderboard"><strong>CLASSIFICA</strong><span>Le migliori run</span></button>
+          <button type="button" class="side-link" data-drawer="settings"><strong>IMPOSTAZIONI</strong><span>Grafica, mouse, accessibilità, callsign</span></button>
+          <button type="button" class="side-link" data-drawer="controls"><strong>COMANDI</strong><span>Tasti di gioco</span></button>
+        </nav>
+      </section>
+
+      <section id="menu-drawer" class="menu-drawer hidden" aria-labelledby="drawer-title">
+        <div class="drawer-panel">
+          <header class="drawer-header">
+            <h2 id="drawer-title">OFFICINA</h2>
+            <button id="drawer-close" class="secondary-button" type="button">CHIUDI</button>
+          </header>
+          <div class="drawer-section" data-drawer-panel="workshop">
+            <div class="panel-heading">
+            <div><p class="eyebrow">PROGRESSIONE PERMANENTE</p><h3>PROGRESSIONE PERMANENTE</h3></div>
             <div class="core-balance"><span class="core-icon">◆</span><strong id="core-balance">0</strong></div>
           </div>
           <p class="panel-description">Investi i frammenti recuperati nelle run. I potenziamenti restano attivi per sempre.</p>
           <div id="meta-upgrades" class="meta-upgrades"></div>
-          <div class="settings-card">
-            <label for="callsign" class="hud-label">CALLSIGN</label>
-            <input id="callsign" maxlength="12" value="PLAYER" autocomplete="off" />
-            <span id="cloud-status" class="cloud-status">LOCALE // OFFLINE</span>
           </div>
-          <div class="settings-card">
-            <label for="graphics-quality" class="hud-label">QUALITÀ GRAFICA</label>
-            <select id="graphics-quality">
-              <option value="low">BASSA</option>
-              <option value="medium">MEDIA</option>
-              <option value="high">ALTA // AO + BLOOM</option>
-            </select>
+          <div class="drawer-section" data-drawer-panel="leaderboard">
+            <div class="local-leaderboard">
+              <span id="leaderboard-title" class="hud-label">CLASSIFICA LOCALE // TOP 5</span>
+              <div id="leaderboard-rows"></div>
+            </div>
           </div>
-          <div class="accessibility-card">
-            <label><input id="reduced-motion" type="checkbox" /> RIDUCI MOVIMENTO</label>
-            <label><input id="high-contrast" type="checkbox" /> CONTRASTO ELEVATO</label>
-            <label for="mouse-sensitivity">SENSIBILITÀ MOUSE <output id="sensitivity-value">1,0×</output></label>
-            <input id="mouse-sensitivity" type="range" min="0.5" max="2" step="0.1" value="1" />
+          <div class="drawer-section" data-drawer-panel="settings">
+            <div class="settings-card">
+              <label for="callsign" class="hud-label">CALLSIGN</label>
+              <input id="callsign" maxlength="12" value="PLAYER" autocomplete="off" />
+              <span id="cloud-status" class="cloud-status">LOCALE // OFFLINE</span>
+            </div>
+            <div class="settings-card">
+              <label for="graphics-quality" class="hud-label">QUALITÀ GRAFICA</label>
+              <select id="graphics-quality">
+                <option value="low">BASSA</option>
+                <option value="medium">MEDIA</option>
+                <option value="high">ALTA // AO + BLOOM</option>
+              </select>
+            </div>
+            <div class="accessibility-card">
+              <label><input id="reduced-motion" type="checkbox" /> RIDUCI MOVIMENTO</label>
+              <label><input id="high-contrast" type="checkbox" /> CONTRASTO ELEVATO</label>
+              <label for="mouse-sensitivity">SENSIBILITÀ MOUSE <output id="sensitivity-value">1,0×</output></label>
+              <input id="mouse-sensitivity" type="range" min="0.5" max="2" step="0.1" value="1" />
+            </div>
           </div>
-          <div class="controls-card">
+          <div class="drawer-section" data-drawer-panel="controls">
+            <div class="controls-card">
             <span class="hud-label">COMANDI</span>
             <div><kbd>W A S D / MOUSE</kbd><span>Movimento e visuale</span></div>
             <div><kbd>CLICK SX / DX</kbd><span>Fuoco / mira</span></div>
@@ -186,7 +237,32 @@
             <div><kbd>E</kbd><span>Porte e postazioni</span></div>
             <div><kbd>ESC</kbd><span>Pausa</span></div>
           </div>
-        </aside>
+          </div>
+        </div>
+      </section>
+
+      <section id="account-screen" class="overlay modal-overlay hidden" aria-labelledby="account-title">
+        <div class="modal-card account-card">
+          <p class="eyebrow">PROFILO GIOCATORE</p>
+          <h2 id="account-title">ACCOUNT</h2>
+          <form id="account-form" class="account-form" novalidate>
+            <div class="account-tabs" role="tablist">
+              <button type="button" role="tab" class="selected" data-account-tab="login" aria-selected="true">ACCEDI</button>
+              <button type="button" role="tab" data-account-tab="signup" aria-selected="false">REGISTRATI</button>
+            </div>
+            <label for="account-email" class="hud-label">EMAIL</label>
+            <input id="account-email" type="email" autocomplete="email" required />
+            <label for="account-password" class="hud-label">PASSWORD</label>
+            <input id="account-password" type="password" autocomplete="current-password" minlength="6" required />
+            <button id="account-submit" class="primary-button" type="submit"><span>ACCEDI</span><span aria-hidden="true">↗</span></button>
+          </form>
+          <div id="account-signed" class="account-signed hidden">
+            <p>Connesso come <strong id="account-email-display"></strong>. Livello, armeria, officina e record vengono salvati sull'account.</p>
+            <button id="account-logout" class="secondary-button" type="button">ESCI DALL'ACCOUNT</button>
+          </div>
+          <p id="account-status" class="account-status" aria-live="polite"></p>
+          <button id="account-close" class="secondary-button" type="button">CONTINUA</button>
+        </div>
       </section>
 
       <section id="pause-screen" class="overlay modal-overlay hidden" aria-labelledby="pause-title">
