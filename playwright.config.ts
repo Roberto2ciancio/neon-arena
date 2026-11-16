@@ -9,7 +9,7 @@ export default defineConfig({
   use: {
     baseURL: 'http://127.0.0.1:5174',
     headless: true,
-    viewport: process.env.CI ? { width: 640, height: 400 } : { width: 1440, height: 900 },
+    viewport: process.env.CI ? { width: 480, height: 360 } : { width: 1440, height: 900 },
   },
   webServer: {
     command: 'npm run dev -- --host 127.0.0.1',
