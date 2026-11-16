@@ -37,7 +37,7 @@ import type { EnemyModel } from './models'
 import { applyUpgrade, createBaseStats, FIRST_LEVEL_XP, getNextLevelXp, getUpgradeChoices, UPGRADE_KEYS } from './upgrades'
 import { WEAPONS } from './weapons'
 import { BURN_DURATION, CHAIN_LIGHTNING_RADIUS, getBurnDamagePerSecond, getChainLightningDamage, getChainTargetCount, getHeadshotExplosionDamage, HEADSHOT_EXPLOSION_RADIUS } from './specialEffects'
-import { BLOATER_BLAST, ENEMY_FIRST_WAVE, FINAL_WAVE, getEliteChance, getMaxActiveZombies, getMeleeDamage, getPrewarmCount, getSpawnPool, PATH_BUDGET_PER_FRAME, getWaveSpawnCount, getZombieColor, getZombieStats, SHIELD_FRONT_REDUCTION, WAVE_BREAK_SECONDS } from './zombies'
+import { BLOATER_BLAST, ENEMY_FIRST_WAVE, ENEMY_INTEL, FINAL_WAVE, getEliteChance, getMaxActiveZombies, getMeleeDamage, getPrewarmCount, getSpawnPool, PATH_BUDGET_PER_FRAME, getWaveSpawnCount, getZombieColor, getZombieStats, SHIELD_FRONT_REDUCTION, WAVE_BREAK_SECONDS } from './zombies'
 import { INSTA_KILL_BOSS_MULTIPLIER, POWER_UP_LIFETIME, POWER_UPS, rollPowerUp, SHOCKWAVE_RADIUS } from './powerups'
 import type { PowerUpId } from './powerups'
 import type { EnemyKind, GameEvents, GameState, HitZone, MetaBonuses, RunResult } from './types'
@@ -191,6 +191,8 @@ export class Game {
   private readonly enemies: Enemy[] = []
   private readonly enemyPool = new Map<EnemyKind, EnemyModel[]>()
   private pathBudget = 0
+  /** Tipi di zombie già presentati in questa run. */
+  private readonly introducedKinds = new Set<EnemyKind>()
   private readonly dyingEnemies: DyingEnemy[] = []
   private readonly projectiles: Projectile[] = []
   private readonly pickups: Pickup[] = []
@@ -229,6 +231,11 @@ export class Game {
   private waveActive = false
   private waveBreak = 0
   private cameraShake = 0
+  /** Spinta della visuale dovuta allo sparo (0–1) e verso casuale dell'inclinazione. */
+  private firePunch = 0
+  private punchRoll = 1
+  private precisionHitThisShot = false
+  private groanTimer = 2
   private reducedMotion = false
   private mouseSensitivity = 0.002
   private hudTimer = 0
@@ -452,6 +459,8 @@ export class Game {
     this.clearEntities()
     this.setMap(map)
     this.prewarmEnemies()
+    this.introducedKinds.clear()
+    this.introducedKinds.add('walker')
     this.stats = createBaseStats(bonuses)
     this.health = this.stats.maxHealth
     this.score = 0
@@ -712,6 +721,11 @@ export class Game {
   private spawnEnemy(kind: EnemyKind): void {
     const elite = kind !== 'brute' && Math.random() < getEliteChance(this.wave)
     const stats = getZombieStats(kind, this.wave, elite)
+    if (!this.introducedKinds.has(kind)) {
+      this.introducedKinds.add(kind)
+      const color = getZombieColor(kind)
+      this.events.onNotice?.(`NUOVO NEMICO // ${getZombieStats(kind, 1).name.toUpperCase()}`, ENEMY_INTEL[kind], kind === 'brute' ? 0xff6b6b : color)
+    }
     const pooled = this.enemyPool.get(kind)?.pop()
     const model = pooled ?? createEnemyModel(kind, getZombieColor(kind))
     model.group.visible = true
@@ -793,12 +807,14 @@ export class Game {
 
     const frameInput = { aiming: this.aiming, crouched: this.controller.crouched, blocked: this.controller.sprinting, fireRateMultiplier: (this.stats.fireRate / 8.5) * (this.activePowerUps.has('rapid-fire') ? 1.6 : 1) }
     const frame = this.weapons.update(delta, frameInput)
+    for (const sound of frame.sounds) this.audio.play(sound)
     this.pitch = THREE.MathUtils.clamp(this.pitch - frame.recovery.pitch, -1.45, 1.45)
     this.yaw -= frame.recovery.yaw
     for (let shot = 0; shot < frame.shots; shot += 1) {
       const kick = this.weapons.kick(frameInput)
       this.pitch = THREE.MathUtils.clamp(this.pitch + kick.pitch, -1.45, 1.45)
       this.yaw += kick.yaw
+      this.firePunch = Math.min(1, this.firePunch + this.weaponPunch())
       this.firePlayerWeapon()
     }
     this.updateFirstPersonCamera(delta)
@@ -811,13 +827,16 @@ export class Game {
       this.camera.position.x += (Math.random() - 0.5) * this.cameraShake * 0.25
       this.camera.position.y += (Math.random() - 0.5) * this.cameraShake * 0.2
     }
-    this.camera.rotation.set(this.pitch, this.yaw, this.reducedMotion ? 0 : this.controller.roll)
+    // Spinta dello sparo: la visuale sobbalza appena e il campo visivo si allarga per un istante.
+    this.firePunch = Math.max(0, this.firePunch - delta * 9)
+    const punch = this.reducedMotion ? 0 : this.firePunch
+    this.camera.rotation.set(this.pitch + punch * 0.012, this.yaw, (this.reducedMotion ? 0 : this.controller.roll) + punch * this.punchRoll * 0.01)
 
     const weapon = this.weapons.current
     const aiming = this.aiming && weapon !== null
     const adsFov = weapon?.adsFov ?? 52
     const targetFov = aiming ? adsFov : this.controller.sliding ? 84 : this.controller.sprinting ? 80 : 75
-    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, 1 - Math.exp(-delta * 12))
+    this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, 1 - Math.exp(-delta * 12)) + punch * (aiming ? 0.4 : 1.4)
     this.camera.updateProjectionMatrix()
     this.weapons.setScoped(aiming && adsFov <= 30 && this.camera.fov < adsFov + 8)
     this.weapons.applyPose(delta, {
@@ -837,7 +856,7 @@ export class Game {
     if (this.state !== 'playing') return
     if (this.weapons.switchTo(slot)) {
       this.aiming = false
-      this.audio.play('pickup')
+      this.audio.play('switch')
       this.emitHud()
     }
   }
@@ -852,7 +871,7 @@ export class Game {
     if (this.state !== 'playing') return
     const melee = this.weapons.startMelee(quick)
     if (!melee) return
-    this.audio.play('dash')
+    this.audio.play('melee')
     const forward = this.camera.getWorldDirection(new THREE.Vector3()).setY(0).normalize()
     const minimumDot = Math.cos(melee.arc / 2)
     let hit = false
@@ -875,14 +894,17 @@ export class Game {
     }
     if (hit) {
       this.events.onHit(false)
-      this.audio.play('hit')
+      this.audio.play('meleeHit')
       this.cameraShake = Math.max(this.cameraShake, 0.12)
     }
     this.killDestroyedEnemies()
   }
 
   private firePlayerWeapon(): void {
-    this.audio.play('shoot')
+    const profile = this.weapons.soundProfile()
+    if (profile) this.audio.gunshot(profile)
+    if (this.weaponDefinition.pellets === 1 || Math.random() < 0.5) this.audio.play('shell')
+    this.precisionHitThisShot = false
 
     const origin = this.camera.getWorldPosition(new THREE.Vector3())
     const baseDirection = this.camera.getWorldDirection(new THREE.Vector3())
@@ -973,7 +995,7 @@ export class Game {
         this.decals.spawn(wallPoint, origin)
       }
     }
-    if (hitAny) this.audio.play('hit')
+    if (hitAny) this.audio.play(this.precisionHitThisShot ? 'headshot' : 'hit')
     this.killDestroyedEnemies()
   }
 
@@ -1031,6 +1053,7 @@ export class Game {
     const precisionHit = hit.zone === 'head' || hit.zone === 'generator' || hit.zone === 'core'
       || hit.zone === 'spine' || hit.zone === 'throat'
     if (precisionHit) this.score += hit.zone === 'head' ? 25 : 50
+    if (precisionHit) this.precisionHitThisShot = true
     this.events.onHit(precisionHit)
     this.spawnBurst(hit.point, precisionHit ? 0xffd166 : 0x9b3147, precisionHit ? 7 : 4)
   }
@@ -1529,6 +1552,24 @@ export class Game {
     }
   }
 
+  /** Spinta della visuale per colpo, proporzionale alla potenza dell'arma impugnata. */
+  private weaponPunch(): number {
+    this.punchRoll = Math.random() < 0.5 ? -1 : 1
+    const weapon = this.weaponDefinition
+    return Math.min(1, 0.25 + weapon.recoil.vertical * 30 + (weapon.pellets > 1 ? 0.35 : 0))
+  }
+
+  /** Versi degli zombie: ogni tanto uno vicino ringhia, così si sentono arrivare anche alle spalle. */
+  private updateGroans(delta: number): void {
+    this.groanTimer -= delta
+    if (this.groanTimer > 0 || this.enemies.length === 0) return
+    this.groanTimer = 1.4 + Math.random() * 2.2 - Math.min(0.8, this.enemies.length * 0.03)
+    const candidates = this.enemies.filter((enemy) => enemy.health > 0 && enemy.spawnTimer <= 0 && enemy.body.position.distanceTo(this.player) < 22)
+    const enemy = candidates[Math.floor(Math.random() * candidates.length)]
+    if (!enemy) return
+    this.audio.playAt(enemy.kind === 'brute' || enemy.kind === 'bloater' ? 'groanBig' : 'groan', enemy.body.position, this.player, this.yaw)
+  }
+
   /** Vero se lo scudo dello Scudiero è rivolto verso il punto indicato. */
   private isShieldFacing(enemy: Enemy, point: THREE.Vector3): boolean {
     const forward = new THREE.Vector3(-Math.sin(enemy.model.group.rotation.y), 0, -Math.cos(enemy.model.group.rotation.y))
@@ -1541,7 +1582,7 @@ export class Game {
     const center = position.clone().setY(position.y + 1)
     this.effects.explosion(center, BLOATER_BLAST.radius, getZombieColor('bloater'), position.y)
     this.spawnHazard(position)
-    this.audio.playAt('damage', position, this.player, this.yaw)
+    this.audio.playAt('explosion', position, this.player, this.yaw)
     const playerDistance = this.player.distanceTo(position)
     if (playerDistance < BLOATER_BLAST.radius && Math.abs(this.player.y - position.y) < 1.6) {
       this.damagePlayer(BLOATER_BLAST.playerDamage * Math.max(0.3, 1 - playerDistance / BLOATER_BLAST.radius))
@@ -1578,6 +1619,7 @@ export class Game {
     this.dyingEnemies.push({ model: enemy.model, kind: enemy.kind, life: 0.65, direction: Math.random() < 0.5 ? -1 : 1, baseY: position.y })
     this.gainXp(enemy.xp)
     this.audio.playAt('kill', position, this.player, this.yaw)
+    this.events.onKill?.()
   }
 
   private get lootMultiplier(): number {
@@ -1647,6 +1689,7 @@ export class Game {
     this.audio.play('upgrade')
     this.effects.pulse(this.player, definition.color, 3)
     this.events.onPowerUp?.(definition.name, definition.description, definition.color)
+    this.audio.play('powerUp')
     if (id === 'full-ammo') {
       this.weapons.refill()
       this.cooldowns.lethal = 0
@@ -1932,6 +1975,7 @@ export class Game {
     if (this.state !== 'playing') return
     this.updatePickups(delta)
     this.updatePowerUps(delta)
+    this.updateGroans(delta)
     this.updateEffects(delta)
     this.hudTimer -= delta
     if (this.hudTimer <= 0) {

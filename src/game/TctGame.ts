@@ -1,3 +1,5 @@
+import { getGunSoundProfile } from './gunSounds'
+import { getSpatialSound } from './spatialAudio'
 import * as THREE from 'three'
 import { GameAudio } from './audio'
 import { RenderPipeline } from './RenderPipeline'
@@ -427,7 +429,8 @@ export class TctGame {
           if (shooter) shooter.revealed = SHOT_REVEAL
           this.spawnTracer(toVector(message.from), toVector(message.to), shooter?.team === this.team ? ALLY_COLOR : 0xff668e)
           this.effects.muzzle(toVector(message.from), shooter?.team === this.team ? 0x8effd9 : 0xff9ab6)
-          this.audio.playAt('enemyShoot', toVector(message.from), this.player, this.yaw)
+          // Sparo di un altro giocatore: stesso suono di un fucile, attenuato e filtrato dalla distanza.
+          this.audio.gunshot(getGunSoundProfile('assault', 'auto', false), getSpatialSound(toVector(message.from), this.player, this.yaw))
         }
         break
       case 'throw':
@@ -657,6 +660,7 @@ export class TctGame {
     this.localTarget.height = this.controller.height
     const frameInput = { aiming: this.aiming, crouched: this.controller.crouched, blocked: !controllable || this.controller.sprinting }
     const frame = this.weapons.update(delta, frameInput)
+    for (const sound of frame.sounds) this.audio.play(sound)
     this.pitch = THREE.MathUtils.clamp(this.pitch - frame.recovery.pitch, -1.45, 1.45)
     this.yaw -= frame.recovery.yaw
     for (let shot = 0; shot < frame.shots; shot += 1) {
@@ -700,7 +704,7 @@ export class TctGame {
     if (this.state !== 'playing' || !this.alive) return
     if (this.weapons.switchTo(slot)) {
       this.aiming = false
-      this.audio.play('pickup')
+      this.audio.play('switch')
       this.emitHud()
     }
   }
@@ -708,7 +712,9 @@ export class TctGame {
   private fireWeapon(): void {
     const definition = this.weapons.current
     if (!definition) return
-    this.audio.play('shoot')
+    const profile = this.weapons.soundProfile()
+    if (profile) this.audio.gunshot(profile)
+    this.audio.play('shell')
     const origin = this.camera.getWorldPosition(new THREE.Vector3())
     const forward = this.camera.getWorldDirection(new THREE.Vector3())
     const spread = (this.aiming ? definition.adsSpread : definition.hipSpread) * (this.controller.crouched ? 0.7 : 1)
@@ -768,7 +774,7 @@ export class TctGame {
     if (this.state !== 'playing' || !this.alive) return
     const melee = this.weapons.startMelee(quick)
     if (!melee) return
-    this.audio.play('dash')
+    this.audio.play('melee')
     const forward = this.camera.getWorldDirection(new THREE.Vector3()).setY(0).normalize()
     const minimumDot = Math.cos(melee.arc / 2)
     let hit = false

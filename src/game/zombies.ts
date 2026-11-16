@@ -135,3 +135,18 @@ export const PATH_BUDGET_PER_FRAME = 6
 export function getPrewarmCount(kind: EnemyKind): number {
   return kind === 'brute' ? 1 : 2
 }
+
+/** Avviso mostrato la prima volta che un tipo di zombie compare in una run: come affrontarlo. */
+export const ENEMY_INTEL: Record<EnemyKind, string> = {
+  walker: 'Lento ma numeroso: mira alla testa.',
+  runner: 'Velocissimo e fragile: non farti accerchiare.',
+  armored: 'Corazza frontale: distruggi il generatore luminoso.',
+  brute: 'Carica in linea retta: schivala e colpisci il nucleo esposto.',
+  crawler: 'Basso e scattante: mira alla spina dorsale.',
+  spitter: 'Sputa acido da lontano: colpisci la gola.',
+  screamer: 'Potenzia gli zombie vicini: abbattilo per primo, punta alla gola.',
+  leaper: 'Balza da lontano: spara alla spina dorsale luminosa prima che atterri.',
+  bloater: 'Esplode in acido: abbattilo a distanza, ferisce anche gli altri zombie.',
+  stalker: 'Quasi invisibile da lontano: ascolta i passi e tieniti le spalle coperte.',
+  shielder: 'Lo scudo blocca i colpi frontali: aggiralo e colpisci il generatore sulla schiena.',
+}

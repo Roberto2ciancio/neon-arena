@@ -1,6 +1,4 @@
 import { normalizeCallsign } from './identity'
-import type { PlayerIdentity } from './identity'
-import type { MetaProgress } from './progression'
 import type { LeaderboardEntry, RunResult } from './types'
 
 export interface OnlineLeaderboardEntry extends LeaderboardEntry {
@@ -23,52 +21,19 @@ export class SupabaseCloud {
     this.baseUrl = url.replace(/\/$/, '')
   }
 
-  async loadProfile(identity: PlayerIdentity): Promise<MetaProgress | null> {
-    const rows = await this.request<Record<string, unknown>[]>(`/rest/v1/profiles?id=eq.${encodeURIComponent(identity.id)}&select=*&limit=1`)
-    const row = rows[0]
-    if (!row) return null
-    const upgrades = typeof row.upgrades === 'object' && row.upgrades !== null ? row.upgrades as Record<string, unknown> : {}
-    return {
-      cores: safeNumber(row.cores),
-      bestScore: safeNumber(row.best_score),
-      bestWave: safeNumber(row.best_wave),
-      totalKills: safeNumber(row.total_kills),
-      runs: safeNumber(row.runs),
-      leaderboard: [],
-      upgrades: {
-        vitality: safeNumber(upgrades.vitality, 5),
-        power: safeNumber(upgrades.power, 5),
-        mobility: safeNumber(upgrades.mobility, 5),
-      },
-    }
-  }
-
-  async saveProfile(identity: PlayerIdentity, progress: MetaProgress): Promise<void> {
-    await this.request('/rest/v1/profiles', {
-      method: 'POST',
-      headers: { Prefer: 'resolution=merge-duplicates,return=minimal' },
-      body: JSON.stringify({
-        id: identity.id,
-        callsign: normalizeCallsign(identity.callsign),
-        cores: progress.cores,
-        best_score: progress.bestScore,
-        best_wave: progress.bestWave,
-        total_kills: progress.totalKills,
-        runs: progress.runs,
-        upgrades: progress.upgrades,
-      }),
-    })
-  }
-
-  async submitRun(identity: PlayerIdentity, result: RunResult): Promise<void> {
+  /**
+   * Invia una run alla classifica online a nome dell'account. Il database accetta solo run
+   * dell'utente autenticato e rifiuta quelle non plausibili (vedi supabase/schema.sql).
+   */
+  async submitRun(account: { accessToken: string; userId: string }, callsign: string, result: RunResult): Promise<void> {
     await this.request('/rest/v1/leaderboard', {
       method: 'POST',
-      headers: { Prefer: 'return=minimal' },
+      headers: { Prefer: 'return=minimal', Authorization: `Bearer ${account.accessToken}` },
       body: JSON.stringify({
-        player_id: identity.id,
-        callsign: normalizeCallsign(identity.callsign),
+        player_id: account.userId,
+        callsign: normalizeCallsign(callsign),
         score: safeNumber(result.score),
-        wave: safeNumber(result.wave),
+        wave: safeNumber(result.wave, 15),
         kills: safeNumber(result.kills),
         time_seconds: safeNumber(result.time),
         won: result.won === true,

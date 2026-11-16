@@ -1,3 +1,4 @@
+import type { SoundName } from './audio'
 import * as THREE from 'three'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
 import { raycastObstacles } from './collision'
@@ -46,7 +47,7 @@ export interface EquipmentContext {
   onDecoy(position: THREE.Vector3, seconds: number, hostile: boolean): void
   addSolid(solid: CollisionObstacle): void
   removeSolid(solid: CollisionObstacle): void
-  playAt(sound: 'damage' | 'shoot' | 'enemyShoot' | 'kill' | 'upgrade' | 'pickup', position: THREE.Vector3): void
+  playAt(sound: SoundName, position: THREE.Vector3): void
   shake(amount: number): void
 }
 
@@ -357,7 +358,7 @@ export class EquipmentSystem {
       case 'semtex': {
         const radius = item.kind === 'frag' ? EQUIPMENT_STATS.fragRadius : EQUIPMENT_STATS.semtexRadius
         effects.explosion(position, radius, item.kind === 'frag' ? 0xff9a4a : 0xff7a2a, ground)
-        this.context.playAt('damage', position)
+        this.context.playAt('explosion', position)
         this.context.shake(Math.max(0.12, 0.6 - local.feet.distanceTo(position) * 0.04))
         if (item.options.owned) this.damageArea(position, radius, item.kind === 'frag' ? 140 : 150, 'grenade', item.options.hostile, item.stuckTarget)
         break
@@ -369,13 +370,13 @@ export class EquipmentSystem {
         glow.position.set(position.x, ground + 0.05, position.z)
         this.context.scene.add(glow)
         this.fires.push({ position: new THREE.Vector3(position.x, ground, position.z), life: EQUIPMENT_STATS.molotovDuration, tick: 0, options: item.options, glow, flameTimer: 0 })
-        this.context.playAt('damage', position)
+        this.context.playAt('explosion', position)
         break
       }
       case 'flashbang': {
         effects.flash(position, 0xffffff, 140, 0.25, 22)
         effects.pulse(position.clone().setY(ground), 0xffffff, 3)
-        this.context.playAt('damage', position)
+        this.context.playAt('explosion', position)
         if (local.alive) {
           const toFlash = position.clone().sub(local.eye)
           const distance = toFlash.length()
@@ -395,7 +396,7 @@ export class EquipmentSystem {
         effects.flash(position, 0x5aa8ff, 50, 0.3, 14)
         effects.pulse(position.clone().setY(ground), 0x5aa8ff, EQUIPMENT_STATS.stunRadius)
         effects.sparks(position, new THREE.Vector3(0, 1, 0), 0x8fd0ff, 14)
-        this.context.playAt('damage', position)
+        this.context.playAt('explosion', position)
         if (item.options.hostile && local.alive && local.feet.distanceTo(position) < EQUIPMENT_STATS.stunRadius && this.lineOfSight(position, local.eye)) {
           this.context.onLocalStun(EQUIPMENT_STATS.stunDuration)
         }
@@ -545,7 +546,7 @@ export class EquipmentSystem {
     if (!deployable) return
     const center = deployable.position.clone().setY(deployable.position.y + 0.3)
     this.context.effects.explosion(center, EQUIPMENT_STATS.claymoreRadius, 0xff9a4a, deployable.position.y)
-    this.context.playAt('damage', center)
+    this.context.playAt('explosion', center)
     if (deployable.options.owned) this.damageArea(center.clone().addScaledVector(deployable.forward, 1), EQUIPMENT_STATS.claymoreRadius, EQUIPMENT_STATS.claymoreDamage, 'claymore', deployable.options.hostile)
     this.removeObject(deployable.group)
     this.deployables.splice(index, 1)

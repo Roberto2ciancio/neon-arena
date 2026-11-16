@@ -88,7 +88,7 @@
       <div id="power-banner" class="power-banner hidden" aria-live="assertive"><strong id="power-banner-title">BONUS</strong><span id="power-banner-text"></span></div>
       <div id="quality-notice" class="quality-notice hidden" role="status"></div>
       <div id="wave-banner" class="wave-banner hidden" aria-live="polite">
-        <span>MINACCE IN ARRIVO</span>
+        <span id="wave-banner-subtitle">MINACCE IN ARRIVO</span>
         <strong id="wave-banner-title">ONDATA 1</strong>
       </div>
 
@@ -204,6 +204,7 @@
             <div class="local-leaderboard">
               <span id="leaderboard-title" class="hud-label">CLASSIFICA LOCALE // TOP 5</span>
               <div id="leaderboard-rows"></div>
+              <p id="leaderboard-note" class="panel-description">La classifica online raccoglie solo le run giocate con un account; da ospite i risultati restano su questo dispositivo.</p>
             </div>
           </div>
           <div class="drawer-section" data-drawer-panel="settings">
@@ -225,6 +226,8 @@
               <label><input id="high-contrast" type="checkbox" /> CONTRASTO ELEVATO</label>
               <label for="mouse-sensitivity">SENSIBILITÀ MOUSE <output id="sensitivity-value">1,0×</output></label>
               <input id="mouse-sensitivity" type="range" min="0.5" max="2" step="0.1" value="1" />
+              <label for="master-volume">VOLUME <output id="volume-value">80%</output></label>
+              <input id="master-volume" type="range" min="0" max="1" step="0.05" value="0.8" />
             </div>
           </div>
           <div class="drawer-section" data-drawer-panel="controls">
@@ -237,6 +240,7 @@
             <div><kbd>F</kbd><span>Attacco rapido corpo a corpo</span></div>
             <div><kbd>G / Q / T</kbd><span>Letale / tattico / gadget</span></div>
             <div><kbd>C</kbd><span>Accovacciati, in scatto scivola</span></div>
+            <div><kbd>Z / X / V</kbd><span>Scegli un potenziamento al level up</span></div>
             <div><kbd>E</kbd><span>Porte e postazioni</span></div>
             <div><kbd>ESC</kbd><span>Pausa</span></div>
           </div>
@@ -272,6 +276,7 @@
         <div class="modal-card compact-card">
           <p class="eyebrow">SIMULAZIONE SOSPESA</p>
           <h2 id="pause-title">PAUSA</h2>
+          <p id="pause-summary" class="pause-summary"></p>
           <button id="resume-button" class="primary-button" type="button">RIPRENDI</button>
           <button id="pause-settings-button" class="secondary-button" type="button">IMPOSTAZIONI</button>
           <button id="abandon-button" class="secondary-button" type="button">TERMINA RUN</button>

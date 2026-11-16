@@ -1,4 +1,6 @@
+import * as THREE from 'three'
 import './style.css'
+import { GameAudio } from './game/audio'
 import { Game } from './game/Game'
 import { loadAccessibility, saveAccessibility } from './game/accessibility'
 import { SupabaseCloud } from './game/cloud'
@@ -94,6 +96,9 @@ const game = new Game(byId('scene'), {
   onHit: showHitmarker,
   onFlash: showFlash,
   onPowerUp: showPowerUp,
+  onKill: showKillMarker,
+  // I colori dei nemici sono spenti: schiariti per restare leggibili sul fondo scuro.
+  onNotice: (title, text, color) => showPowerUp(title, text, new THREE.Color(color).lerp(new THREE.Color(0xffffff), 0.45).getHex()),
 })
 
 const tctGame = new TctGame(byId('scene'), {
@@ -148,6 +153,7 @@ function updateState(state: GameState): void {
   byId('door-prompt').classList.toggle('hidden', state !== 'playing')
   if (state !== 'playing') hitmarker.classList.remove('active')
   pauseScreen.classList.toggle('hidden', state !== 'paused')
+  if (state === 'paused') renderPauseSummary()
   if (state !== 'playing' && state !== 'paused') upgradePanel.classList.add('hidden')
   gameoverScreen.classList.toggle('hidden', state !== 'gameover' && state !== 'victory')
 
@@ -197,7 +203,18 @@ function renderPowerUps(powerUps: HudData['powerUps']): void {
   }))
 }
 
+let lastHud: HudData | null = null
+
+function renderPauseSummary(): void {
+  const data = lastHud
+  byId('pause-summary').textContent = !data ? '' : data.tct
+    ? `${data.mapName.toUpperCase()} // ${data.tct.teamScore} : ${data.tct.enemyScore}`
+    : `${data.mapName.toUpperCase()} // ONDATA ${data.wave}/15
+${data.kills} ELIMINAZIONI // ${data.enemiesRemaining} NEMICI RIMASTI`
+}
+
 function updateHud(data: HudData): void {
+  lastHud = data
   const healthPercentage = Math.max(0, (data.health / data.maxHealth) * 100)
   setText(hudEl('health-text'), `${Math.ceil(data.health)} / ${data.maxHealth}`)
   if (data.performance) {
@@ -356,12 +373,9 @@ function showUpgradeChoices(ids: string[], pending: number): void {
   if (wasHidden && buttons.length > 0) byId('upgrade-title').textContent = pending > 1 ? `LIVELLO SU! SCEGLI UN POTENZIAMENTO (${pending})` : 'LIVELLO SU! SCEGLI UN POTENZIAMENTO'
 }
 
+/** I progressi degli ospiti restano sul dispositivo; quelli degli account vanno in player_saves. */
 function syncCloudProfile(): void {
   accountPanel?.scheduleSave()
-  if (!cloud) return
-  void cloud.saveProfile(identity, progress).catch(() => {
-    byId('cloud-status').textContent = 'OFFLINE // SALVATAGGIO LOCALE'
-  })
 }
 
 async function refreshOnlineLeaderboard(): Promise<void> {
@@ -379,30 +393,22 @@ async function refreshOnlineLeaderboard(): Promise<void> {
 async function initializeCloud(): Promise<void> {
   if (!cloud) return
   byId('cloud-status').textContent = 'SINCRONIZZAZIONE...'
+  await refreshOnlineLeaderboard()
+}
+
+/** Classifica online: solo per gli account, con validazione lato server. Da ospite resta locale. */
+async function submitOnlineRun(result: RunResult): Promise<void> {
+  if (!cloud) return
+  const account = await accountPanel?.accountCredentials()
+  if (!account) {
+    byId('cloud-status').textContent = 'OSPITE // ACCEDI PER LA CLASSIFICA ONLINE'
+    return
+  }
   try {
-    const remote = await cloud.loadProfile(identity)
-    if (remote) {
-      progress = {
-        ...remote,
-        cores: Math.max(progress.cores, remote.cores),
-        bestScore: Math.max(progress.bestScore, remote.bestScore),
-        bestWave: Math.max(progress.bestWave, remote.bestWave),
-        totalKills: Math.max(progress.totalKills, remote.totalKills),
-        runs: Math.max(progress.runs, remote.runs),
-        leaderboard: progress.leaderboard,
-        upgrades: {
-          vitality: Math.max(progress.upgrades.vitality, remote.upgrades.vitality),
-          power: Math.max(progress.upgrades.power, remote.upgrades.power),
-          mobility: Math.max(progress.upgrades.mobility, remote.upgrades.mobility),
-        },
-      }
-      saveProgress(window.localStorage, progress)
-      renderMenu()
-    }
-    syncCloudProfile()
+    await cloud.submitRun(account, identity.callsign, result)
     await refreshOnlineLeaderboard()
   } catch {
-    byId('cloud-status').textContent = 'OFFLINE // DATI LOCALI'
+    byId('cloud-status').textContent = 'OFFLINE // RUN SALVATA IN LOCALE'
   }
 }
 
@@ -506,12 +512,11 @@ function completeRun(result: RunResult): void {
   byId('result-wave-label').textContent = 'ONDATA'
   byId('result-kills-label').textContent = 'ELIMINAZIONI'
   byId('result-shards').parentElement?.classList.remove('hidden')
+  const previousBest = progress.bestScore
   progress = recordRun(progress, result)
   saveProgress(window.localStorage, progress)
   syncCloudProfile()
-  if (cloud) void cloud.submitRun(identity, result).then(refreshOnlineLeaderboard).catch(() => {
-    byId('cloud-status').textContent = 'OFFLINE // RUN SALVATA IN LOCALE'
-  })
+  void submitOnlineRun(result)
   byId('result-score').textContent = result.score.toLocaleString('it-IT')
   byId('result-wave').textContent = String(result.wave)
   byId('result-kills').textContent = String(result.kills)
@@ -520,7 +525,8 @@ function completeRun(result: RunResult): void {
   const xp = result.kills * XP_REWARDS.zombieKill + Math.max(0, result.wave - 1) * XP_REWARDS.wave + XP_REWARDS.runComplete
   byId('gameover-message').textContent = (result.won
     ? 'Hai superato tutte le 15 ondate. Bonus vittoria: 10 frammenti.'
-    : 'L’orda ti ha sopraffatto. I frammenti recuperati sono al sicuro.') + grantXp(xp)
+    : `L’orda ti ha sopraffatto all’ondata ${result.wave} di 15. I frammenti recuperati sono al sicuro.`) + grantXp(xp)
+  byId('gameover-title').textContent += result.score > previousBest && result.score > 0 ? ' // NUOVO RECORD' : ''
   renderMenu()
 }
 
@@ -601,6 +607,7 @@ function renderMenu(): void {
 function showWaveBanner(wave: number): void {
   window.clearTimeout(waveBannerTimer)
   byId('wave-banner-title').textContent = wave % 5 === 0 ? `BOSS // ONDATA ${wave}` : `ONDATA ${wave}`
+  byId('wave-banner-subtitle').textContent = wave % 5 === 0 ? 'IL BRUTO STA ARRIVANDO' : wave === 15 ? 'ULTIMA ONDATA' : `MINACCE IN ARRIVO // ${wave}/15`
   waveBanner.classList.add('hidden')
   waveBanner.style.animation = 'none'
   void waveBanner.offsetWidth
@@ -638,10 +645,22 @@ function showFlash(intensity: number): void {
 }
 
 function showHitmarker(headshot: boolean): void {
+  if (hitmarker.classList.contains('kill')) return
   window.clearTimeout(hitmarkerTimer)
   hitmarker.classList.toggle('headshot', headshot)
+  hitmarker.classList.remove('active')
+  void hitmarker.offsetWidth
   hitmarker.classList.add('active')
-  hitmarkerTimer = window.setTimeout(() => hitmarker.classList.remove('active'), 100)
+  hitmarkerTimer = window.setTimeout(() => hitmarker.classList.remove('active'), 120)
+}
+
+/** Uccisione: segno rosso più grande e più lungo del normale indicatore di colpo. */
+function showKillMarker(): void {
+  window.clearTimeout(hitmarkerTimer)
+  hitmarker.classList.remove('active', 'headshot')
+  void hitmarker.offsetWidth
+  hitmarker.classList.add('active', 'kill')
+  hitmarkerTimer = window.setTimeout(() => hitmarker.classList.remove('active', 'kill'), 260)
 }
 
 function flashDamage(): void {
@@ -928,6 +947,14 @@ byId<HTMLButtonElement>('switch-team').addEventListener('click', () => {
   const me = session.lobby.find((player) => player.id === session?.localId)
   if (me) session.send({ t: 'team', team: otherTeam(me.team) })
 })
+const volumeInput = byId<HTMLInputElement>('master-volume')
+volumeInput.value = String(GameAudio.masterVolume)
+byId<HTMLOutputElement>('volume-value').textContent = `${Math.round(GameAudio.masterVolume * 100)}%`
+volumeInput.addEventListener('input', () => {
+  GameAudio.setMasterVolume(Number(volumeInput.value))
+  byId<HTMLOutputElement>('volume-value').textContent = `${Math.round(GameAudio.masterVolume * 100)}%`
+})
+
 soundButton.addEventListener('click', () => {
   const current = activeGame()
   current.setAudioMuted(!current.isAudioMuted)

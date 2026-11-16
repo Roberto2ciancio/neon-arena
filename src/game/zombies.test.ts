@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { getMaxActiveZombies, getPrewarmCount, MAX_ACTIVE_ZOMBIES, ENEMY_FIRST_WAVE, FINAL_WAVE, getEliteChance, getMeleeDamage, getSpawnPool, getWaveSpawnCount, getZombieStats, SPEED_SCALE_CAP, WAVE_BREAK_SECONDS } from './zombies'
+import { ENEMY_INTEL, getMaxActiveZombies, getPrewarmCount, MAX_ACTIVE_ZOMBIES, ENEMY_FIRST_WAVE, FINAL_WAVE, getEliteChance, getMeleeDamage, getSpawnPool, getWaveSpawnCount, getZombieStats, SPEED_SCALE_CAP, WAVE_BREAK_SECONDS } from './zombies'
 
 describe('progressione zombie', () => {
   it('prevede 15 ondate e un intervallo reale fra esse', () => {
@@ -114,6 +114,14 @@ describe('stabilità', () => {
   it('prepara almeno un modello per ogni tipo', () => {
     for (const kind of [...Object.keys(ENEMY_FIRST_WAVE), 'brute'] as const) {
       expect(getPrewarmCount(kind as Parameters<typeof getPrewarmCount>[0])).toBeGreaterThanOrEqual(1)
+    }
+  })
+})
+
+describe('schede dei nemici', () => {
+  it('ogni tipo ha un consiglio non vuoto', () => {
+    for (const kind of [...Object.keys(ENEMY_FIRST_WAVE), 'brute']) {
+      expect(ENEMY_INTEL[kind as keyof typeof ENEMY_INTEL].length).toBeGreaterThan(10)
     }
   })
 })
