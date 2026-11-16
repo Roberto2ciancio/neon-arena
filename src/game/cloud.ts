@@ -17,7 +17,8 @@ export class SupabaseCloud {
   constructor(
     url: string,
     private readonly anonKey: string,
-    private readonly fetcher: typeof fetch = fetch,
+    // Wrapper: chiamare window.fetch come metodo di un altro oggetto lancia "Illegal invocation".
+    private readonly fetcher: typeof fetch = (...args) => fetch(...args),
   ) {
     this.baseUrl = url.replace(/\/$/, '')
   }
