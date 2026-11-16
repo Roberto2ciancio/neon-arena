@@ -178,6 +178,20 @@ Le prime versioni useranno geometrie procedurali. Successivamente i modelli glTF
 - Valutazione tecnica separata del server autorevole per TCT.
 - Bilanciamento, accessibilità e preparazione della pubblicazione.
 
+### Fase 8 — Armeria, arsenale e personalizzazione
+
+**Stato: completata.** Verificata con build, 111 test unitari e 9 test end-to-end. Specifica e piano operativo sono in `docs/superpowers/specs/2026-11-16-armeria-design.md` e `docs/superpowers/plans/2026-11-16-armeria.md`.
+
+- Tredici armi da fuoco e tre armi bianche, con modalità di fuoco e rinculo distinti.
+- Loadout condiviso fra Zombie e TCT: primaria, secondaria, arma bianca, letale, tattico e gadget.
+- Accessori compatibili per ottica, bocca, canna, sottocanna e caricatore, con effetti sulle statistiche e sui modelli.
+- Nuovi equipaggiamenti: Semtex, Molotov, Claymore, flashbang, fumogeno, stordente, esca, scudo, cassa munizioni e drone radar.
+- Livello giocatore fino al 30, XP nelle due modalità e sblocco progressivo di armi, accessori ed equipaggiamenti.
+- Mimetiche delle armi e personalizzazione del soldato, visibili nell'anteprima 3D e nei giocatori remoti TCT.
+- Salvataggio locale normalizzato e protocollo TCT versione 2 con danni delle nuove fonti limitati dall'host.
+
+La verifica ha incluso il controllo visivo dell'armeria e delle partite e una partita TCT fra due browser.
+
 ## Primo risultato verificabile
 
 La Fase 1 sarà completa quando il giocatore e i nemici non potranno attraversare gli ostacoli, i colpi rispetteranno le coperture, i nemici sapranno aggirarli e le statistiche delle armi arriveranno da definizioni esterne coperte da test automatici.

@@ -23,7 +23,15 @@ Per i test end-to-end è necessario un browser supportato da Playwright. Il serv
 
 - `WASD`: movimento; mouse: visuale; click sinistro: fuoco; click destro: mira.
 - `Shift`: scatto; `Spazio`: salto; `C`: accovacciati (tieni premuto), durante lo scatto avvia la scivolata; `R`: ricarica; `Esc`: pausa.
-- Zombie: `1–6` armi possedute, `G` granata, `T` torretta, `E` interagisci (porte e postazioni d'acquisto), `Z`/`X`/`V` scelta del potenziamento al level-up (il gioco non si ferma).
+- `1`: primaria; `2`: secondaria; `3`: arma bianca; `F`: attacco rapido corpo a corpo.
+- `G`: equipaggiamento letale; `Q`: equipaggiamento tattico; `T`: gadget.
+- Zombie: `E` interagisci (porte e postazioni d'acquisto), `Z`/`X`/`V` scelta del potenziamento al level-up (il gioco non si ferma).
+
+## Armeria e progressione
+
+Dal pulsante **ARMERIA** del menu puoi configurare il loadout condiviso fra Zombie e TCT, montare accessori compatibili, scegliere mimetiche ed equipaggiamenti e personalizzare il soldato. L'anteprima 3D mostra arma o personaggio selezionato.
+
+Le partite assegnano XP e fanno salire il livello giocatore fino al 30, sbloccando nuovi contenuti. Livello, loadout e cosmetici vengono salvati localmente nel browser; gli oggetti non ancora sbloccati non possono essere equipaggiati.
 
 ## Mappe ed edifici
 
@@ -32,7 +40,6 @@ Le mappe sono definite come dati in `src/game/maps.ts`: ostacoli, porte acquista
 ## Frammenti
 
 Nella modalità zombie i frammenti raccolti servono a: aprire porte e palazzi chiusi, comprare le armi alle postazioni sparse per la mappa (anche ai piani alti e sui tetti), ricaricare un'arma posseduta a metà prezzo, rifornire tutte le munizioni e curarsi con il kit medico. I frammenti spesi non riducono quelli assegnati all'officina a fine run.
-- TCT: `1` primaria, `2` secondaria, `G` granata, `T` torretta.
 
 ## Supabase opzionale
 
