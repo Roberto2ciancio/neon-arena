@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#070810" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="description" content="Neon Arena: sopravvivi, evolviti, supera i tuoi limiti. Un arena shooter roguelike nel browser." />
+    <title>Neon Arena</title>
+  </head>
+  <body>
+    <main id="app" data-state="menu">
+      <div id="scene" aria-label="Arena di gioco 3D"></div>
+      <div class="vignette" aria-hidden="true"></div>
+      <div id="damage-flash" aria-hidden="true"></div>
+
+      <header class="topbar">
+        <a class="wordmark" href="./" aria-label="Neon Arena, torna al menu">
+          <span class="wordmark-mark">N//A</span>
+          <span>NEON ARENA</span>
+        </a>
+        <div class="topbar-right">
+          <span class="status-dot"></span>
+          <span id="system-status">SISTEMA PRONTO</span>
+          <button id="sound-button" class="icon-button" type="button" aria-label="Disattiva audio" title="Attiva/disattiva audio">AUDIO ON</button>
+        </div>
+      </header>
+
+      <section id="hud" class="hud hidden" aria-label="Informazioni partita">
+        <div class="hud-left">
+          <div class="health-row">
+            <span class="hud-label">INTEGRITÀ</span>
+            <span id="health-text">100 / 100</span>
+          </div>
+          <div class="bar health-bar"><div id="health-fill"></div></div>
+          <div class="level-row">
+            <span>LIV. <strong id="level-text">1</strong></span>
+            <div class="bar xp-bar"><div id="xp-fill"></div></div>
+          </div>
+          <span id="performance-stats" class="performance-stats">-- FPS · -- DC</span>
+        </div>
+        <div class="hud-center">
+          <span id="score-label" class="hud-label">PUNTEGGIO</span>
+          <strong id="score-text">000000</strong>
+          <span id="wave-text" class="wave-pill">ONDATA 01</span>
+          <span id="map-name" class="map-name">STAZIONE 13</span>
+        </div>
+        <div class="hud-right">
+          <div><span class="hud-label">FRAMMENTI</span><strong id="shards-text">0</strong></div>
+          <div><span class="hud-label">ELIMINAZIONI</span><strong id="kills-text">0</strong></div>
+        </div>
+      </section>
+
+      <div id="combat-footer" class="combat-footer hidden">
+        <div class="controls-hint"><kbd>WASD</kbd> MOVIMENTO <span>·</span> <kbd>MOUSE</kbd> VISUALE <span>·</span> <kbd>CLICK</kbd> FUOCO <span>·</span> <kbd>R</kbd> RICARICA</div>
+        <div class="sprint-status"><kbd>SHIFT</kbd><span>SCATTO</span><kbd>SPAZIO</kbd><span>SALTO</span></div>
+        <button id="pause-button" class="icon-button" type="button">ESC // PAUSA</button>
+      </div>
+
+      <div id="tct-overlay" class="tct-overlay hidden">
+        <canvas id="minimap" width="180" height="180" aria-label="Minimappa tattica"></canvas>
+        <div id="ally-markers" class="ally-markers" aria-hidden="true"></div>
+      </div>
+      <div id="equipment-hud" class="equipment-hud hidden" aria-label="Equipaggiamenti">
+        <div><kbd>G</kbd><span>GRANATA</span><strong id="grenade-status">PRONTA</strong></div>
+        <div><kbd>T</kbd><span>TORRETTA</span><strong id="turret-status">PRONTA</strong></div>
+      </div>
+      <div id="weapon-hud" class="weapon-hud hidden">
+        <span id="weapon-name" class="hud-label">AR-07 // AUTOMATICO</span>
+        <div><strong id="ammo-text">30</strong><span>/ <span id="reserve-text">∞</span></span></div>
+        <small id="reload-text">CARICATORE PRONTO</small>
+      </div>
+      <div id="door-prompt" class="door-prompt hidden"><kbd>E</kbd><span id="door-prompt-text">APRI PORTA</span></div>
+      <div id="crosshair" class="crosshair hidden" aria-hidden="true"><i></i><i></i><i></i><i></i><b></b></div>
+      <div id="hitmarker" class="hitmarker" aria-hidden="true">×</div>
+      <div id="respawn-banner" class="respawn-banner hidden">RIENTRO IN COMBATTIMENTO</div>
+
+      <div id="wave-banner" class="wave-banner hidden" aria-live="polite">
+        <span>MINACCE IN ARRIVO</span>
+        <strong id="wave-banner-title">ONDATA 1</strong>
+      </div>
+
+      <section id="menu-screen" class="overlay menu-screen">
+        <div class="menu-copy">
+          <p class="eyebrow">PROTOCOLLO DI COMBATTIMENTO // 01</p>
+          <div class="mode-selector" aria-label="Seleziona modalità">
+            <button type="button" class="selected" data-mode="zombies" aria-pressed="true">ZOMBIE // ONDATE</button>
+            <button type="button" data-mode="tct" aria-pressed="false">TCT // 4 CONTRO 4</button>
+          </div>
+          <h1>NEON<br /><span>ARENA</span></h1>
+          <p class="tagline">Sopravvivi. Evolviti. Ricomincia più forte.</p>
+          <p class="intro">Scegli l’arena e sopravvivi a 15 ondate di zombie. Colpisci i punti deboli, costruisci la tua configurazione e sconfiggi il Bruto.</p>
+          <div class="map-selector" aria-label="Seleziona mappa">
+            <button type="button" class="map-option selected" data-map="station-13" aria-pressed="true"><strong>STAZIONE 13</strong><span>Stazione industriale // zona centrale</span></button>
+            <button type="button" class="map-option" data-map="depot-06" aria-pressed="false"><strong>DEPOSITO 06</strong><span>Container e corridoi // tre corsie</span></button>
+            <button type="button" class="map-option" data-map="district-zero" aria-pressed="false"><strong>DISTRETTO ZERO</strong><span>Edifici e vicoli // piazza urbana</span></button>
+          </div>
+          <div id="tct-loadout" class="tct-loadout hidden">
+            <span class="hud-label">LOADOUT // PRIMARIA</span>
+            <div>
+              <button type="button" class="selected" data-primary="ar-07">AR-07</button>
+              <button type="button" data-primary="smg-9">SMG-9</button>
+              <button type="button" data-primary="sg-6">SG-6</button>
+              <button type="button" data-primary="dmr-3">DMR-3</button>
+              <button type="button" data-primary="lmg-75">LMG-75</button>
+            </div>
+            <small>SECONDARIA: P-12 // G GRANATA · T TORRETTA</small>
+          </div>
+          <button id="start-button" class="primary-button" type="button"><span>INIZIA RUN</span><span aria-hidden="true">↗</span></button>
+          <div class="menu-records">
+            <div><span>RECORD</span><strong id="best-score">0</strong></div>
+            <div><span>MIGLIOR ONDATA</span><strong id="best-wave">0</strong></div>
+            <div><span>RUN TOTALI</span><strong id="total-runs">0</strong></div>
+          </div>
+          <div class="local-leaderboard">
+            <span id="leaderboard-title" class="hud-label">CLASSIFICA LOCALE // TOP 5</span>
+            <div id="leaderboard-rows"></div>
+          </div>
+        </div>
+
+        <aside class="workshop-panel">
+          <div class="panel-heading">
+            <div><p class="eyebrow">PROGRESSIONE PERMANENTE</p><h2>OFFICINA</h2></div>
+            <div class="core-balance"><span class="core-icon">◆</span><strong id="core-balance">0</strong></div>
+          </div>
+          <p class="panel-description">Investi i frammenti recuperati nelle run. I potenziamenti restano attivi per sempre.</p>
+          <div id="meta-upgrades" class="meta-upgrades"></div>
+          <div class="settings-card">
+            <label for="callsign" class="hud-label">CALLSIGN</label>
+            <input id="callsign" maxlength="12" value="PLAYER" autocomplete="off" />
+            <span id="cloud-status" class="cloud-status">LOCALE // OFFLINE</span>
+          </div>
+          <div class="settings-card">
+            <label for="graphics-quality" class="hud-label">QUALITÀ GRAFICA</label>
+            <select id="graphics-quality">
+              <option value="low">BASSA</option>
+              <option value="medium">MEDIA</option>
+              <option value="high">ALTA // AO + BLOOM</option>
+            </select>
+          </div>
+          <div class="accessibility-card">
+            <label><input id="reduced-motion" type="checkbox" /> RIDUCI MOVIMENTO</label>
+            <label><input id="high-contrast" type="checkbox" /> CONTRASTO ELEVATO</label>
+            <label for="mouse-sensitivity">SENSIBILITÀ MOUSE <output id="sensitivity-value">1,0×</output></label>
+            <input id="mouse-sensitivity" type="range" min="0.5" max="2" step="0.1" value="1" />
+          </div>
+          <div class="controls-card">
+            <span class="hud-label">COMANDI</span>
+            <div><kbd>W A S D / MOUSE</kbd><span>Movimento e visuale</span></div>
+            <div><kbd>CLICK SX / DX</kbd><span>Fuoco / mira</span></div>
+            <div><kbd>R / SHIFT / SPAZIO</kbd><span>Ricarica / scatto / salto</span></div>
+            <div><kbd>1 — 6</kbd><span>Cambio arma</span></div>
+            <div><kbd>G / T / E</kbd><span>Granata / torretta / porta</span></div>
+            <div><kbd>ESC</kbd><span>Pausa</span></div>
+          </div>
+        </aside>
+      </section>
+
+      <section id="upgrade-screen" class="overlay modal-overlay hidden" aria-labelledby="upgrade-title">
+        <div class="upgrade-container">
+          <p class="eyebrow">SINCRONIZZAZIONE COMPLETATA</p>
+          <h2 id="upgrade-title">SCEGLI UN POTENZIAMENTO</h2>
+          <p>Il tempo nell’arena è sospeso. Premi 1, 2 o 3.</p>
+          <div id="upgrade-choices" class="upgrade-choices"></div>
+        </div>
+      </section>
+
+      <section id="pause-screen" class="overlay modal-overlay hidden" aria-labelledby="pause-title">
+        <div class="modal-card compact-card">
+          <p class="eyebrow">SIMULAZIONE SOSPESA</p>
+          <h2 id="pause-title">PAUSA</h2>
+          <button id="resume-button" class="primary-button" type="button">RIPRENDI</button>
+          <button id="abandon-button" class="secondary-button" type="button">TERMINA RUN</button>
+        </div>
+      </section>
+
+      <section id="gameover-screen" class="overlay modal-overlay hidden" aria-labelledby="gameover-title">
+        <div class="modal-card gameover-card">
+          <p class="eyebrow">SEGNALE INTERROTTO</p>
+          <h2 id="gameover-title">RUN TERMINATA</h2>
+          <p id="gameover-message">L’arena ti ha sopraffatto. I frammenti recuperati sono al sicuro.</p>
+          <div class="run-results">
+            <div><span id="result-score-label">PUNTEGGIO</span><strong id="result-score">0</strong></div>
+            <div><span id="result-wave-label">ONDATA</span><strong id="result-wave">1</strong></div>
+            <div><span id="result-kills-label">ELIMINAZIONI</span><strong id="result-kills">0</strong></div>
+            <div><span>FRAMMENTI</span><strong id="result-shards">+0</strong></div>
+          </div>
+          <button id="restart-button" class="primary-button" type="button">NUOVA RUN</button>
+          <button id="menu-button" class="secondary-button" type="button">TORNA ALL’OFFICINA</button>
+        </div>
+      </section>
+
+      <p class="desktop-note">Neon Arena richiede tastiera e mouse.</p>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

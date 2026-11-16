@@ -1,0 +1,11 @@
+{
+  "name": "Neon Arena",
+  "short_name": "Neon Arena",
+  "description": "FPS 3D con zombie a ondate e scontri tattici 4v4.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "background_color": "#070810",
+  "theme_color": "#070810",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
