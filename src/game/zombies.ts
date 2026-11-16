@@ -118,3 +118,20 @@ export const BLOATER_BLAST = { radius: 3.4, playerDamage: 30, zombieDamage: 70 }
 /** Lo scudo dello Scudiero blocca questa quota del danno frontale. */
 export const SHIELD_FRONT_REDUCTION = 0.85
 
+/**
+ * Zombie vivi contemporaneamente: il resto dell'ondata aspetta in coda. Il totale dell'ondata
+ * non cambia, ma il carico per frame (rendering, IA, collisioni) resta limitato.
+ */
+export const MAX_ACTIVE_ZOMBIES = { low: 18, medium: 24, high: 30 } as const
+
+export function getMaxActiveZombies(quality: keyof typeof MAX_ACTIVE_ZOMBIES): number {
+  return MAX_ACTIVE_ZOMBIES[quality]
+}
+
+/** Ricalcoli di percorso concessi per frame: gli altri zombie aspettano il frame successivo. */
+export const PATH_BUDGET_PER_FRAME = 6
+
+/** Modelli preparati a inizio partita per ogni tipo, così le prime apparizioni non bloccano il frame. */
+export function getPrewarmCount(kind: EnemyKind): number {
+  return kind === 'brute' ? 1 : 2
+}

@@ -37,7 +37,7 @@ import type { EnemyModel } from './models'
 import { applyUpgrade, createBaseStats, FIRST_LEVEL_XP, getNextLevelXp, getUpgradeChoices, UPGRADE_KEYS } from './upgrades'
 import { WEAPONS } from './weapons'
 import { BURN_DURATION, CHAIN_LIGHTNING_RADIUS, getBurnDamagePerSecond, getChainLightningDamage, getChainTargetCount, getHeadshotExplosionDamage, HEADSHOT_EXPLOSION_RADIUS } from './specialEffects'
-import { BLOATER_BLAST, FINAL_WAVE, getEliteChance, getMeleeDamage, getSpawnPool, getWaveSpawnCount, getZombieColor, getZombieStats, SHIELD_FRONT_REDUCTION, WAVE_BREAK_SECONDS } from './zombies'
+import { BLOATER_BLAST, ENEMY_FIRST_WAVE, FINAL_WAVE, getEliteChance, getMaxActiveZombies, getMeleeDamage, getPrewarmCount, getSpawnPool, PATH_BUDGET_PER_FRAME, getWaveSpawnCount, getZombieColor, getZombieStats, SHIELD_FRONT_REDUCTION, WAVE_BREAK_SECONDS } from './zombies'
 import { INSTA_KILL_BOSS_MULTIPLIER, POWER_UP_LIFETIME, POWER_UPS, rollPowerUp, SHOCKWAVE_RADIUS } from './powerups'
 import type { PowerUpId } from './powerups'
 import type { EnemyKind, GameEvents, GameState, HitZone, MetaBonuses, RunResult } from './types'
@@ -190,6 +190,7 @@ export class Game {
   private readonly audio = new GameAudio()
   private readonly enemies: Enemy[] = []
   private readonly enemyPool = new Map<EnemyKind, EnemyModel[]>()
+  private pathBudget = 0
   private readonly dyingEnemies: DyingEnemy[] = []
   private readonly projectiles: Projectile[] = []
   private readonly pickups: Pickup[] = []
@@ -435,6 +436,7 @@ export class Game {
     if (loadout) this.loadout = loadout
     this.clearEntities()
     this.setMap(map)
+    this.prewarmEnemies()
     this.stats = createBaseStats(bonuses)
     this.health = this.stats.maxHealth
     this.score = 0
@@ -610,8 +612,36 @@ export class Game {
     this.events.onWave(this.wave)
   }
 
+  /**
+   * Crea in anticipo i modelli di ogni tipo di zombie e compila i loro shader, così la prima
+   * apparizione di un tipo nuovo (es. l'Ombra all'ondata 7) non provoca un blocco del frame.
+   */
+  private prewarmEnemies(): void {
+    const kinds: EnemyKind[] = [...(Object.keys(ENEMY_FIRST_WAVE) as EnemyKind[]), 'brute']
+    const created: EnemyModel[] = []
+    for (const kind of kinds) {
+      const pool = this.enemyPool.get(kind) ?? []
+      while (pool.length < getPrewarmCount(kind)) {
+        const model = createEnemyModel(kind, getZombieColor(kind))
+        model.group.position.set(0, -50, 0)
+        pool.push(model)
+        created.push(model)
+      }
+      this.enemyPool.set(kind, pool)
+    }
+    if (created.length === 0) return
+    for (const model of created) this.scene.add(model.group)
+    this.renderer.compile(this.scene, this.camera)
+    for (const model of created) {
+      this.scene.remove(model.group)
+      model.group.position.set(0, 0, 0)
+    }
+  }
+
   private updateSpawning(delta: number): void {
     if (this.spawnQueue > 0) {
+      // Il resto dell'ondata aspetta finché ci sono troppi zombie vivi.
+      if (this.enemies.length >= getMaxActiveZombies(this.graphicsQuality)) return
       this.spawnTimer -= delta
       if (this.spawnTimer <= 0) {
         const bossWave = this.wave % 5 === 0
@@ -1260,7 +1290,8 @@ export class Game {
       const direction = toPlayer.clone().divideScalar(distance)
       // Percorso fra piani e porte; inseguimento diretto quando si è nella stessa area.
       enemy.pathTimer -= delta
-      if (enemy.pathTimer <= 0 && !(this.navigation.isOnStairs(enemy.body.position) && enemy.path.length > 0)) {
+      if (enemy.pathTimer <= 0 && this.pathBudget > 0 && !(this.navigation.isOnStairs(enemy.body.position) && enemy.path.length > 0)) {
+        this.pathBudget -= 1
         enemy.path = this.navigation.findPath(enemy.body.position, targetPoint, (doorId) => this.doors.some((door) => door.definition.id === doorId && door.open))
         enemy.pathTimer = 0.45 + Math.random() * 0.2
       }
@@ -1914,6 +1945,7 @@ export class Game {
       this.fpsTimer = 0
       this.fpsFrames = 0
     }
+    this.pathBudget = PATH_BUDGET_PER_FRAME
     if (this.state === 'playing') this.update(delta)
     else if (this.state === 'menu') this.updateMenu(time)
     this.pipeline.render()

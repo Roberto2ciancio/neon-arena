@@ -144,35 +144,67 @@ function updateState(state: GameState): void {
   }
 }
 
+const hudElements = new Map<string, HTMLElement>()
+
+/** Elemento dell'HUD in cache: l'HUD si aggiorna 20 volte al secondo. */
+function hudEl<T extends HTMLElement = HTMLElement>(id: string): T {
+  let element = hudElements.get(id)
+  if (!element) {
+    element = byId(id)
+    hudElements.set(id, element)
+  }
+  return element as T
+}
+
+/** Scrive il testo solo se è cambiato, per non invalidare stile e layout a ogni aggiornamento. */
+function setText(element: HTMLElement, value: string): void {
+  if (element.textContent !== value) element.textContent = value
+}
+
+let powerUpsKey = ''
+
+function renderPowerUps(powerUps: HudData['powerUps']): void {
+  const key = powerUps.map((power) => `${power.id}:${Math.ceil(power.remaining)}`).join('|')
+  if (key === powerUpsKey) return
+  powerUpsKey = key
+  hudEl('power-ups').replaceChildren(...powerUps.map((power) => {
+    const item = document.createElement('span')
+    item.className = 'power-up'
+    item.style.color = `#${power.color.toString(16).padStart(6, '0')}`
+    item.innerHTML = `<b>${power.icon}</b>${power.name} ${Math.ceil(power.remaining)}s<i style="width:${Math.round((power.remaining / Math.max(power.duration, 0.1)) * 100)}%"></i>`
+    return item
+  }))
+}
+
 function updateHud(data: HudData): void {
   const healthPercentage = Math.max(0, (data.health / data.maxHealth) * 100)
-  byId('health-text').textContent = `${Math.ceil(data.health)} / ${data.maxHealth}`
-  if (data.performance) byId('performance-stats').textContent = `${data.performance.fps} FPS · ${data.performance.drawCalls} DC`
-  byId('health-fill').style.width = `${healthPercentage}%`
-  byId('health-fill').classList.toggle('critical', healthPercentage < 30)
-  byId('xp-fill').style.width = `${Math.min(100, (data.xp / data.xpNext) * 100)}%`
-  byId('level-text').textContent = String(data.level)
-  byId('score-label').textContent = data.tct ? `${data.tct.team.toUpperCase()} // AVVERSARI` : 'PUNTEGGIO'
-  byId('score-text').textContent = data.tct
+  setText(hudEl('health-text'), `${Math.ceil(data.health)} / ${data.maxHealth}`)
+  if (data.performance) setText(hudEl('performance-stats'), `${data.performance.fps} FPS · ${data.performance.drawCalls} DC`)
+  hudEl('health-fill').style.width = `${healthPercentage}%`
+  hudEl('health-fill').classList.toggle('critical', healthPercentage < 30)
+  hudEl('xp-fill').style.width = `${Math.min(100, (data.xp / data.xpNext) * 100)}%`
+  setText(hudEl('level-text'), String(data.level))
+  setText(hudEl('score-label'), data.tct ? `${data.tct.team.toUpperCase()} // AVVERSARI` : 'PUNTEGGIO')
+  setText(hudEl('score-text'), data.tct
     ? `${data.tct.teamScore} : ${data.tct.enemyScore}`
-    : String(data.score).padStart(6, '0')
-  byId('map-name').textContent = data.mapName.toUpperCase()
-  byId('wave-text').textContent = data.tct
+    : String(data.score).padStart(6, '0'))
+  setText(hudEl('map-name'), data.mapName.toUpperCase())
+  setText(hudEl('wave-text'), data.tct
     ? `TCT // ${Math.floor(data.tct.timeRemaining / 60)}:${String(Math.ceil(data.tct.timeRemaining) % 60).padStart(2, '0')}`
     : data.waveBreak > 0
       ? `INTERVALLO ${Math.ceil(data.waveBreak)}s`
-      : `ONDATA ${String(data.wave).padStart(2, '0')}`
-  const respawnBanner = byId('respawn-banner')
+      : `ONDATA ${String(data.wave).padStart(2, '0')}`)
+  const respawnBanner = hudEl('respawn-banner')
   respawnBanner.classList.toggle('hidden', !data.tct || data.tct.playerRespawn <= 0 || currentState !== 'playing')
-  if (data.tct?.playerRespawn) respawnBanner.textContent = `RIENTRO IN COMBATTIMENTO // ${Math.ceil(data.tct.playerRespawn)}s`
-  byId('wave-text').title = `${data.enemiesRemaining} nemici rimanenti`
-  byId('shards-text').textContent = String(data.shards)
-  byId('kills-text').textContent = String(data.kills)
-  byId('ammo-text').textContent = data.melee ? '—' : String(data.ammo).padStart(2, '0')
-  byId('reserve-text').textContent = data.melee ? '—' : data.reserveAmmo === null ? '∞' : String(data.reserveAmmo)
-  byId('weapon-name').textContent = data.weaponName
-  byId('reload-text').textContent = data.melee ? 'CLICK O F PER COLPIRE' : data.reloading ? 'RICARICA IN CORSO...' : data.ammo === 0 ? 'PREMI R PER RICARICARE' : 'CARICATORE PRONTO'
-  byId('scope-overlay').classList.toggle('hidden', !data.scoped || currentState !== 'playing')
+  if (data.tct?.playerRespawn) setText(respawnBanner, `RIENTRO IN COMBATTIMENTO // ${Math.ceil(data.tct.playerRespawn)}s`)
+  hudEl('wave-text').title = `${data.enemiesRemaining} nemici rimanenti`
+  setText(hudEl('shards-text'), String(data.shards))
+  setText(hudEl('kills-text'), String(data.kills))
+  setText(hudEl('ammo-text'), data.melee ? '—' : String(data.ammo).padStart(2, '0'))
+  setText(hudEl('reserve-text'), data.melee ? '—' : data.reserveAmmo === null ? '∞' : String(data.reserveAmmo))
+  setText(hudEl('weapon-name'), data.weaponName)
+  setText(hudEl('reload-text'), data.melee ? 'CLICK O F PER COLPIRE' : data.reloading ? 'RICARICA IN CORSO...' : data.ammo === 0 ? 'PREMI R PER RICARICARE' : 'CARICATORE PRONTO')
+  hudEl('scope-overlay').classList.toggle('hidden', !data.scoped || currentState !== 'playing')
   hud.classList.toggle('scoped', data.scoped)
   weaponHud.classList.toggle('reloading', data.reloading)
   crosshair.classList.toggle('aiming', data.aiming)
@@ -180,29 +212,22 @@ function updateHud(data: HudData): void {
   data.equipment.forEach((entry, index) => {
     const ids = equipmentIds[index]
     if (!ids) return
-    byId(ids[0]).textContent = entry.name
-    const status = byId(ids[1])
-    status.textContent = entry.cooldown > 0 ? `${Math.ceil(entry.cooldown)}s` : 'PRONTA'
+    setText(hudEl(ids[0]), entry.name)
+    const status = hudEl(ids[1])
+    setText(status, entry.cooldown > 0 ? `${Math.ceil(entry.cooldown)}s` : 'PRONTA')
     status.classList.toggle('cooldown', entry.cooldown > 0)
   })
-  const doorPrompt = byId('door-prompt')
+  const doorPrompt = hudEl('door-prompt')
   doorPrompt.classList.toggle('hidden', !data.interaction || currentState !== 'playing')
   doorPrompt.classList.toggle('denied', data.interaction?.denied ?? false)
   if (data.interaction) {
-    byId('door-prompt-text').textContent = data.interaction.denied
+    setText(hudEl('door-prompt-text'), data.interaction.denied
       ? `SERVONO ${data.interaction.cost} FRAMMENTI`
-      : `${data.interaction.label} // ◆ ${data.interaction.cost}`
+      : `${data.interaction.label} // ◆ ${data.interaction.cost}`)
   }
   crosshair.classList.toggle('crouched', data.stance !== 'stand')
   renderWeaponSlots(data.weaponSlots)
-  const powerUps = data.powerUps.map((power) => {
-    const item = document.createElement('span')
-    item.className = 'power-up'
-    item.style.color = `#${power.color.toString(16).padStart(6, '0')}`
-    item.innerHTML = `<b>${power.icon}</b>${power.name} ${Math.ceil(power.remaining)}s<i style="width:${Math.round((power.remaining / Math.max(power.duration, 0.1)) * 100)}%"></i>`
-    return item
-  })
-  byId('power-ups').replaceChildren(...powerUps)
+  renderPowerUps(data.powerUps)
   if (data.tct) updateTctOverlay(data.tct)
 }
 

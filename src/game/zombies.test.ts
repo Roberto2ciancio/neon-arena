@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ENEMY_FIRST_WAVE, FINAL_WAVE, getEliteChance, getMeleeDamage, getSpawnPool, getWaveSpawnCount, getZombieStats, SPEED_SCALE_CAP, WAVE_BREAK_SECONDS } from './zombies'
+import { getMaxActiveZombies, getPrewarmCount, MAX_ACTIVE_ZOMBIES, ENEMY_FIRST_WAVE, FINAL_WAVE, getEliteChance, getMeleeDamage, getSpawnPool, getWaveSpawnCount, getZombieStats, SPEED_SCALE_CAP, WAVE_BREAK_SECONDS } from './zombies'
 
 describe('progressione zombie', () => {
   it('prevede 15 ondate e un intervallo reale fra esse', () => {
@@ -100,6 +100,20 @@ describe('corpo a corpo', () => {
       const health = getZombieStats('walker', wave).health
       expect(getMeleeDamage(knife * 3, wave, health)).toBeLessThan(health)
       expect(getMeleeDamage(knife * 3, wave, health) * 2).toBeGreaterThanOrEqual(health)
+    }
+  })
+})
+
+describe('stabilità', () => {
+  it('limita gli zombie vivi in base al preset senza ridurre il totale dell’ondata', () => {
+    expect(getMaxActiveZombies('low')).toBeLessThan(getMaxActiveZombies('medium'))
+    expect(getMaxActiveZombies('medium')).toBeLessThan(getMaxActiveZombies('high'))
+    expect(getWaveSpawnCount(15)).toBeGreaterThan(MAX_ACTIVE_ZOMBIES.high)
+  })
+
+  it('prepara almeno un modello per ogni tipo', () => {
+    for (const kind of [...Object.keys(ENEMY_FIRST_WAVE), 'brute'] as const) {
+      expect(getPrewarmCount(kind as Parameters<typeof getPrewarmCount>[0])).toBeGreaterThanOrEqual(1)
     }
   })
 })
