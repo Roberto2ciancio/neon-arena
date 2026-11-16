@@ -1,4 +1,16 @@
 import { expect, test } from '@playwright/test'
+import type { Page } from '@playwright/test'
+
+/** Impostazioni e callsign stanno nel pannello laterale del menu. */
+async function openSettings(page: Page): Promise<void> {
+  await page.getByRole('button', { name: /^IMPOSTAZIONI/ }).click()
+  await expect(page.locator('#menu-drawer')).toBeVisible()
+}
+
+async function closeDrawer(page: Page): Promise<void> {
+  await page.locator('#drawer-close').click()
+  await expect(page.locator('#menu-drawer')).toBeHidden()
+}
 
 test('una run FPS usa mouse, fuoco, mira e ricarica e salva il risultato', async ({ page }) => {
   const errors: string[] = []
@@ -97,8 +109,11 @@ test('la modalità TCT online fa giocare due persone nella stessa stanza', async
 
   await host.goto('/?net=local')
   await guest.goto('/?net=local')
+  await openSettings(guest)
   await guest.locator('#callsign').fill('nova')
   await guest.locator('#callsign').press('Tab')
+  await closeDrawer(guest)
+  await expect(guest.locator('#profile-name')).toHaveText('NOVA')
 
   await host.bringToFront()
   await host.locator('[data-mode="tct"]').click()
@@ -233,6 +248,7 @@ test('le impostazioni di accessibilità sono applicate e persistenti', async ({ 
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))
   await page.goto('/')
+  await openSettings(page)
   await page.locator('#reduced-motion').check()
   await page.locator('#high-contrast').check()
   await expect(page.locator('#app')).toHaveClass(/reduced-motion/)
@@ -247,11 +263,38 @@ test('le impostazioni di accessibilità sono applicate e persistenti', async ({ 
   expect(errors).toEqual([])
 })
 
+test('il menu guida le scelte e permette di giocare come ospite', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  await page.goto('/')
+  await expect(page.locator('#welcome-card')).toBeVisible()
+  await expect(page.locator('#profile-kind')).toContainText('OSPITE')
+  await page.getByRole('button', { name: 'GIOCA COME OSPITE' }).click()
+  await expect(page.locator('#welcome-card')).toBeHidden()
+  // Senza Supabase configurato gli account sono dichiarati non disponibili.
+  await page.getByRole('button', { name: 'ACCEDI / REGISTRATI' }).click()
+  await expect(page.locator('#account-screen')).toBeVisible()
+  await expect(page.locator('#account-status')).toContainText('non sono attivi')
+  await page.getByRole('button', { name: 'CONTINUA COME OSPITE' }).click()
+  await expect(page.locator('#account-screen')).toBeHidden()
+  await page.getByRole('button', { name: /^OFFICINA/ }).click()
+  await expect(page.locator('#drawer-title')).toHaveText('OFFICINA')
+  await expect(page.locator('#meta-upgrades .meta-upgrade')).toHaveCount(3)
+  await page.keyboard.press('Escape')
+  await expect(page.locator('#menu-drawer')).toBeHidden()
+  await page.locator('[data-mode="tct"]').click()
+  await expect(page.locator('#play-step')).toHaveText('3 // CREA O ENTRA IN UNA STANZA')
+  await page.reload()
+  await expect(page.locator('#welcome-card')).toBeHidden()
+  expect(errors).toEqual([])
+})
+
 test('il profilo locale conserva il callsign senza richiedere Supabase', async ({ page }) => {
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))
   await page.goto('/')
   await expect(page.locator('#cloud-status')).toHaveText('LOCALE // OFFLINE')
+  await openSettings(page)
   await page.locator('#callsign').fill('nova-07!')
   await page.locator('#callsign').press('Tab')
   await expect(page.locator('#callsign')).toHaveValue('NOVA-07')
@@ -264,8 +307,10 @@ test('il preset grafico viene applicato e conservato', async ({ page }) => {
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))
   await page.goto('/')
+  await openSettings(page)
   await page.locator('#graphics-quality').selectOption('high')
   await expect(page.locator('#graphics-quality')).toHaveValue('high')
+  await closeDrawer(page)
   await page.reload()
   await expect(page.locator('#graphics-quality')).toHaveValue('high')
   await page.getByRole('button', { name: 'INIZIA RUN' }).click()
@@ -273,7 +318,9 @@ test('il preset grafico viene applicato e conservato', async ({ page }) => {
   await page.screenshot({ path: 'test-results/high-quality-gameplay.png' })
   await page.keyboard.press('Escape')
   await page.getByRole('button', { name: 'TERMINA RUN' }).click()
+  await openSettings(page)
   await page.locator('#graphics-quality').selectOption('low')
+  await closeDrawer(page)
   await page.getByRole('button', { name: 'INIZIA RUN' }).click()
   await expect(page.locator('#app')).toHaveAttribute('data-state', 'playing')
   expect(errors).toEqual([])
@@ -283,7 +330,9 @@ test('Distretto Zero è giocabile in modalità zombie con prestazioni adeguate',
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))
   await page.goto('/')
+  await openSettings(page)
   await page.locator('#graphics-quality').selectOption('low')
+  await closeDrawer(page)
   await page.locator('[data-map="district-zero"]').click()
   await page.getByRole('button', { name: 'INIZIA RUN' }).click()
   await expect(page.locator('#map-name')).toHaveText('DISTRETTO ZERO')

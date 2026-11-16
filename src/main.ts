@@ -19,6 +19,9 @@ import { getTransportKind } from './game/net/transport'
 import { addXp, loadArmory, MAX_LEVEL, resolveLoadout, saveArmory, XP_REWARDS, xpForLevel } from './game/armory'
 import type { ArmoryState } from './game/armory'
 import { ArmoryScreen } from './armoryScreen'
+import { AccountPanel } from './accountPanel'
+import { SupabaseAuth } from './game/auth'
+import type { PlayerSave } from './game/accountSave'
 import { ATTACHMENTS } from './game/attachments'
 import { CAMOS, COSMETIC_CATALOG } from './game/cosmetics'
 import type { CosmeticOption } from './game/cosmetics'
@@ -70,6 +73,7 @@ let currentState: GameState = 'menu'
 let selectedMode: 'zombies' | 'tct' = 'zombies'
 let selectedMap = STATION_13
 let armory: ArmoryState = loadArmory(window.localStorage)
+let accountPanel: AccountPanel | null = null
 let session: NetSession | null = null
 let lobbyBusy = false
 const transportKind = getTransportKind()
@@ -290,6 +294,7 @@ function showUpgradeChoices(ids: string[], pending: number): void {
 }
 
 function syncCloudProfile(): void {
+  accountPanel?.scheduleSave()
   if (!cloud) return
   void cloud.saveProfile(identity, progress).catch(() => {
     byId('cloud-status').textContent = 'OFFLINE // SALVATAGGIO LOCALE'
@@ -342,6 +347,56 @@ function setArmory(next: ArmoryState): void {
   armory = next
   saveArmory(window.localStorage, armory)
   renderPlayerLevel()
+  accountPanel?.scheduleSave()
+}
+
+// ---------------------------------------------------------------------------
+// Profilo: ospite o account, pannelli laterali del menu
+// ---------------------------------------------------------------------------
+
+function renderProfile(): void {
+  byId('profile-name').textContent = identity.callsign
+  byId('profile-avatar').textContent = identity.callsign.charAt(0) || 'P'
+  const signedIn = accountPanel?.signedIn ?? false
+  byId('profile-kind').textContent = signedIn ? `ACCOUNT // ${accountPanel?.email ?? ''}` : 'OSPITE // PROGRESSI SU QUESTO DISPOSITIVO'
+  byId('profile-kind').parentElement?.parentElement?.classList.toggle('signed', signedIn)
+  byId<HTMLInputElement>('callsign').value = identity.callsign
+}
+
+function localSave(): PlayerSave {
+  return { callsign: identity.callsign, progress, armory }
+}
+
+function applyMergedSave(save: PlayerSave): void {
+  progress = save.progress
+  saveProgress(window.localStorage, progress)
+  identity = { ...identity, callsign: save.callsign }
+  saveIdentity(window.localStorage, identity)
+  armory = save.armory
+  saveArmory(window.localStorage, armory)
+  renderPlayerLevel()
+  renderMenu()
+  renderProfile()
+}
+
+const DRAWER_TITLES: Record<string, string> = {
+  workshop: 'OFFICINA',
+  leaderboard: 'CLASSIFICA',
+  settings: 'IMPOSTAZIONI',
+  controls: 'COMANDI',
+}
+
+function openDrawer(panel: string): void {
+  byId('drawer-title').textContent = DRAWER_TITLES[panel] ?? ''
+  document.querySelectorAll<HTMLElement>('[data-drawer-panel]').forEach((section) => {
+    section.classList.toggle('active', section.dataset.drawerPanel === panel)
+  })
+  byId('menu-drawer').classList.remove('hidden')
+  byId<HTMLButtonElement>('drawer-close').focus()
+}
+
+function closeDrawer(): void {
+  byId('menu-drawer').classList.add('hidden')
 }
 
 function renderPlayerLevel(): void {
@@ -425,6 +480,7 @@ function renderMenu(): void {
   byId('best-wave').textContent = String(progress.bestWave)
   byId('total-runs').textContent = String(progress.runs)
   byId('core-balance').textContent = String(progress.cores)
+  byId('core-balance-side').textContent = String(progress.cores)
 
   const ranking = onlineLeaderboard ?? progress.leaderboard
   byId('leaderboard-title').textContent = onlineLeaderboard ? 'CLASSIFICA ONLINE // TOP 5' : 'CLASSIFICA LOCALE // TOP 5'
@@ -721,6 +777,7 @@ document.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((button) => 
       option.setAttribute('aria-pressed', String(selected))
     })
     byId('start-button').querySelector('span')!.textContent = selectedMode === 'tct' ? 'INIZIA MATCH' : 'INIZIA RUN'
+    byId('play-step').textContent = selectedMode === 'tct' ? '3 // CREA O ENTRA IN UNA STANZA' : '3 // GIOCA'
   })
 })
 
@@ -751,6 +808,7 @@ byId<HTMLInputElement>('callsign').addEventListener('change', (event) => {
   identity = { ...identity, callsign: normalizeCallsign(input.value) }
   input.value = identity.callsign
   saveIdentity(window.localStorage, identity)
+  renderProfile()
   syncCloudProfile()
 })
 
@@ -796,8 +854,30 @@ soundButton.addEventListener('click', () => {
   soundButton.setAttribute('aria-label', current.isAudioMuted ? 'Attiva audio' : 'Disattiva audio')
 })
 
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+accountPanel = new AccountPanel({
+  auth: supabaseUrl && supabaseKey ? new SupabaseAuth(supabaseUrl, supabaseKey, window.localStorage) : null,
+  storage: window.localStorage,
+  getLocal: localSave,
+  applyMerged: applyMergedSave,
+  onProfileChange: renderProfile,
+})
+document.querySelectorAll<HTMLButtonElement>('[data-drawer]').forEach((button) => {
+  button.addEventListener('click', () => openDrawer(button.dataset.drawer ?? ''))
+})
+byId<HTMLButtonElement>('drawer-close').addEventListener('click', closeDrawer)
+byId('menu-drawer').addEventListener('click', (event) => {
+  if (event.target === event.currentTarget) closeDrawer()
+})
+window.addEventListener('keydown', (event) => {
+  if (event.code === 'Escape' && !byId('menu-drawer').classList.contains('hidden')) closeDrawer()
+})
+
 renderMenu()
+renderProfile()
 void initializeCloud()
+void accountPanel.initialize()
 window.addEventListener('pagehide', () => session?.close())
 // Accesso di debug per i test visivi, solo in sviluppo.
 if (import.meta.env.DEV) Object.assign(window, { __neonArena: { game, tctGame } })
