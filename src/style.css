@@ -173,7 +173,10 @@ kbd { display: inline-block; color: #aab4cb; font-family: 'Chakra Petch', sans-s
 .respawn-banner { position: absolute; z-index: 6; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 18px 26px; color: var(--pink); border: 1px solid rgba(255, 79, 135, 0.4); background: rgba(7, 8, 16, 0.9); font-family: 'Chakra Petch', sans-serif; font-size: 18px; letter-spacing: 0.12em; pointer-events: none; }
 .hud.tct #score-text { color: var(--cyan); }
 .hitmarker { position: absolute; z-index: 5; top: 50%; left: 50%; transform: translate(-50%, -52%); color: white; font-family: Arial, sans-serif; font-size: 36px; font-weight: 400; opacity: 0; pointer-events: none; }
-.hitmarker.active { opacity: 1; }
+.hitmarker.active { opacity: 1; animation: hitmarker-pop 120ms ease-out; }
+.hitmarker.kill { color: #ff4f6e; font-size: 48px; text-shadow: 0 0 12px rgba(255, 79, 110, 0.8); animation-duration: 260ms; }
+@keyframes hitmarker-pop { from { transform: translate(-50%, -52%) scale(1.5); } }
+@media (prefers-reduced-motion: reduce) { .hitmarker.active { animation: none; } }
 .hitmarker.headshot { color: #ffd166; }
 .wave-banner { position: absolute; z-index: 4; top: 42%; left: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; pointer-events: none; animation: banner-in 2.4s both; }
 .wave-banner span { color: var(--cyan); font-family: 'Chakra Petch', sans-serif; font-size: 10px; letter-spacing: 0.32em; }

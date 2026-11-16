@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import './style.css'
+import { GameAudio } from './game/audio'
 import { Game } from './game/Game'
 import { loadAccessibility, saveAccessibility } from './game/accessibility'
 import { SupabaseCloud } from './game/cloud'
@@ -92,6 +93,7 @@ const game = new Game(byId('scene'), {
   onHit: showHitmarker,
   onFlash: showFlash,
   onPowerUp: showPowerUp,
+  onKill: showKillMarker,
   // I colori dei nemici sono spenti: schiariti per restare leggibili sul fondo scuro.
   onNotice: (title, text, color) => showPowerUp(title, text, new THREE.Color(color).lerp(new THREE.Color(0xffffff), 0.45).getHex()),
 })
@@ -629,10 +631,22 @@ function showFlash(intensity: number): void {
 }
 
 function showHitmarker(headshot: boolean): void {
+  if (hitmarker.classList.contains('kill')) return
   window.clearTimeout(hitmarkerTimer)
   hitmarker.classList.toggle('headshot', headshot)
+  hitmarker.classList.remove('active')
+  void hitmarker.offsetWidth
   hitmarker.classList.add('active')
-  hitmarkerTimer = window.setTimeout(() => hitmarker.classList.remove('active'), 100)
+  hitmarkerTimer = window.setTimeout(() => hitmarker.classList.remove('active'), 120)
+}
+
+/** Uccisione: segno rosso più grande e più lungo del normale indicatore di colpo. */
+function showKillMarker(): void {
+  window.clearTimeout(hitmarkerTimer)
+  hitmarker.classList.remove('active', 'headshot')
+  void hitmarker.offsetWidth
+  hitmarker.classList.add('active', 'kill')
+  hitmarkerTimer = window.setTimeout(() => hitmarker.classList.remove('active', 'kill'), 260)
 }
 
 function flashDamage(): void {
@@ -924,6 +938,14 @@ byId<HTMLButtonElement>('switch-team').addEventListener('click', () => {
   const me = session.lobby.find((player) => player.id === session?.localId)
   if (me) session.send({ t: 'team', team: otherTeam(me.team) })
 })
+const volumeInput = byId<HTMLInputElement>('master-volume')
+volumeInput.value = String(GameAudio.masterVolume)
+byId<HTMLOutputElement>('volume-value').textContent = `${Math.round(GameAudio.masterVolume * 100)}%`
+volumeInput.addEventListener('input', () => {
+  GameAudio.setMasterVolume(Number(volumeInput.value))
+  byId<HTMLOutputElement>('volume-value').textContent = `${Math.round(GameAudio.masterVolume * 100)}%`
+})
+
 soundButton.addEventListener('click', () => {
   const current = activeGame()
   current.setAudioMuted(!current.isAudioMuted)

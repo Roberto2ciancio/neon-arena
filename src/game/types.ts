@@ -107,6 +107,8 @@ export interface GameEvents {
   onFlash?: (intensity: number) => void
   /** Bonus raccolto: annuncio a schermo. */
   onPowerUp?: (name: string, description: string, color: number) => void
+  /** Uccisione confermata: il mirino mostra un segno dedicato. */
+  onKill?: () => void
   /** Avviso informativo (es. nuovo tipo di zombie). */
   onNotice?: (title: string, text: string, color: number) => void
 }

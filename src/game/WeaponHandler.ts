@@ -1,3 +1,5 @@
+import { getGunSoundProfile } from './gunSounds'
+import type { GunSoundProfile } from './gunSounds'
 import * as THREE from 'three'
 import type { ResolvedLoadout } from './armory'
 import type { ResolvedWeapon } from './attachments'
@@ -30,10 +32,14 @@ export interface FrameInput {
   fireRateMultiplier?: number
 }
 
+export type MechanicalSound = 'dry' | 'reloadOut' | 'reloadIn'
+
 export interface FrameResult {
   /** Colpi da risolvere in questo frame (raycast a carico del motore). */
   shots: number
   recovery: RecoilKick
+  /** Suoni meccanici dell'arma avvenuti in questo frame (ricarica, colpo a vuoto). */
+  sounds: MechanicalSound[]
 }
 
 const MELEE_SWING = 0.38
@@ -67,6 +73,7 @@ export class WeaponHandler {
   private visible = false
   private scoped = false
   visualRecoil = 0
+  private pendingSounds: MechanicalSound[] = []
 
   constructor(private readonly parent: THREE.Object3D) {}
 
@@ -254,6 +261,7 @@ export class WeaponHandler {
     if (!current || this.reloadTimer > 0 || current.magazine.ammo >= current.weapon.magazineSize || current.magazine.reserveAmmo === 0) return false
     this.reloadTimer = current.weapon.reloadDuration
     this.burstRemaining = 0
+    this.pendingSounds.push('reloadOut')
     return true
   }
 
@@ -287,6 +295,7 @@ export class WeaponHandler {
       if (this.reloadTimer <= 0) {
         this.reloadTimer = 0
         current.magazine = reloadMagazine(current.magazine, current.weapon)
+        this.pendingSounds.push('reloadIn')
       }
     }
     if (current && this.reloadTimer <= 0 && this.meleeTimer <= 0 && !input.blocked && this.drawTimer <= 0) {
@@ -295,13 +304,19 @@ export class WeaponHandler {
       if (wantsShot && this.fireTimer <= 0) {
         if (current.magazine.ammo <= 0) {
           this.burstRemaining = 0
-          this.startReload()
+          if (!this.startReload()) {
+            // Caricatore e riserva vuoti: scatto a vuoto, ripetuto al massimo ogni 0,3 s.
+            this.pendingSounds.push('dry')
+            this.fireTimer = 0.3
+            this.triggerConsumed = true
+          }
         } else {
           if (weapon.fireMode === 'burst' && this.burstRemaining === 0) this.burstRemaining = weapon.burstCount
           current.magazine = { ...current.magazine, ammo: current.magazine.ammo - 1 }
           shots = 1
           this.muzzleTimer = weapon.suppressed ? 0.03 : 0.045
-          this.visualRecoil = Math.min(0.2, this.visualRecoil + (weapon.fireMode === 'bolt' ? 0.18 : 0.045))
+          // Rinculo visivo proporzionale alla potenza dell'arma: pistole e SMG leggeri, fucili a pompa e cecchini pesanti.
+          this.visualRecoil = Math.min(0.24, this.visualRecoil + getVisualKick(weapon))
           if (weapon.fireMode !== 'auto') this.triggerConsumed = true
           if (this.burstRemaining > 0) this.burstRemaining -= 1
           const rate = weapon.fireRate * (input.fireRateMultiplier ?? 1)
@@ -312,7 +327,15 @@ export class WeaponHandler {
       }
     }
     this.updateVisibility()
-    return { shots, recovery }
+    const sounds = this.pendingSounds
+    this.pendingSounds = []
+    return { shots, recovery, sounds }
+  }
+
+  /** Ricetta audio dello sparo dell'arma impugnata. */
+  soundProfile(): GunSoundProfile | null {
+    const weapon = this.current
+    return weapon ? getGunSoundProfile(weapon.category, weapon.fireMode, weapon.suppressed) : null
   }
 
   /** Spinta di rinculo per il colpo appena sparato. */
@@ -339,4 +362,11 @@ export class WeaponHandler {
   dispose(): void {
     this.disposeModels()
   }
+}
+
+/** Spinta visiva per colpo: cresce con il rinculo verticale dell'arma, più forte per otturatore e pompa. */
+export function getVisualKick(weapon: { recoil: { vertical: number }; fireMode: string; pellets: number }): number {
+  const base = 0.03 + weapon.recoil.vertical * 4
+  const heavy = weapon.fireMode === 'bolt' || weapon.pellets > 1 ? 0.07 : 0
+  return Math.min(0.22, base + heavy)
 }
