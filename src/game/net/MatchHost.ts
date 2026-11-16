@@ -11,6 +11,7 @@ import {
   parseClientMessage,
 } from './protocol'
 import type { HostMessage, LobbyPlayer, NetTeam, PlayerSnapshot, TeamScores } from './protocol'
+import type { Cosmetics } from '../cosmetics'
 
 export const SNAPSHOT_INTERVAL = 1 / 15
 export const SPAWN_PROTECTION = 1
@@ -52,7 +53,7 @@ export class MatchHost {
   }
 
   get lobby(): LobbyPlayer[] {
-    return [...this.players.values()].map(({ id, name, team, slot }) => ({ id, name, team, slot }))
+    return [...this.players.values()].map(({ id, name, team, slot, cosmetics }) => ({ id, name, team, slot, cosmetics }))
   }
 
   get canStart(): boolean {
@@ -71,7 +72,7 @@ export class MatchHost {
     const message = parseClientMessage(raw)
     if (!message) return
     if (message.t === 'hello') {
-      this.join(peerId, message.v, message.name)
+      this.join(peerId, message.v, message.name, message.cosmetics)
       return
     }
     const player = this.players.get(peerId)
@@ -100,16 +101,20 @@ export class MatchHost {
         if (this.phase !== 'playing' || !player.alive) return
         this.broadcast({ t: 'shot', by: peerId, from: message.from, to: message.to })
         return
-      case 'grenade':
+      case 'throw':
         if (this.phase !== 'playing' || !player.alive) return
-        this.broadcast({ t: 'grenade', by: peerId, pos: message.pos, vel: message.vel })
+        this.broadcast({ t: 'throw', by: peerId, kind: message.kind, pos: message.pos, vel: message.vel })
         return
-      case 'turret':
+      case 'deploy':
         if (this.phase !== 'playing' || !player.alive) return
-        this.broadcast({ t: 'turret', by: peerId, pos: message.pos })
+        this.broadcast({ t: 'deploy', by: peerId, kind: message.kind, id: message.id, pos: message.pos, yaw: message.yaw })
+        return
+      case 'detonate':
+        if (this.phase !== 'playing') return
+        this.broadcast({ t: 'detonate', by: peerId, id: message.id })
         return
       case 'hit':
-        this.applyHit(player, message.target, message.damage, message.headshot, getMaxHitDamage(message.source, message.weapon), getMaxHitRange(message.source, message.weapon), message.source === 'gun')
+        this.applyHit(player, message.target, message.damage, message.headshot, getMaxHitDamage(message.source, message.weapon), getMaxHitRange(message.source, message.weapon), message.source === 'gun' || message.source === 'melee')
         return
     }
   }
@@ -170,7 +175,7 @@ export class MatchHost {
     }
   }
 
-  private join(peerId: string, version: number, name: string): void {
+  private join(peerId: string, version: number, name: string, cosmetics: Cosmetics): void {
     if (version !== PROTOCOL_VERSION) {
       this.send(peerId, { t: 'error', code: 'bad-version' })
       return
@@ -191,6 +196,7 @@ export class MatchHost {
       name: name.trim() || 'PLAYER',
       team: assignment.team,
       slot: assignment.slot,
+      cosmetics,
       x: spawn.x,
       y: 0,
       z: spawn.z,

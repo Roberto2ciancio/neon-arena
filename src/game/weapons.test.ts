@@ -1,9 +1,23 @@
 import { describe, expect, it } from 'vitest'
-import { createMagazine, DEFAULT_WEAPON, reloadMagazine, WEAPONS } from './weapons'
+import { createMagazine, DEFAULT_WEAPON, MELEE_WEAPONS, PRIMARY_WEAPONS, reloadMagazine, SECONDARY_WEAPONS, WEAPON_ORDER, WEAPONS } from './weapons'
 
 describe('armi basate su dati', () => {
-  it('espone sei armi con modalità di fuoco e configurazioni distinte', () => {
-    expect(Object.keys(WEAPONS)).toHaveLength(6)
+  it('copre tutte le classi primarie e secondarie con slot coerenti', () => {
+    expect(PRIMARY_WEAPONS).toHaveLength(10)
+    expect(SECONDARY_WEAPONS).toHaveLength(3)
+    for (const id of WEAPON_ORDER) {
+      const weapon = WEAPONS[id]
+      expect(weapon.id).toBe(id)
+      expect(weapon.slot === 'secondary').toBe(weapon.category === 'pistol' || weapon.category === 'machine-pistol')
+      expect(weapon.automatic).toBe(weapon.fireMode === 'auto')
+      expect(weapon.recoil.vertical).toBeGreaterThan(0)
+    }
+    expect(WEAPONS['br-3'].burstCount).toBe(3)
+    expect(WEAPONS['sr-50'].damage * WEAPONS['sr-50'].headshotMultiplier).toBeGreaterThan(250)
+    expect(MELEE_WEAPONS.knife.unlockLevel).toBe(1)
+  })
+
+  it('espone armi con modalità di fuoco e configurazioni distinte', () => {
     expect(WEAPONS['ar-07'].automatic).toBe(true)
     expect(WEAPONS['p-12'].automatic).toBe(false)
     expect(WEAPONS['sg-6'].pellets).toBe(8)

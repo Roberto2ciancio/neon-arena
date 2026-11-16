@@ -63,8 +63,9 @@
         <div id="ally-markers" class="ally-markers" aria-hidden="true"></div>
       </div>
       <div id="equipment-hud" class="equipment-hud hidden" aria-label="Equipaggiamenti">
-        <div><kbd>G</kbd><span>GRANATA</span><strong id="grenade-status">PRONTA</strong></div>
-        <div><kbd>T</kbd><span>TORRETTA</span><strong id="turret-status">PRONTA</strong></div>
+        <div><kbd>G</kbd><span id="lethal-name">GRANATA</span><strong id="grenade-status">PRONTA</strong></div>
+        <div><kbd>Q</kbd><span id="tactical-name">FLASHBANG</span><strong id="tactical-status">PRONTA</strong></div>
+        <div><kbd>T</kbd><span id="gadget-name">TORRETTA</span><strong id="turret-status">PRONTA</strong></div>
       </div>
       <aside id="upgrade-panel" class="upgrade-panel hidden" aria-live="polite" aria-labelledby="upgrade-title">
         <header><strong id="upgrade-title">LIVELLO SU</strong><span id="upgrade-pending"></span></header>
@@ -76,6 +77,8 @@
         <small id="reload-text">CARICATORE PRONTO</small>
         <div id="weapon-slots" class="weapon-slots" aria-label="Armi disponibili"></div>
       </div>
+      <div id="scope-overlay" class="scope-overlay hidden" aria-hidden="true"><i></i></div>
+      <div id="flash-overlay" class="flash-overlay" aria-hidden="true"></div>
       <div id="door-prompt" class="door-prompt hidden"><kbd>E</kbd><span id="door-prompt-text">APRI PORTA</span></div>
       <div id="crosshair" class="crosshair hidden" aria-hidden="true"><i></i><i></i><i></i><i></i><b></b></div>
       <div id="hitmarker" class="hitmarker" aria-hidden="true">×</div>
@@ -101,17 +104,6 @@
             <button type="button" class="map-option" data-map="depot-06" aria-pressed="false"><strong>DEPOSITO 06</strong><span>Container e corridoi // tre corsie</span></button>
             <button type="button" class="map-option" data-map="district-zero" aria-pressed="false"><strong>DISTRETTO ZERO</strong><span>Edifici e vicoli // piazza urbana</span></button>
           </div>
-          <div id="tct-loadout" class="tct-loadout hidden">
-            <span class="hud-label">LOADOUT // PRIMARIA</span>
-            <div>
-              <button type="button" class="selected" data-primary="ar-07">AR-07</button>
-              <button type="button" data-primary="smg-9">SMG-9</button>
-              <button type="button" data-primary="sg-6">SG-6</button>
-              <button type="button" data-primary="dmr-3">DMR-3</button>
-              <button type="button" data-primary="lmg-75">LMG-75</button>
-            </div>
-            <small>SECONDARIA: P-12 // G GRANATA · T TORRETTA</small>
-          </div>
           <section id="tct-lobby" class="tct-lobby hidden" aria-labelledby="lobby-title">
             <span id="lobby-title" class="hud-label">STANZA ONLINE // GIOCATORI REALI</span>
             <div id="lobby-connect" class="lobby-connect">
@@ -136,7 +128,10 @@
             </div>
             <p id="lobby-status" class="lobby-status" aria-live="polite">Crea una stanza o inserisci il codice di un amico.</p>
           </section>
-          <button id="start-button" class="primary-button" type="button"><span>INIZIA RUN</span><span aria-hidden="true">↗</span></button>
+          <div class="menu-actions">
+            <button id="start-button" class="primary-button" type="button"><span>INIZIA RUN</span><span aria-hidden="true">↗</span></button>
+            <button id="armory-button" class="secondary-button armory-button" type="button">ARMERIA</button>
+          </div>
           <div class="menu-records">
             <div><span>RECORD</span><strong id="best-score">0</strong></div>
             <div><span>MIGLIOR ONDATA</span><strong id="best-wave">0</strong></div>
@@ -149,6 +144,11 @@
         </div>
 
         <aside class="workshop-panel">
+          <div class="player-level-card">
+            <div><span class="hud-label">LIVELLO GIOCATORE</span><strong id="player-level">1</strong></div>
+            <div class="player-xp"><i id="player-xp-fill"></i></div>
+            <small id="player-xp-text">0 / 400 XP</small>
+          </div>
           <div class="panel-heading">
             <div><p class="eyebrow">PROGRESSIONE PERMANENTE</p><h2>OFFICINA</h2></div>
             <div class="core-balance"><span class="core-icon">◆</span><strong id="core-balance">0</strong></div>
@@ -179,8 +179,11 @@
             <div><kbd>W A S D / MOUSE</kbd><span>Movimento e visuale</span></div>
             <div><kbd>CLICK SX / DX</kbd><span>Fuoco / mira</span></div>
             <div><kbd>R / SHIFT / SPAZIO</kbd><span>Ricarica / scatto / salto</span></div>
-            <div><kbd>1 — 6</kbd><span>Cambio arma</span></div>
-            <div><kbd>G / T / E</kbd><span>Granata / torretta / porta</span></div>
+            <div><kbd>1 / 2 / 3</kbd><span>Primaria / secondaria / arma bianca</span></div>
+            <div><kbd>F</kbd><span>Attacco rapido corpo a corpo</span></div>
+            <div><kbd>G / Q / T</kbd><span>Letale / tattico / gadget</span></div>
+            <div><kbd>C</kbd><span>Accovacciati, in scatto scivola</span></div>
+            <div><kbd>E</kbd><span>Porte e postazioni</span></div>
             <div><kbd>ESC</kbd><span>Pausa</span></div>
           </div>
         </aside>
@@ -208,6 +211,32 @@
           </div>
           <button id="restart-button" class="primary-button" type="button">NUOVA RUN</button>
           <button id="menu-button" class="secondary-button" type="button">TORNA ALL’OFFICINA</button>
+        </div>
+      </section>
+
+      <section id="armory-screen" class="overlay armory-screen hidden" aria-labelledby="armory-title">
+        <div class="armory-panel">
+          <header class="armory-header">
+            <div>
+              <p class="eyebrow">LOADOUT // LIVELLO <span id="armory-level">1</span> // <span id="armory-xp">0 XP</span></p>
+              <h2 id="armory-title">ARMERIA</h2>
+            </div>
+            <button id="armory-close" class="secondary-button" type="button">CHIUDI</button>
+          </header>
+          <nav class="armory-tabs" role="tablist" aria-label="Sezioni dell'armeria">
+            <button type="button" role="tab" data-armory-tab="primary">PRIMARIA</button>
+            <button type="button" role="tab" data-armory-tab="secondary">SECONDARIA</button>
+            <button type="button" role="tab" data-armory-tab="melee">CORPO A CORPO</button>
+            <button type="button" role="tab" data-armory-tab="equipment">EQUIPAGGIAMENTO</button>
+            <button type="button" role="tab" data-armory-tab="appearance">ASPETTO</button>
+          </nav>
+          <div class="armory-body">
+            <div id="armory-list" class="armory-list"></div>
+            <aside class="armory-detail">
+              <canvas id="armory-preview" aria-label="Anteprima 3D"></canvas>
+              <div id="armory-info" class="armory-info"></div>
+            </aside>
+          </div>
         </div>
       </section>
 

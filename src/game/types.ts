@@ -62,8 +62,12 @@ export interface HudData {
   aiming: boolean
   waveBreak: number
   enemiesRemaining: number
-  grenadeCooldown: number
-  turretCooldown: number
+  /** Letale (G), tattico (Q) e gadget (T) con il tempo di ricarica residuo. */
+  equipment: { key: string; name: string; cooldown: number }[]
+  /** Arma bianca impugnata. */
+  melee: boolean
+  /** Mira con ottica ad alto ingrandimento: sovrimpressione del mirino. */
+  scoped: boolean
   /** Porta o postazione d'acquisto a portata di mano (tasto E). */
   interaction: { label: string; cost: number; canAfford: boolean; denied: boolean } | null
   weaponSlots: { key: string; name: string; owned: boolean; active: boolean }[]
@@ -97,4 +101,6 @@ export interface GameEvents {
   onWave: (wave: number) => void
   onDamage: () => void
   onHit: (headshot: boolean) => void
+  /** Accecamento da flashbang (0–1). */
+  onFlash?: (intensity: number) => void
 }

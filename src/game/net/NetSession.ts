@@ -3,6 +3,7 @@ import { NET_ERROR_MESSAGES, PROTOCOL_VERSION, parseHostMessage } from './protoc
 import type { ClientMessage, HostMessage, LobbyPlayer, NetErrorCode } from './protocol'
 import { createHostTransport, joinHostTransport, TransportError } from './transport'
 import type { ClientTransport, HostTransport, TransportKind } from './transport'
+import type { Cosmetics } from '../cosmetics'
 
 const HOST_LOCAL_ID = 'host'
 const HOST_TICK_MS = 1000 / 30
@@ -37,7 +38,7 @@ export class NetSession {
     private readonly match: MatchHost | null,
   ) {}
 
-  static async host(code: string, name: string, mapId: string, kind: TransportKind): Promise<NetSession> {
+  static async host(code: string, name: string, mapId: string, kind: TransportKind, cosmetics: Cosmetics): Promise<NetSession> {
     let transport: HostTransport
     try {
       transport = await createHostTransport(code, kind)
@@ -55,12 +56,12 @@ export class NetSession {
     transport.onConnect = () => undefined
     transport.onMessage = (peerId, data) => match.handle(peerId, data)
     transport.onDisconnect = (peerId) => match.leave(peerId)
-    match.handle(HOST_LOCAL_ID, { t: 'hello', v: PROTOCOL_VERSION, name })
+    match.handle(HOST_LOCAL_ID, { t: 'hello', v: PROTOCOL_VERSION, name, cosmetics })
     session.startHostLoop()
     return session
   }
 
-  static async join(code: string, name: string, kind: TransportKind): Promise<NetSession> {
+  static async join(code: string, name: string, kind: TransportKind, cosmetics: Cosmetics): Promise<NetSession> {
     let transport: ClientTransport
     try {
       transport = await joinHostTransport(code, kind)
@@ -92,7 +93,7 @@ export class NetSession {
         window.clearTimeout(timer)
         reject(new NetSessionError('host-left'))
       }
-      transport.send(JSON.stringify({ t: 'hello', v: PROTOCOL_VERSION, name } satisfies ClientMessage))
+      transport.send(JSON.stringify({ t: 'hello', v: PROTOCOL_VERSION, name, cosmetics } satisfies ClientMessage))
     })
     transport.onClose = () => session.handleRemoteClose('host-left')
     return session

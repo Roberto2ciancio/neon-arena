@@ -50,14 +50,23 @@ export interface MapDefinition {
   stations: readonly StationDefinition[]
 }
 
-export const STATION_COSTS = {
+type PurchasableWeapon = Exclude<WeaponId, 'ar-07' | 'p-12'>
+
+export const STATION_COSTS: Record<PurchasableWeapon | 'ammo' | 'medkit', number> = {
   'smg-9': 6,
+  'vx-45': 9,
   'sg-6': 8,
+  'as-12': 14,
   'dmr-3': 10,
+  'sr-50': 16,
   'lmg-75': 14,
+  'ak-74r': 12,
+  'br-3': 12,
+  'r-44': 6,
+  'ap-18': 7,
   ammo: 3,
   medkit: 4,
-} as const
+}
 
 function buildingDoor(id: string, building: BuildingDefinition, side: Side, cost: number): MapDoorDefinition {
   const { center } = getDoorPoints(building, side)
@@ -74,7 +83,7 @@ function buildingDoor(id: string, building: BuildingDefinition, side: Side, cost
   }
 }
 
-const weapon = (id: string, weaponId: Exclude<WeaponId, 'ar-07' | 'p-12'>, x: number, y: number, z: number): StationDefinition => ({
+const weapon = (id: string, weaponId: PurchasableWeapon, x: number, y: number, z: number): StationDefinition => ({
   id, kind: 'weapon', weapon: weaponId, x, y, z, cost: STATION_COSTS[weaponId],
 })
 
@@ -124,6 +133,8 @@ export const STATION_13: MapDefinition = {
     weapon('station-sg', 'sg-6', -6, 0, 2.9),
     weapon('station-dmr', 'dmr-3', 18.4, 9.6, -13.2),
     weapon('station-lmg', 'lmg-75', 17.5, 0, 15.5),
+    weapon('station-ak', 'ak-74r', -6, 0, 18),
+    weapon('station-sr', 'sr-50', -1, 3.2, -10),
     { id: 'station-ammo', kind: 'ammo', x: 2, y: 3.2, z: -12, cost: STATION_COSTS.ammo },
     { id: 'station-medkit', kind: 'medkit', x: -13, y: 3.2, z: -6, cost: STATION_COSTS.medkit },
   ],
@@ -174,6 +185,8 @@ export const DEPOT_06: MapDefinition = {
     weapon('station-sg', 'sg-6', 5, 0, -20),
     weapon('station-dmr', 'dmr-3', 19.5, 6.4, -1),
     weapon('station-lmg', 'lmg-75', 21, 0, 19.5),
+    weapon('station-ak', 'br-3', -3, 0, 8),
+    weapon('station-sr', 'sr-50', 20.5, 3.2, -7.2),
     { id: 'station-ammo', kind: 'ammo', x: 3, y: 0, z: -3, cost: STATION_COSTS.ammo },
     { id: 'station-medkit', kind: 'medkit', x: 4, y: 3.2, z: -17, cost: STATION_COSTS.medkit },
   ],
@@ -222,6 +235,8 @@ export const DISTRICT_ZERO: MapDefinition = {
     weapon('station-sg', 'sg-6', -16, 0, 17),
     weapon('station-dmr', 'dmr-3', -15.5, 9.6, -21),
     weapon('station-lmg', 'lmg-75', 16, 6.4, 24),
+    weapon('station-ak', 'ak-74r', 5.5, 0, -12),
+    weapon('station-revolver', 'r-44', -5.5, 0, -9),
     { id: 'station-ammo', kind: 'ammo', x: 22, y: 3.2, z: -17, cost: STATION_COSTS.ammo },
     { id: 'station-medkit', kind: 'medkit', x: -5.5, y: 0, z: 9, cost: STATION_COSTS.medkit },
   ],

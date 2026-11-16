@@ -108,7 +108,12 @@ export function createWeaponModel(): WeaponModel {
   return { group, muzzle, flash }
 }
 
-export function createEnemyModel(kind: EnemyKind, color: number, appearance: 'zombie' | 'soldier' = 'zombie'): EnemyModel {
+export interface SoldierOutfit {
+  suit: number
+  accent: number
+}
+
+export function createEnemyModel(kind: EnemyKind, color: number, appearance: 'zombie' | 'soldier' = 'zombie', outfit?: SoldierOutfit): EnemyModel {
   const group = new THREE.Group()
   const details: THREE.Object3D[] = []
   const soldier = appearance === 'soldier'
@@ -117,9 +122,9 @@ export function createEnemyModel(kind: EnemyKind, color: number, appearance: 'zo
   const width = (kind === 'armored' ? 0.95 : kind === 'brute' ? 1.05 : kind === 'runner' ? 0.52 : 0.66) * scale
   const skinColor = new THREE.Color(soldier ? 0x8b6b57 : 0x727768).lerp(new THREE.Color(color), soldier ? 0 : 0.28)
   const skin = new THREE.MeshStandardMaterial({ color: 0xffffff, map: createOrganicTexture(skinColor.getHex()), roughness: 0.8 })
-  const clothesColor = soldier ? 0x1d252b : kind === 'runner' ? 0x39262a : 0x252a2c
+  const clothesColor = soldier ? outfit?.suit ?? 0x1d252b : kind === 'runner' ? 0x39262a : 0x252a2c
   const clothes = new THREE.MeshStandardMaterial({ color: 0xffffff, map: createFabricTexture(clothesColor), roughness: 0.96, side: THREE.DoubleSide })
-  const armor = new THREE.MeshStandardMaterial({ color: 0x4c5050, metalness: 0.72, roughness: 0.48 })
+  const armor = new THREE.MeshStandardMaterial({ color: outfit?.accent ?? 0x4c5050, metalness: outfit ? 0.45 : 0.72, roughness: 0.48 })
   const glow = new THREE.MeshStandardMaterial({ color: 0xffd28a, emissive: color, emissiveIntensity: 1.5, roughness: 0.4 })
   const woundMaterial = new THREE.MeshStandardMaterial({ color: 0x47151a, roughness: 0.72 })
   const toothMaterial = new THREE.MeshStandardMaterial({ color: 0xc9c1a4, roughness: 0.75 })
@@ -186,12 +191,16 @@ export function createEnemyModel(kind: EnemyKind, color: number, appearance: 'zo
   }
 
   if (soldier) {
-    const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.34 * scale, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2), armor)
-    helmet.position.y = 0.08
-    head.add(helmet)
-    const visor = new THREE.Mesh(new RoundedBoxGeometry(0.34 * scale, 0.1 * scale, 0.055, 2, 0.02), new THREE.MeshStandardMaterial({ color: 0x111a20, metalness: 0.65, roughness: 0.18 }))
-    visor.position.set(0, 0.025, -0.26 * scale)
-    head.add(visor)
+    // Con un outfit personalizzato copricapo e visore li aggiunge characterModels.
+    if (!outfit) {
+      const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.34 * scale, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2), armor)
+      helmet.position.y = 0.08
+      head.add(helmet)
+      const visor = new THREE.Mesh(new RoundedBoxGeometry(0.34 * scale, 0.1 * scale, 0.055, 2, 0.02), new THREE.MeshStandardMaterial({ color: 0x111a20, metalness: 0.65, roughness: 0.18 }))
+      visor.position.set(0, 0.025, -0.26 * scale)
+      head.add(visor)
+      details.push(helmet, visor)
+    }
     const vest = new THREE.Mesh(new RoundedBoxGeometry(width * 0.95, 0.62 * scale, 0.12, 3, 0.035), armor)
     vest.position.set(0, 0, -0.24 * scale)
     body.add(vest)
@@ -201,7 +210,7 @@ export function createEnemyModel(kind: EnemyKind, color: number, appearance: 'zo
       body.add(pouch)
       details.push(pouch)
     }
-    details.push(helmet, visor, vest)
+    details.push(vest)
   }
 
   const legGeometry = new THREE.CapsuleGeometry(0.115 * scale, 0.58 * scale, 5, 10)

@@ -13,6 +13,8 @@ export interface WeaponPoseInput {
   landingKick: number
   airborne: boolean
   reducedMotion: boolean
+  /** Avanzamento del fendente 0–1, oppure -1. */
+  swing?: number
 }
 
 const HIP = new THREE.Vector3(0.32, -0.29, -0.8)
@@ -84,13 +86,25 @@ export class WeaponAnimator {
     target.x -= this.swayX * 0.5 * swayScale
     target.y += this.swayY * 0.4 * swayScale
 
-    this.position.lerp(target, 1 - Math.exp(-delta * (input.aiming ? 20 : 14)))
+    const swing = input.swing ?? -1
+    if (swing >= 0) {
+      // Fendente da destra a sinistra con caricamento iniziale.
+      const wind = swing < 0.25 ? swing / 0.25 : 1 - (swing - 0.25) / 0.75
+      const cut = swing < 0.25 ? 0 : Math.sin(((swing - 0.25) / 0.75) * Math.PI)
+      target.set(0.28 - cut * 0.5, -0.24 + wind * 0.12 - cut * 0.06, -0.62 - cut * 0.18)
+    }
+    this.position.lerp(target, 1 - Math.exp(-delta * (swing >= 0 ? 30 : input.aiming ? 20 : 14)))
     group.position.copy(this.position)
 
     const reload = input.reloadProgress >= 0 ? Math.sin(input.reloadProgress * Math.PI) * motion : 0
     const rotX = -input.recoil * 0.7 + reload * 0.75 + switchPhase * 0.7 + this.swayY * 1.2 * swayScale + (input.sprinting ? -0.12 : 0)
     const rotY = this.swayX * 1.4 * swayScale + (input.sprinting ? 0.45 : 0)
     const rotZ = reload * 0.5 - input.strafe * 0.06 * motion + (input.sliding ? 0.28 : 0) + (input.sprinting ? 0.15 : 0)
+    if (swing >= 0) {
+      const progress = swing < 0.25 ? -swing / 0.25 : (swing - 0.25) / 0.75
+      group.rotation.set(-0.3 + Math.abs(progress) * 0.2, 0.9 - progress * 1.8, -0.5 + progress * 1.1)
+      return
+    }
     this.rotation.x = THREE.MathUtils.lerp(this.rotation.x, rotX, 1 - Math.exp(-delta * 16))
     this.rotation.y = THREE.MathUtils.lerp(this.rotation.y, rotY, 1 - Math.exp(-delta * 12))
     this.rotation.z = THREE.MathUtils.lerp(this.rotation.z, rotZ, 1 - Math.exp(-delta * 12))

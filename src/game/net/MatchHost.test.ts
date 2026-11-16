@@ -130,4 +130,28 @@ describe('stanza TCT online', () => {
     join('x')
     expect(host.lobby).toHaveLength(2)
   })
+
+  it('limita corpo a corpo e claymore e trasmette lanci e cosmetici', () => {
+    const { host, broadcasts } = startedRoom()
+    host.handle('host', { t: 'state', x: 0, y: 0, z: 0, yaw: 0, pitch: 0, crouch: false })
+    host.handle('p2', { t: 'state', x: 0, y: 0, z: 6, yaw: 0, pitch: 0, crouch: true })
+    const before = broadcasts.filter((message) => message.t === 'damage').length
+    host.handle('host', { t: 'hit', target: 'p2', damage: 90, headshot: false, source: 'melee', weapon: 'ar-07' })
+    expect(broadcasts.filter((message) => message.t === 'damage').length).toBe(before)
+    host.handle('host', { t: 'hit', target: 'p2', damage: 999, headshot: false, source: 'claymore', weapon: 'ar-07' })
+    expect(lastOfType(broadcasts, 'damage')?.amount).toBe(170)
+    host.handle('host', { t: 'throw', kind: 'flashbang', pos: [0, 1, 0], vel: [0, 2, -5] })
+    expect(lastOfType(broadcasts, 'throw')).toMatchObject({ by: 'host', kind: 'flashbang' })
+    host.handle('host', { t: 'throw', kind: 'nuke', pos: [0, 1, 0], vel: [0, 2, -5] })
+    expect(lastOfType(broadcasts, 'throw')?.kind).toBe('flashbang')
+    host.tick(0.1)
+    expect(lastOfType(broadcasts, 'snapshot')?.players.find((player) => player.id === 'p2')?.crouch).toBe(true)
+  })
+
+  it('include i cosmetici validi nella lobby', () => {
+    const { host } = createRoom()
+    host.handle('a', { t: 'hello', v: PROTOCOL_VERSION, name: 'A', cosmetics: { headgear: 'beret', mask: 'drago' } })
+    expect(host.lobby[0]?.cosmetics.headgear).toBe('beret')
+    expect(host.lobby[0]?.cosmetics.mask).toBe('none')
+  })
 })

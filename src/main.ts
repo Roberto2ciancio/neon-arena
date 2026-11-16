@@ -16,7 +16,14 @@ import { NetSession, NetSessionError } from './game/net/NetSession'
 import { generateRoomCode, NET_ERROR_MESSAGES, normalizeRoomCode, otherTeam } from './game/net/protocol'
 import type { HostMessage } from './game/net/protocol'
 import { getTransportKind } from './game/net/transport'
-import type { WeaponId } from './game/weapons'
+import { addXp, loadArmory, MAX_LEVEL, resolveLoadout, saveArmory, XP_REWARDS, xpForLevel } from './game/armory'
+import type { ArmoryState } from './game/armory'
+import { ArmoryScreen } from './armoryScreen'
+import { ATTACHMENTS } from './game/attachments'
+import { CAMOS, COSMETIC_CATALOG } from './game/cosmetics'
+import type { CosmeticOption } from './game/cosmetics'
+import { EQUIPMENT } from './game/equipment'
+import { MELEE_WEAPONS } from './game/weapons'
 import type { GameState, HudData, RunResult, TctHudData } from './game/types'
 
 function byId<T extends HTMLElement>(id: string): T {
@@ -62,7 +69,7 @@ let accessibility = loadAccessibility(window.localStorage)
 let currentState: GameState = 'menu'
 let selectedMode: 'zombies' | 'tct' = 'zombies'
 let selectedMap = STATION_13
-let selectedPrimary: WeaponId = 'ar-07'
+let armory: ArmoryState = loadArmory(window.localStorage)
 let session: NetSession | null = null
 let lobbyBusy = false
 const transportKind = getTransportKind()
@@ -78,6 +85,7 @@ const game = new Game(byId('scene'), {
   onWave: showWaveBanner,
   onDamage: flashDamage,
   onHit: showHitmarker,
+  onFlash: showFlash,
 })
 
 const tctGame = new TctGame(byId('scene'), {
@@ -86,6 +94,7 @@ const tctGame = new TctGame(byId('scene'), {
   onMatchEnd: completeTctMatch,
   onDamage: flashDamage,
   onHit: showHitmarker,
+  onFlash: showFlash,
 })
 tctGame.setActive(false)
 game.setGraphicsQuality(graphicsQuality)
@@ -154,18 +163,23 @@ function updateHud(data: HudData): void {
   byId('wave-text').title = `${data.enemiesRemaining} nemici rimanenti`
   byId('shards-text').textContent = String(data.shards)
   byId('kills-text').textContent = String(data.kills)
-  byId('ammo-text').textContent = String(data.ammo).padStart(2, '0')
-  byId('reserve-text').textContent = data.reserveAmmo === null ? '∞' : String(data.reserveAmmo)
+  byId('ammo-text').textContent = data.melee ? '—' : String(data.ammo).padStart(2, '0')
+  byId('reserve-text').textContent = data.melee ? '—' : data.reserveAmmo === null ? '∞' : String(data.reserveAmmo)
   byId('weapon-name').textContent = data.weaponName
-  byId('reload-text').textContent = data.reloading ? 'RICARICA IN CORSO...' : data.ammo === 0 ? 'PREMI R PER RICARICARE' : 'CARICATORE PRONTO'
+  byId('reload-text').textContent = data.melee ? 'CLICK O F PER COLPIRE' : data.reloading ? 'RICARICA IN CORSO...' : data.ammo === 0 ? 'PREMI R PER RICARICARE' : 'CARICATORE PRONTO'
+  byId('scope-overlay').classList.toggle('hidden', !data.scoped || currentState !== 'playing')
+  hud.classList.toggle('scoped', data.scoped)
   weaponHud.classList.toggle('reloading', data.reloading)
   crosshair.classList.toggle('aiming', data.aiming)
-  const grenadeStatus = byId('grenade-status')
-  grenadeStatus.textContent = data.grenadeCooldown > 0 ? `${Math.ceil(data.grenadeCooldown)}s` : 'PRONTA'
-  grenadeStatus.classList.toggle('cooldown', data.grenadeCooldown > 0)
-  const turretStatus = byId('turret-status')
-  turretStatus.textContent = data.turretCooldown > 0 ? `${Math.ceil(data.turretCooldown)}s` : 'PRONTA'
-  turretStatus.classList.toggle('cooldown', data.turretCooldown > 0)
+  const equipmentIds = [['lethal-name', 'grenade-status'], ['tactical-name', 'tactical-status'], ['gadget-name', 'turret-status']] as const
+  data.equipment.forEach((entry, index) => {
+    const ids = equipmentIds[index]
+    if (!ids) return
+    byId(ids[0]).textContent = entry.name
+    const status = byId(ids[1])
+    status.textContent = entry.cooldown > 0 ? `${Math.ceil(entry.cooldown)}s` : 'PRONTA'
+    status.classList.toggle('cooldown', entry.cooldown > 0)
+  })
   const doorPrompt = byId('door-prompt')
   doorPrompt.classList.toggle('hidden', !data.interaction || currentState !== 'playing')
   doorPrompt.classList.toggle('denied', data.interaction?.denied ?? false)
@@ -324,6 +338,48 @@ async function initializeCloud(): Promise<void> {
   }
 }
 
+function setArmory(next: ArmoryState): void {
+  armory = next
+  saveArmory(window.localStorage, armory)
+  renderPlayerLevel()
+}
+
+function renderPlayerLevel(): void {
+  byId('player-level').textContent = String(armory.level)
+  const needed = xpForLevel(armory.level)
+  byId<HTMLElement>('player-xp-fill').style.width = armory.level >= MAX_LEVEL ? '100%' : `${Math.round((armory.xp / needed) * 100)}%`
+  byId('player-xp-text').textContent = armory.level >= MAX_LEVEL ? 'LIVELLO MASSIMO' : `${armory.xp} / ${needed} XP`
+}
+
+/** Nomi degli oggetti sbloccati raggiungendo esattamente un dato livello. */
+function unlocksAt(level: number): string[] {
+  const names: string[] = []
+  for (const weapon of Object.values(WEAPONS)) if (weapon.unlockLevel === level) names.push(weapon.shortName)
+  for (const melee of Object.values(MELEE_WEAPONS)) if (melee.unlockLevel === level) names.push(melee.name)
+  for (const item of Object.values(EQUIPMENT)) if (item.unlockLevel === level) names.push(item.name)
+  for (const attachment of Object.values(ATTACHMENTS)) if (attachment.unlockLevel === level) names.push(attachment.name)
+  for (const camo of CAMOS) if (camo.unlockLevel === level) names.push(`MIMETICA ${camo.name}`)
+  for (const options of Object.values(COSMETIC_CATALOG) as (readonly CosmeticOption<string>[])[]) {
+    for (const option of options) if (option.unlockLevel === level && option.unlockLevel > 1 && !names.includes(option.name)) names.push(option.name)
+  }
+  return names
+}
+
+/** Assegna l'XP di fine partita e descrive eventuali nuovi livelli e sblocchi. */
+function grantXp(amount: number): string {
+  const before = armory.level
+  const result = addXp(armory, amount)
+  setArmory(result.state)
+  if (result.levelsGained === 0) return ` +${amount} XP.`
+  const unlocked: string[] = []
+  for (let level = before + 1; level <= result.state.level; level += 1) unlocked.push(...unlocksAt(level))
+  return ` +${amount} XP // LIVELLO ${result.state.level}!${unlocked.length > 0 ? ` Sbloccati: ${unlocked.join(', ')}.` : ''}`
+}
+
+function currentLoadout() {
+  return resolveLoadout(armory.loadout, armory.cosmetics)
+}
+
 function completeRun(result: RunResult): void {
   byId('restart-button').textContent = 'NUOVA RUN'
   byId('menu-button').textContent = 'TORNA ALL’OFFICINA'
@@ -342,9 +398,10 @@ function completeRun(result: RunResult): void {
   byId('result-kills').textContent = String(result.kills)
   byId('result-shards').textContent = `+${result.shards}`
   byId('gameover-title').textContent = result.won ? 'STAZIONE SICURA' : 'RUN TERMINATA'
-  byId('gameover-message').textContent = result.won
+  const xp = result.kills * XP_REWARDS.zombieKill + Math.max(0, result.wave - 1) * XP_REWARDS.wave + XP_REWARDS.runComplete
+  byId('gameover-message').textContent = (result.won
     ? 'Hai superato tutte le 15 ondate. Bonus vittoria: 10 frammenti.'
-    : 'L’orda ti ha sopraffatto. I frammenti recuperati sono al sicuro.'
+    : 'L’orda ti ha sopraffatto. I frammenti recuperati sono al sicuro.') + grantXp(xp)
   renderMenu()
 }
 
@@ -357,7 +414,8 @@ function completeTctMatch(result: TctResult): void {
   byId('result-kills').textContent = `${result.kills} / ${result.deaths}`
   byId('result-shards').parentElement?.classList.add('hidden')
   byId('gameover-title').textContent = result.outcome === 'draw' ? 'PAREGGIO' : result.outcome === 'win' ? 'VITTORIA' : 'SCONFITTA'
-  byId('gameover-message').textContent = 'Match TCT online terminato. La progressione zombie non è stata modificata.'
+  const xp = result.kills * XP_REWARDS.tctKill + XP_REWARDS.tctMatch + (result.outcome === 'win' ? XP_REWARDS.tctWin : 0)
+  byId('gameover-message').textContent = `Match TCT online terminato.${grantXp(xp)}`
   byId('restart-button').textContent = 'TORNA ALLA LOBBY'
   byId('menu-button').textContent = 'ESCI DALLA STANZA'
 }
@@ -431,6 +489,21 @@ function showWaveBanner(wave: number): void {
   waveBannerTimer = window.setTimeout(() => waveBanner.classList.add('hidden'), 2400)
 }
 
+let flashTimer = 0
+
+/** Accecamento del flashbang: bianco pieno che sfuma in base all'intensità. */
+function showFlash(intensity: number): void {
+  const overlay = byId<HTMLElement>('flash-overlay')
+  window.clearTimeout(flashTimer)
+  overlay.style.transition = 'none'
+  overlay.style.opacity = String(Math.min(1, intensity))
+  void overlay.offsetWidth
+  flashTimer = window.setTimeout(() => {
+    overlay.style.transition = `opacity ${(0.6 + intensity * 2.6).toFixed(2)}s ease-in`
+    overlay.style.opacity = '0'
+  }, 120 + intensity * 600)
+}
+
 function showHitmarker(headshot: boolean): void {
   window.clearTimeout(hitmarkerTimer)
   hitmarker.classList.toggle('headshot', headshot)
@@ -446,7 +519,7 @@ function flashDamage(): void {
 
 function startRun(): void {
   if (selectedMode === 'tct') returnToLobby()
-  else game.start(getMetaBonuses(progress), selectedMap)
+  else game.start(getMetaBonuses(progress), selectedMap, currentLoadout())
 }
 
 // ---------------------------------------------------------------------------
@@ -473,7 +546,7 @@ async function createRoom(): Promise<void> {
   try {
     for (let attempt = 0; attempt < 3 && !session; attempt += 1) {
       try {
-        attachSession(await NetSession.host(generateRoomCode(), identity.callsign, selectedMap.id, transportKind))
+        attachSession(await NetSession.host(generateRoomCode(), identity.callsign, selectedMap.id, transportKind, armory.cosmetics))
       } catch (error) {
         if (!(error instanceof NetSessionError && error.code === 'code-taken') || attempt === 2) throw error
       }
@@ -498,7 +571,7 @@ async function joinRoom(): Promise<void> {
   setLobbyStatus(`Connessione alla stanza ${code}...`)
   renderLobby()
   try {
-    attachSession(await NetSession.join(code, identity.callsign, transportKind))
+    attachSession(await NetSession.join(code, identity.callsign, transportKind, armory.cosmetics))
     setLobbyStatus('Connesso. In attesa che l’host avvii la partita.')
   } catch (error) {
     setLobbyStatus(describeError(error), true)
@@ -527,7 +600,8 @@ function onSessionMessage(message: HostMessage): void {
     renderLobby()
   }
   if (message.t === 'start' && selectedMode === 'tct') {
-    tctGame.start(session, message.mapId, message.players, selectedPrimary)
+    armoryScreen.close()
+    tctGame.start(session, message.mapId, message.players, currentLoadout())
   }
 }
 
@@ -635,7 +709,6 @@ document.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((button) => 
     selectedMode = button.dataset.mode === 'tct' ? 'tct' : 'zombies'
     game.setActive(selectedMode === 'zombies')
     tctGame.setActive(selectedMode === 'tct')
-    byId('tct-loadout').classList.toggle('hidden', selectedMode !== 'tct')
     byId('tct-lobby').classList.toggle('hidden', selectedMode !== 'tct')
     byId('start-button').classList.toggle('hidden', selectedMode === 'tct')
     byId('abandon-button').textContent = selectedMode === 'tct' ? 'ESCI DALLA PARTITA' : 'TERMINA RUN'
@@ -651,14 +724,18 @@ document.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((button) => 
   })
 })
 
-document.querySelectorAll<HTMLButtonElement>('[data-primary]').forEach((button) => {
-  button.addEventListener('click', () => {
-    const id = button.dataset.primary as WeaponId
-    if (!WEAPONS[id]) return
-    selectedPrimary = id
-    document.querySelectorAll<HTMLButtonElement>('[data-primary]').forEach((option) => option.classList.toggle('selected', option === button))
-  })
+const armoryScreen = new ArmoryScreen({
+  root: byId('armory-screen'),
+  getState: () => armory,
+  setState: setArmory,
 })
+byId<HTMLButtonElement>('armory-button').addEventListener('click', () => armoryScreen.open())
+byId<HTMLButtonElement>('armory-close').addEventListener('click', () => armoryScreen.close())
+window.addEventListener('keydown', (event) => {
+  if (event.code === 'Escape' && armoryScreen.isOpen) armoryScreen.close()
+})
+renderPlayerLevel()
+
 
 byId<HTMLInputElement>('reduced-motion').addEventListener('change', (event) => updateAccessibility({ reducedMotion: (event.target as HTMLInputElement).checked }))
 byId<HTMLInputElement>('high-contrast').addEventListener('change', (event) => updateAccessibility({ highContrast: (event.target as HTMLInputElement).checked }))

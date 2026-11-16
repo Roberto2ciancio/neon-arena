@@ -2,8 +2,16 @@ import { WEAPONS } from '../weapons'
 import type { WeaponId } from '../weapons'
 import { TCT_CONFIG } from '../tctRules'
 import type { TctTeam } from '../tctRules'
+import { DEFAULT_COSMETICS, normalizeCosmetics } from '../cosmetics'
+import type { Cosmetics } from '../cosmetics'
 
-export const PROTOCOL_VERSION = 1
+const THROWABLES = ['frag', 'semtex', 'molotov', 'flashbang', 'smoke', 'stun', 'decoy'] as const
+const DEPLOYABLES = ['claymore', 'turret', 'shield', 'ammo-crate', 'radar'] as const
+const HIT_SOURCES = ['gun', 'grenade', 'turret', 'molotov', 'claymore', 'melee'] as const
+export type NetThrowable = typeof THROWABLES[number]
+export type NetDeployable = typeof DEPLOYABLES[number]
+
+export const PROTOCOL_VERSION = 2
 export const MAX_PLAYERS_PER_TEAM: number = TCT_CONFIG.maxPlayersPerTeam
 export const MAX_PLAYERS = MAX_PLAYERS_PER_TEAM * 2
 export const MAX_MESSAGE_BYTES = 4096
@@ -12,13 +20,14 @@ const ROOM_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 
 export type NetTeam = TctTeam
 export type Vec3 = [number, number, number]
-export type HitSource = 'gun' | 'grenade' | 'turret'
+export type HitSource = typeof HIT_SOURCES[number]
 
 export interface LobbyPlayer {
   id: string
   name: string
   team: NetTeam
   slot: number
+  cosmetics: Cosmetics
 }
 
 export interface PlayerSnapshot extends LobbyPlayer {
@@ -41,13 +50,14 @@ export interface TeamScores {
 }
 
 export type ClientMessage =
-  | { t: 'hello'; v: number; name: string }
+  | { t: 'hello'; v: number; name: string; cosmetics: Cosmetics }
   | { t: 'team'; team: NetTeam }
   | { t: 'state'; x: number; y: number; z: number; yaw: number; pitch: number; crouch: boolean }
   | { t: 'shot'; from: Vec3; to: Vec3 }
   | { t: 'hit'; target: string; damage: number; headshot: boolean; source: HitSource; weapon: WeaponId }
-  | { t: 'grenade'; pos: Vec3; vel: Vec3 }
-  | { t: 'turret'; pos: Vec3 }
+  | { t: 'throw'; kind: NetThrowable; pos: Vec3; vel: Vec3 }
+  | { t: 'deploy'; kind: NetDeployable; id: string; pos: Vec3; yaw: number }
+  | { t: 'detonate'; id: string }
 
 export type HostMessage =
   | { t: 'welcome'; v: number; id: string; hostId: string }
@@ -55,8 +65,9 @@ export type HostMessage =
   | { t: 'start'; mapId: string; duration: number; scoreLimit: number; players: LobbyPlayer[] }
   | { t: 'snapshot'; time: number; scores: TeamScores; players: PlayerSnapshot[] }
   | { t: 'shot'; by: string; from: Vec3; to: Vec3 }
-  | { t: 'grenade'; by: string; pos: Vec3; vel: Vec3 }
-  | { t: 'turret'; by: string; pos: Vec3 }
+  | { t: 'throw'; by: string; kind: NetThrowable; pos: Vec3; vel: Vec3 }
+  | { t: 'deploy'; by: string; kind: NetDeployable; id: string; pos: Vec3; yaw: number }
+  | { t: 'detonate'; by: string; id: string }
   | { t: 'damage'; target: string; by: string; amount: number; headshot: boolean }
   | { t: 'kill'; killer: string; victim: string; headshot: boolean }
   | { t: 'end'; winner: NetTeam | 'draw'; scores: TeamScores; players: PlayerSnapshot[] }
@@ -114,16 +125,19 @@ export function canStartMatch(players: readonly LobbyPlayer[]): boolean {
 
 /** Danno massimo plausibile per un singolo messaggio di colpo. */
 export function getMaxHitDamage(source: HitSource, weapon: WeaponId): number {
-  if (source === 'grenade') return 90
+  if (source === 'grenade') return 150
   if (source === 'turret') return 14
+  if (source === 'molotov') return 16
+  if (source === 'claymore') return 170
+  if (source === 'melee') return 140
   const definition = WEAPONS[weapon]
   return definition.damage * definition.headshotMultiplier * definition.pellets
 }
 
 export function getMaxHitRange(source: HitSource, weapon: WeaponId): number {
-  if (source === 'grenade') return 30
-  if (source === 'turret') return 30
-  return WEAPONS[weapon].range + 2
+  if (source === 'melee') return 3.6
+  if (source !== 'gun') return 30
+  return WEAPONS[weapon].range * 1.25 + 2
 }
 
 const isFiniteNumber = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
@@ -151,7 +165,8 @@ export function parseClientMessage(raw: unknown): ClientMessage | null {
   if (!data) return null
   switch (data.t) {
     case 'hello':
-      return isFiniteNumber(data.v) && typeof data.name === 'string' ? { t: 'hello', v: data.v, name: data.name.slice(0, 12) } : null
+      if (!isFiniteNumber(data.v) || typeof data.name !== 'string') return null
+      return { t: 'hello', v: data.v, name: data.name.slice(0, 12), cosmetics: data.cosmetics === undefined ? { ...DEFAULT_COSMETICS } : normalizeCosmetics(data.cosmetics) }
     case 'team':
       return isTeam(data.team) ? { t: 'team', team: data.team } : null
     case 'state':
@@ -162,13 +177,17 @@ export function parseClientMessage(raw: unknown): ClientMessage | null {
       return isVec3(data.from) && isVec3(data.to) ? { t: 'shot', from: data.from, to: data.to } : null
     case 'hit':
       if (!isShortString(data.target, 64) || !isFiniteNumber(data.damage) || data.damage <= 0 || typeof data.headshot !== 'boolean') return null
-      if (data.source !== 'gun' && data.source !== 'grenade' && data.source !== 'turret') return null
+      if (!(HIT_SOURCES as readonly unknown[]).includes(data.source)) return null
       if (typeof data.weapon !== 'string' || !(data.weapon in WEAPONS)) return null
-      return { t: 'hit', target: data.target, damage: data.damage, headshot: data.headshot, source: data.source, weapon: data.weapon as WeaponId }
-    case 'grenade':
-      return isVec3(data.pos) && isVec3(data.vel) ? { t: 'grenade', pos: data.pos, vel: data.vel } : null
-    case 'turret':
-      return isVec3(data.pos) ? { t: 'turret', pos: data.pos } : null
+      return { t: 'hit', target: data.target, damage: data.damage, headshot: data.headshot, source: data.source as HitSource, weapon: data.weapon as WeaponId }
+    case 'throw':
+      if (!isVec3(data.pos) || !isVec3(data.vel) || !(THROWABLES as readonly unknown[]).includes(data.kind)) return null
+      return { t: 'throw', kind: data.kind as NetThrowable, pos: data.pos, vel: data.vel }
+    case 'deploy':
+      if (!isVec3(data.pos) || !isFiniteNumber(data.yaw) || !isShortString(data.id, 64) || !(DEPLOYABLES as readonly unknown[]).includes(data.kind)) return null
+      return { t: 'deploy', kind: data.kind as NetDeployable, id: data.id, pos: data.pos, yaw: data.yaw }
+    case 'detonate':
+      return isShortString(data.id, 64) ? { t: 'detonate', id: data.id } : null
     default:
       return null
   }
@@ -178,6 +197,6 @@ export function parseClientMessage(raw: unknown): ClientMessage | null {
 export function parseHostMessage(raw: unknown): HostMessage | null {
   const data = decode(raw)
   if (!data || typeof data.t !== 'string') return null
-  const known = ['welcome', 'lobby', 'start', 'snapshot', 'shot', 'grenade', 'turret', 'damage', 'kill', 'end', 'error']
+  const known = ['welcome', 'lobby', 'start', 'snapshot', 'shot', 'throw', 'deploy', 'detonate', 'damage', 'kill', 'end', 'error']
   return known.includes(data.t) ? data as unknown as HostMessage : null
 }

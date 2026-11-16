@@ -9,24 +9,33 @@ import { createNavigation } from './mapGeometry'
 import { advanceWaypoints } from './navigation'
 import type { NavigationGraph } from './navigation'
 import type { NavPoint } from './structures'
-import { getGroundHeight, moveBody, resolveBodyCollisions, steerBody, stepBouncingProjectile } from './world'
+import { getGroundHeight, moveBody, resolveBodyCollisions, steerBody } from './world'
 import type { Body } from './world'
 import { PlayerController, readMovementInput } from './PlayerController'
-import { WeaponAnimator } from './WeaponAnimator'
+import { WeaponHandler } from './WeaponHandler'
+import type { ActiveSlot } from './WeaponHandler'
+import { DEFAULT_LOADOUT, resolveLoadout } from './armory'
+import type { ResolvedLoadout } from './armory'
+import { resolveWeapon } from './attachments'
+import type { ResolvedWeapon } from './attachments'
+import { DEFAULT_COSMETICS } from './cosmetics'
+import { EQUIPMENT } from './equipment'
+import type { EquipmentSlot } from './equipment'
+import { EquipmentSystem } from './EquipmentSystem'
+import type { DeployableKind, EquipmentTarget, ThrowableKind } from './EquipmentSystem'
 import { CombatEffects } from './effects'
-import { createGrenadeModel, createStationModel, createTurretModel, disposeObject, STATION_COLORS, TurretAnimator } from './equipmentModels'
-import type { GrenadeModel, StationModel } from './equipmentModels'
+import { createStationModel, disposeObject, STATION_COLORS } from './equipmentModels'
+import type { StationModel } from './equipmentModels'
 import { buildMap } from './mapBuilder'
 import type { BuiltDoor } from './mapBuilder'
 import type { AccessibilitySettings } from './accessibility'
 import { STATION_13 } from './maps'
 import type { MapDefinition, StationDefinition } from './maps'
-import { createEnemyModel, createWeaponModel } from './models'
-import type { EnemyModel, WeaponModel } from './models'
+import { createEnemyModel } from './models'
+import type { EnemyModel } from './models'
 import { applyUpgrade, createBaseStats, FIRST_LEVEL_XP, getNextLevelXp, getUpgradeChoices, UPGRADE_KEYS } from './upgrades'
-import { createMagazine, DEFAULT_WEAPON, reloadMagazine, WEAPON_ORDER, WEAPONS } from './weapons'
+import { WEAPONS } from './weapons'
 import { BURN_DURATION, CHAIN_LIGHTNING_RADIUS, getBurnDamagePerSecond, getChainLightningDamage, getChainTargetCount, getHeadshotExplosionDamage, HEADSHOT_EXPLOSION_RADIUS } from './specialEffects'
-import type { MagazineState, WeaponId } from './weapons'
 import { FINAL_WAVE, getWaveSpawnCount, getZombieColor, getZombieStats, WAVE_BREAK_SECONDS } from './zombies'
 import type { EnemyKind, GameEvents, GameState, HitZone, MetaBonuses, RunResult } from './types'
 
@@ -39,7 +48,11 @@ interface Enemy {
   spawnTimer: number
   flinch: number
   attackAnim: number
+  stunTimer: number
   knockback: THREE.Vector3
+  /** Bersaglio per granate, torrette e gadget. */
+  target: EquipmentTarget
+  marker: THREE.Object3D
   kind: EnemyKind
   health: number
   speed: number
@@ -104,19 +117,6 @@ interface Hazard {
   life: number
 }
 
-interface Grenade {
-  model: GrenadeModel
-  velocity: THREE.Vector3
-  timer: number
-  trailTimer: number
-}
-
-interface Turret {
-  animator: TurretAnimator
-  life: number
-  fireTimer: number
-}
-
 interface Station {
   definition: StationDefinition
   model: StationModel
@@ -138,11 +138,6 @@ interface HitscanHit {
   zone: HitZone
 }
 
-const STARTING_WEAPONS: readonly WeaponId[] = ['ar-07', 'p-12']
-const GRENADE_FUSE = 1.6
-const GRENADE_RADIUS = 4.8
-const TURRET_LIFE = 16
-const TURRET_RANGE = 15
 const SPAWN_RISE = 0.7
 
 function getWeakPointZone(kind: EnemyKind): HitZone {
@@ -167,7 +162,13 @@ export class Game {
   private readonly controller = new PlayerController()
   /** Piedi del giocatore: stesso vettore del corpo fisico del controller. */
   private readonly player = this.controller.body.position
-  private readonly weaponAnimator = new WeaponAnimator()
+  private readonly weapons = new WeaponHandler(this.camera)
+  private readonly equipment: EquipmentSystem
+  private readonly targetOwners = new WeakMap<EquipmentTarget, Enemy>()
+  private loadout: ResolvedLoadout = resolveLoadout(DEFAULT_LOADOUT, DEFAULT_COSMETICS)
+  private readonly cooldowns: Record<EquipmentSlot, number> = { lethal: 0, tactical: 0, gadget: 0 }
+  private decoy: { position: THREE.Vector3; life: number } | null = null
+  private radarTimer = 0
   private readonly audio = new GameAudio()
   private readonly enemies: Enemy[] = []
   private readonly enemyPool = new Map<EnemyKind, EnemyModel[]>()
@@ -177,19 +178,13 @@ export class Game {
   private readonly particles: Particle[] = []
   private readonly tracers: Tracer[] = []
   private readonly hazards: Hazard[] = []
-  private readonly grenades: Grenade[] = []
-  private readonly turrets: Turret[] = []
-  private readonly weapon: WeaponModel = createWeaponModel()
   private map: MapDefinition = STATION_13
   private mapContent = buildMap(this.map)
   private obstacles = this.mapContent.obstacles
   private doors: Door[] = this.mapContent.doors.map((door) => ({ ...door, open: false, progress: 0 }))
   private navigation: NavigationGraph = createNavigation(this.map)
   private stations: Station[] = []
-  private readonly ownedWeapons = new Set<WeaponId>(STARTING_WEAPONS)
   private shardsCollected = 0
-  private weaponDefinition = DEFAULT_WEAPON
-  private magazines = Object.fromEntries(WEAPON_ORDER.map((id) => [id, createMagazine(WEAPONS[id])])) as Record<WeaponId, MagazineState>
   private readonly particleGeometry = new THREE.BoxGeometry(0.07, 0.07, 0.07)
   private readonly acidGeometry = new THREE.SphereGeometry(0.16, 7, 7)
   private readonly acidMaterial = new THREE.MeshBasicMaterial({ color: 0x8cff62 })
@@ -208,10 +203,6 @@ export class Game {
   private pendingUpgrades = 0
   private shards = 0
   private kills = 0
-  private ammo = this.weaponDefinition.magazineSize
-  private reserveAmmo: number | null = this.weaponDefinition.reserveAmmo
-  private fireTimer = 0
-  private reloadTimer = 0
   private invulnerability = 0
   private spawnQueue = 0
   private spawnTimer = 0
@@ -226,10 +217,6 @@ export class Game {
   private aiming = false
   private yaw = 0
   private pitch = 0
-  private recoil = 0
-  private muzzleTimer = 0
-  private grenadeCooldown = 0
-  private turretCooldown = 0
   private doorDeniedTimer = 0
   private currentUpgradeIds: string[] = []
   private animationId = 0
@@ -256,7 +243,9 @@ export class Game {
     this.scene.fog = new THREE.FogExp2(0x0b0d1a, 0.0115)
     this.camera.rotation.order = 'YXZ'
     this.camera.position.set(0, 5, 16)
-    this.camera.add(this.weapon.group)
+    this.weapons.configure(this.loadout)
+    this.equipment = this.createEquipmentSystem()
+    this.equipment.onTurretShot = (from, to) => this.spawnTracer(from, to)
     const weaponLight = new THREE.PointLight(0xd8e6ff, 3, 4)
     weaponLight.position.set(0.2, 0.35, 0.25)
     this.camera.add(weaponLight)
@@ -311,6 +300,65 @@ export class Game {
     return this.audio.isMuted
   }
 
+  /** Arma da fuoco attiva (la primaria quando si impugna l'arma bianca). */
+  private get weaponDefinition(): ResolvedWeapon {
+    return this.weapons.current ?? this.loadout.primary
+  }
+
+  private createEquipmentSystem(): EquipmentSystem {
+    return new EquipmentSystem({
+      scene: this.scene,
+      effects: this.effects,
+      solids: () => this.obstacles,
+      targets: () => this.enemies.filter((enemy) => enemy.health > 0 && enemy.spawnTimer <= 0).map((enemy) => enemy.target),
+      damage: (target, amount, source) => {
+        const enemy = this.targetOwners.get(target)
+        if (!enemy || enemy.health <= 0) return
+        enemy.health -= amount * (this.stats.damage / 20)
+        enemy.hitFlash = 0.1
+        enemy.flinch = Math.min(1, enemy.flinch + (source === 'molotov' ? 0.15 : 0.6))
+        if (source === 'molotov') enemy.burnTimer = Math.max(enemy.burnTimer, 0.6)
+      },
+      stunTarget: (target, seconds) => {
+        const enemy = this.targetOwners.get(target)
+        if (enemy) enemy.stunTimer = Math.max(enemy.stunTimer, enemy.kind === 'brute' ? seconds * 0.4 : seconds)
+      },
+      slowTarget: (target, seconds) => {
+        const enemy = this.targetOwners.get(target)
+        if (enemy) enemy.slowTimer = Math.max(enemy.slowTimer, seconds)
+      },
+      localPlayer: () => ({ feet: this.player, eye: this.camera.position, forward: this.camera.getWorldDirection(new THREE.Vector3()), alive: this.state === 'playing' }),
+      onLocalFlash: (intensity) => this.events.onFlash?.(intensity),
+      onLocalStun: () => undefined,
+      onLocalBurn: (damage) => {
+        if (damage > 0) this.damagePlayer(damage)
+      },
+      onRefill: () => {
+        this.weapons.topUp()
+        for (const slot of ['lethal', 'tactical', 'gadget'] as const) {
+          if (slot !== 'gadget') this.cooldowns[slot] = Math.max(0, this.cooldowns[slot] - 2)
+        }
+      },
+      onReveal: (seconds) => {
+        this.radarTimer = seconds
+      },
+      onDecoy: (position, seconds) => {
+        this.decoy = { position, life: seconds }
+      },
+      addSolid: (solid) => {
+        this.obstacles.push(solid)
+      },
+      removeSolid: (solid) => {
+        const index = this.obstacles.indexOf(solid)
+        if (index >= 0) this.obstacles.splice(index, 1)
+      },
+      playAt: (sound, position) => this.audio.playAt(sound, position, this.player, this.yaw),
+      shake: (amount) => {
+        this.cameraShake = Math.max(this.cameraShake, amount)
+      },
+    })
+  }
+
   /** Solo per test e sviluppo: posiziona il giocatore e la visuale. */
   debugPlace(x: number, y: number, z: number, yaw: number, pitch: number): void {
     this.controller.reset(x, y, z)
@@ -358,7 +406,8 @@ export class Game {
     })
   }
 
-  start(bonuses: MetaBonuses, map: MapDefinition = STATION_13): void {
+  start(bonuses: MetaBonuses, map: MapDefinition = STATION_13, loadout?: ResolvedLoadout): void {
+    if (loadout) this.loadout = loadout
     this.clearEntities()
     this.setMap(map)
     this.stats = createBaseStats(bonuses)
@@ -373,17 +422,10 @@ export class Game {
     this.shardsCollected = 0
     this.kills = 0
     this.elapsed = 0
-    this.ownedWeapons.clear()
-    for (const id of STARTING_WEAPONS) this.ownedWeapons.add(id)
-    this.weaponAnimator.reset()
-    this.weaponDefinition = DEFAULT_WEAPON
-    this.weapon.group.scale.setScalar(1)
-    for (const id of WEAPON_ORDER) this.magazines[id] = createMagazine(WEAPONS[id])
-    const magazine = this.magazines[this.weaponDefinition.id]
-    this.ammo = magazine.ammo
-    this.reserveAmmo = magazine.reserveAmmo
-    this.fireTimer = 0
-    this.reloadTimer = 0
+    this.weapons.configure(this.loadout)
+    this.equipment.clear()
+    this.decoy = null
+    this.radarTimer = 0
     this.invulnerability = 0
     this.currentUpgradeIds = []
     this.events.onUpgrade([], 0)
@@ -391,9 +433,9 @@ export class Game {
     this.aiming = false
     this.yaw = 0
     this.pitch = 0
-    this.recoil = 0
-    this.grenadeCooldown = 0
-    this.turretCooldown = 0
+    this.cooldowns.lethal = 0
+    this.cooldowns.tactical = 0
+    this.cooldowns.gadget = 0
     this.doorDeniedTimer = 0
     for (const door of this.doors) {
       door.open = false
@@ -481,6 +523,8 @@ export class Game {
     }
     this.enemyPool.clear()
     this.decals.dispose()
+    this.equipment.dispose()
+    this.weapons.dispose()
     this.effects.dispose()
     for (const station of this.stations) disposeObject(station.model.group)
     this.pipeline.dispose()
@@ -490,7 +534,7 @@ export class Game {
 
   private setState(state: GameState): void {
     this.state = state
-    this.weapon.group.visible = state !== 'menu'
+    this.weapons.setVisible(state !== 'menu')
     if (state !== 'playing' && document.pointerLockElement === this.renderer.domElement) document.exitPointerLock()
     this.events.onStateChange(state)
   }
@@ -614,7 +658,18 @@ export class Game {
     this.scene.add(model.group)
     this.effects.pulse(model.group.position, getZombieColor(kind), 1.4)
     this.spawnBurst(model.group.position.clone().setY(0.3), 0x3a3128, 6)
-    this.enemies.push({
+    let marker = model.group.userData.marker as THREE.Object3D | undefined
+    if (!marker) {
+      // Indicatore del drone radar, visibile attraverso i muri.
+      marker = new THREE.Mesh(new THREE.OctahedronGeometry(0.16), new THREE.MeshBasicMaterial({ color: 0xff4f6e, depthTest: false, transparent: true, opacity: 0.9 }))
+      marker.position.y = model.height + 0.45
+      marker.renderOrder = 999
+      model.group.add(marker)
+      model.group.userData.marker = marker
+    }
+    marker.visible = false
+    const target: EquipmentTarget = { id: `z${Math.random().toString(36).slice(2, 9)}`, feet: model.group.position, height: model.height, radius: stats.radius }
+    const enemy: Enemy = {
       model,
       body: { position: model.group.position, velocityY: 0, grounded: true },
       path: [],
@@ -622,7 +677,10 @@ export class Game {
       spawnTimer: SPAWN_RISE,
       flinch: 0,
       attackAnim: 0,
+      stunTimer: 0,
       knockback: new THREE.Vector3(),
+      target,
+      marker,
       kind,
       health: stats.health,
       speed: stats.speed,
@@ -644,32 +702,17 @@ export class Game {
       score: stats.score,
       xp: stats.xp,
       phase: Math.random() * Math.PI * 2,
-    })
+    }
+    this.targetOwners.set(target, enemy)
+    this.enemies.push(enemy)
   }
 
   private updatePlayer(delta: number): void {
     this.invulnerability = Math.max(0, this.invulnerability - delta)
     this.doorDeniedTimer = Math.max(0, this.doorDeniedTimer - delta)
-    this.fireTimer -= delta
-    this.muzzleTimer = Math.max(0, this.muzzleTimer - delta)
-    this.recoil = Math.max(0, this.recoil - delta * 4)
-    this.weapon.flash.visible = this.muzzleTimer > 0
     this.health = Math.min(this.stats.maxHealth, this.health + this.stats.regen * delta)
 
-    if (this.reloadTimer > 0) {
-      this.reloadTimer -= delta
-      if (this.reloadTimer <= 0) {
-        this.reloadTimer = 0
-        const magazine = reloadMagazine(
-          { ammo: this.ammo, reserveAmmo: this.reserveAmmo },
-          this.weaponDefinition,
-        )
-        this.ammo = magazine.ammo
-        this.reserveAmmo = magazine.reserveAmmo
-      }
-    }
-
-    const input = readMovementInput(this.keys, this.aiming || this.firing || this.reloadTimer > 0)
+    const input = readMovementInput(this.keys, this.aiming || this.firing || this.weapons.reloading)
     const result = this.controller.update(delta, input, this.yaw, {
       speed: this.stats.speed * this.weaponDefinition.moveMultiplier,
       solids: this.obstacles,
@@ -677,15 +720,17 @@ export class Game {
     })
     if (result.landingSpeed > 7) this.cameraShake = Math.max(this.cameraShake, Math.min(0.3, (result.landingSpeed - 7) * 0.05))
 
-    this.updateFirstPersonCamera(delta)
-    if (this.firing && this.fireTimer <= 0 && this.reloadTimer <= 0 && !this.weaponAnimator.switching && !this.controller.sprinting) {
-      if (this.ammo > 0) {
-        this.firePlayerWeapon()
-        this.fireTimer = 1 / (this.weaponDefinition.fireRate * this.stats.fireRate / 8.5)
-      } else {
-        this.startReload()
-      }
+    const frameInput = { aiming: this.aiming, crouched: this.controller.crouched, blocked: this.controller.sprinting, fireRateMultiplier: this.stats.fireRate / 8.5 }
+    const frame = this.weapons.update(delta, frameInput)
+    this.pitch = THREE.MathUtils.clamp(this.pitch - frame.recovery.pitch, -1.45, 1.45)
+    this.yaw -= frame.recovery.yaw
+    for (let shot = 0; shot < frame.shots; shot += 1) {
+      const kick = this.weapons.kick(frameInput)
+      this.pitch = THREE.MathUtils.clamp(this.pitch + kick.pitch, -1.45, 1.45)
+      this.yaw += kick.yaw
+      this.firePlayerWeapon()
     }
+    this.updateFirstPersonCamera(delta)
   }
 
   private updateFirstPersonCamera(delta: number): void {
@@ -697,68 +742,78 @@ export class Game {
     }
     this.camera.rotation.set(this.pitch, this.yaw, this.reducedMotion ? 0 : this.controller.roll)
 
-    const targetFov = this.aiming ? 52 : this.controller.sliding ? 84 : this.controller.sprinting ? 80 : 75
+    const weapon = this.weapons.current
+    const aiming = this.aiming && weapon !== null
+    const adsFov = weapon?.adsFov ?? 52
+    const targetFov = aiming ? adsFov : this.controller.sliding ? 84 : this.controller.sprinting ? 80 : 75
     this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, 1 - Math.exp(-delta * 12))
     this.camera.updateProjectionMatrix()
-
-    const reloadProgress = this.reloadTimer > 0 ? 1 - this.reloadTimer / this.weaponDefinition.reloadDuration : -1
-    this.weaponAnimator.apply(this.weapon.group, delta, {
-      aiming: this.aiming,
+    this.weapons.setScoped(aiming && adsFov <= 30 && this.camera.fov < adsFov + 8)
+    this.weapons.applyPose(delta, {
+      aiming,
       sprinting: this.controller.sprinting,
       sliding: this.controller.sliding,
       crouchAmount: this.controller.crouchAmount,
       bob: this.controller.getBob(this.reducedMotion),
       strafe: this.controller.strafeAmount,
-      reloadProgress,
-      recoil: this.recoil,
       landingKick: this.controller.landingKick,
       airborne: !this.controller.body.grounded,
       reducedMotion: this.reducedMotion,
     })
   }
 
-  private switchWeapon(id: WeaponId): void {
-    if (this.state !== 'playing' || this.weaponDefinition.id === id) return
-    if (!this.ownedWeapons.has(id)) {
-      this.doorDeniedTimer = 0.9
-      this.audio.play('damage')
-      return
+  private switchSlot(slot: ActiveSlot): void {
+    if (this.state !== 'playing') return
+    if (this.weapons.switchTo(slot)) {
+      this.aiming = false
+      this.audio.play('pickup')
+      this.emitHud()
     }
-    this.weaponAnimator.startSwitch()
-    this.magazines[this.weaponDefinition.id] = { ammo: this.ammo, reserveAmmo: this.reserveAmmo }
-    this.weaponDefinition = WEAPONS[id]
-    this.ammo = this.magazines[id].ammo
-    this.reserveAmmo = this.magazines[id].reserveAmmo
-    this.reloadTimer = 0
-    this.fireTimer = 0.2
-    this.firing = false
-    this.aiming = false
-    const modelScale = id === 'smg-9' || id === 'p-12' ? 0.85 : id === 'lmg-75' ? 1.08 : 1
-    this.weapon.group.scale.setScalar(modelScale)
-    this.audio.play('pickup')
-    this.emitHud()
   }
 
   private startReload(): void {
-    if (this.reloadTimer > 0 || this.ammo === this.weaponDefinition.magazineSize || this.reserveAmmo === 0 || this.state !== 'playing') return
-    this.reloadTimer = this.weaponDefinition.reloadDuration
-    this.firing = false
+    if (this.state !== 'playing') return
+    this.weapons.startReload()
+  }
+
+  /** Fendente con l'arma bianca: colpisce gli zombie nel cono frontale. */
+  private performMelee(quick: boolean): void {
+    if (this.state !== 'playing') return
+    const melee = this.weapons.startMelee(quick)
+    if (!melee) return
+    this.audio.play('dash')
+    const forward = this.camera.getWorldDirection(new THREE.Vector3()).setY(0).normalize()
+    const minimumDot = Math.cos(melee.arc / 2)
+    let hit = false
+    for (const enemy of this.enemies) {
+      if (enemy.health <= 0 || enemy.spawnTimer > 0) continue
+      const offset = enemy.body.position.clone().sub(this.player)
+      if (Math.abs(offset.y) > 1.4) continue
+      offset.setY(0)
+      const distance = offset.length()
+      if (distance > melee.range + enemy.radius) continue
+      if (distance > 0.3 && offset.divideScalar(distance).dot(forward) < minimumDot) continue
+      enemy.health -= melee.damage * (this.stats.damage / 20)
+      enemy.hitFlash = 0.12
+      enemy.flinch = 1
+      enemy.knockback.addScaledVector(forward, enemy.kind === 'brute' ? 1 : 4)
+      this.spawnBurst(enemy.model.body.getWorldPosition(new THREE.Vector3()), 0x9b3147, 8)
+      hit = true
+    }
+    if (hit) {
+      this.events.onHit(false)
+      this.audio.play('hit')
+      this.cameraShake = Math.max(this.cameraShake, 0.12)
+    }
+    this.killDestroyedEnemies()
   }
 
   private firePlayerWeapon(): void {
-    this.ammo -= 1
-    this.muzzleTimer = 0.045
-    this.recoil = Math.min(0.16, this.recoil + 0.045)
-    this.pitch = THREE.MathUtils.clamp(
-      this.pitch + this.weaponDefinition.recoil * (this.aiming ? 0.55 : 1),
-      -1.45,
-      1.45,
-    )
     this.audio.play('shoot')
 
     const origin = this.camera.getWorldPosition(new THREE.Vector3())
     const baseDirection = this.camera.getWorldDirection(new THREE.Vector3())
-    const muzzlePosition = this.weapon.muzzle.getWorldPosition(new THREE.Vector3())
+    const muzzlePosition = this.weapons.muzzlePosition()
     const critical = Math.random() < this.stats.critChance
     let hitAny = false
 
@@ -845,7 +900,6 @@ export class Game {
       }
     }
     if (hitAny) this.audio.play('hit')
-    if (!this.weaponDefinition.automatic) this.firing = false
     this.killDestroyedEnemies()
   }
 
@@ -1000,7 +1054,7 @@ export class Game {
     const weaponId = definition.weapon!
     const name = WEAPONS[weaponId].name.split(' //')[0]
     // Un'arma già posseduta si ricarica a metà prezzo.
-    return this.ownedWeapons.has(weaponId)
+    return this.weapons.has(weaponId)
       ? { label: `MUNIZIONI ${name}`, cost: Math.ceil(definition.cost / 2) }
       : { label: `ACQUISTA ${name}`, cost: definition.cost }
   }
@@ -1031,20 +1085,14 @@ export class Game {
       if (definition.kind === 'medkit') {
         this.health = Math.min(this.stats.maxHealth, this.health + this.stats.maxHealth * 0.5)
       } else if (definition.kind === 'ammo') {
-        for (const id of this.ownedWeapons) this.magazines[id] = createMagazine(WEAPONS[id])
-        this.magazines[this.weaponDefinition.id] = createMagazine(this.weaponDefinition)
-        this.ammo = this.weaponDefinition.magazineSize
-        this.reserveAmmo = this.weaponDefinition.reserveAmmo
+        this.weapons.refill()
+        this.cooldowns.lethal = 0
+        this.cooldowns.tactical = 0
       } else if (definition.weapon) {
         const weaponId = definition.weapon
-        this.ownedWeapons.add(weaponId)
-        this.magazines[weaponId] = createMagazine(WEAPONS[weaponId])
-        if (this.weaponDefinition.id === weaponId) {
-          this.ammo = this.weaponDefinition.magazineSize
-          this.reserveAmmo = this.weaponDefinition.reserveAmmo
-        } else {
-          this.switchWeapon(weaponId)
-        }
+        // Un'arma nuova sostituisce quella dello stesso slot; una posseduta si ricarica.
+        if (this.weapons.has(weaponId)) this.weapons.refill(weaponId)
+        else this.weapons.replace(resolveWeapon(WEAPONS[weaponId], this.loadout.attachments[weaponId]))
       }
       this.effects.pulse(model.group.position, STATION_COLORS[definition.kind], 1.8)
       this.spawnBurst(model.group.position.clone().setY(model.group.position.y + 1.3), STATION_COLORS[definition.kind], 14)
@@ -1069,124 +1117,38 @@ export class Game {
     }
   }
 
-  private throwGrenade(): void {
-    if (this.state !== 'playing' || this.grenadeCooldown > 0) return
-    const direction = this.camera.getWorldDirection(new THREE.Vector3())
-    const model = createGrenadeModel()
-    model.group.position.copy(this.camera.position).addScaledVector(direction, 0.6)
-    const velocity = direction.multiplyScalar(13)
-    velocity.y += 3.5
-    velocity.add(this.controller.velocity.clone().multiplyScalar(0.5))
-    this.scene.add(model.group)
-    this.grenades.push({ model, velocity, timer: GRENADE_FUSE, trailTimer: 0 })
-    this.grenadeCooldown = 7
-    this.weaponAnimator.startSwitch()
-  }
-
-  private explodeGrenade(grenade: Grenade): void {
-    const position = grenade.model.group.position.clone()
-    const ground = getGroundHeight(position.x, position.z, position.y + 0.2, 0.2, this.obstacles)
-    this.effects.explosion(position, GRENADE_RADIUS, 0xff9a4a, ground)
-    this.spawnBurst(position, 0xffd27a, 18)
-    const playerDistance = this.player.distanceTo(position)
-    this.cameraShake = Math.max(this.cameraShake, Math.max(0.12, 0.6 - playerDistance * 0.04))
-    this.audio.playAt('damage', position, this.player, this.yaw)
-    for (const enemy of this.enemies) {
-      const center = enemy.model.group.position.clone().setY(enemy.model.group.position.y + enemy.model.height * 0.5)
-      const distance = center.distanceTo(position)
-      if (distance > GRENADE_RADIUS) continue
-      const direction = center.clone().sub(position)
-      if (raycastObstacles(position, direction.clone().normalize(), distance, this.obstacles) !== null) continue
-      const falloff = 1 - distance / GRENADE_RADIUS
-      enemy.health -= 140 * Math.max(0.25, falloff) * (this.stats.damage / 20)
-      enemy.hitFlash = 0.12
-      enemy.flinch = 1
-      enemy.knockback.addScaledVector(direction.setY(0).normalize(), 5 * falloff)
+  private useEquipment(slot: EquipmentSlot): void {
+    if (this.state !== 'playing' || this.cooldowns[slot] > 0) return
+    const id = this.loadout[slot]
+    const definition = EQUIPMENT[id]
+    if (definition.thrown) {
+      const direction = this.camera.getWorldDirection(new THREE.Vector3())
+      const position = this.camera.position.clone().addScaledVector(direction, 0.6)
+      const velocity = direction.multiplyScalar(13)
+      velocity.y += 3.5
+      velocity.add(this.controller.velocity.clone().multiplyScalar(0.5))
+      this.equipment.throw(id as ThrowableKind, position, velocity, { owned: true, hostile: false })
+      this.weapons.animator.startSwitch()
+    } else {
+      const forward = this.camera.getWorldDirection(new THREE.Vector3()).setY(0).normalize()
+      const position = this.player.clone().addScaledVector(forward, id === 'shield' ? 1.4 : 1.6)
+      resolveBodyCollisions(position, 0.5, 1, this.obstacles)
+      position.y = getGroundHeight(position.x, position.z, this.player.y + 0.3, 0.5, this.obstacles)
+      this.equipment.deploy(id as DeployableKind, position, this.yaw, { owned: true, hostile: false })
+      this.audio.play('upgrade')
     }
-    this.killDestroyedEnemies()
-  }
-
-  private deployTurret(): void {
-    if (this.state !== 'playing' || this.turretCooldown > 0) return
-    const direction = this.camera.getWorldDirection(new THREE.Vector3()).setY(0).normalize()
-    const position = this.player.clone().addScaledVector(direction, 1.8)
-    resolveBodyCollisions(position, 0.5, 1, this.obstacles)
-    position.y = getGroundHeight(position.x, position.z, this.player.y + 0.3, 0.5, this.obstacles)
-    const model = createTurretModel(0x6affea)
-    model.group.position.copy(position)
-    model.group.rotation.y = this.yaw
-    this.scene.add(model.group)
-    this.turrets.push({ animator: new TurretAnimator(model), life: TURRET_LIFE, fireTimer: 0.6 })
-    this.effects.pulse(position, 0x6affea, 1.8)
-    this.turretCooldown = 18
-    this.audio.play('upgrade')
+    this.cooldowns[slot] = definition.cooldown
+    this.emitHud()
   }
 
   private updateEquipment(delta: number): void {
-    this.grenadeCooldown = Math.max(0, this.grenadeCooldown - delta)
-    this.turretCooldown = Math.max(0, this.turretCooldown - delta)
-
-    for (let index = this.grenades.length - 1; index >= 0; index -= 1) {
-      const grenade = this.grenades[index]
-      if (!grenade) continue
-      const position = grenade.model.group.position
-      grenade.timer -= delta
-      stepBouncingProjectile(position, grenade.velocity, delta, this.obstacles)
-      grenade.model.group.rotation.x += grenade.velocity.length() * delta * 2
-      grenade.model.group.rotation.z += grenade.velocity.length() * delta * 1.3
-      // La luce lampeggia sempre più velocemente prima dell'esplosione.
-      const blink = Math.sin((GRENADE_FUSE - grenade.timer) * (8 + (GRENADE_FUSE - grenade.timer) * 22)) > 0
-      grenade.model.light.material.emissiveIntensity = blink ? 3.5 : 0.3
-      grenade.trailTimer -= delta
-      if (grenade.trailTimer <= 0 && grenade.velocity.lengthSq() > 4) {
-        this.effects.trail(position, 0x6affea)
-        grenade.trailTimer = 0.03
-      }
-      if (grenade.timer <= 0) {
-        this.explodeGrenade(grenade)
-        this.scene.remove(grenade.model.group)
-        disposeObject(grenade.model.group)
-        this.grenades.splice(index, 1)
-      }
-    }
-
-    for (let index = this.turrets.length - 1; index >= 0; index -= 1) {
-      const turret = this.turrets[index]
-      if (!turret) continue
-      turret.life -= delta
-      turret.fireTimer -= delta
-      const group = turret.animator.model.group
-      const origin = group.position.clone().setY(group.position.y + 0.85)
-      let target: Enemy | null = null
-      let targetDistance = TURRET_RANGE
-      for (const enemy of this.enemies) {
-        if (enemy.health <= 0 || enemy.spawnTimer > 0) continue
-        const aim = enemy.model.body.getWorldPosition(new THREE.Vector3())
-        const distance = aim.distanceTo(origin)
-        if (distance >= targetDistance) continue
-        const blocked = raycastObstacles(origin, aim.clone().sub(origin).normalize(), distance, this.obstacles) !== null
-        if (!blocked) {
-          target = enemy
-          targetDistance = distance
-        }
-      }
-      const targetPosition = target ? target.model.body.getWorldPosition(new THREE.Vector3()) : null
-      turret.animator.update(delta, targetPosition, turret.life / TURRET_LIFE)
-      if (target && targetPosition && turret.fireTimer <= 0) {
-        target.health -= 12 * (this.stats.damage / 20)
-        target.hitFlash = 0.08
-        target.flinch = Math.min(1, target.flinch + 0.3)
-        const muzzle = turret.animator.fire().getWorldPosition(new THREE.Vector3())
-        this.spawnTracer(muzzle, targetPosition)
-        this.effects.muzzle(muzzle, 0x8effd9)
-        this.effects.sparks(targetPosition, muzzle.clone().sub(targetPosition).normalize(), 0x9b3147, 3)
-        turret.fireTimer = 0.2
-        this.audio.playAt('shoot', group.position, this.player, this.yaw)
-      }
-      if (turret.life <= 0) {
-        this.effects.explosion(origin, 1.6, 0x6affea, group.position.y)
-        this.removeTurret(index)
-      }
+    for (const slot of ['lethal', 'tactical', 'gadget'] as const) this.cooldowns[slot] = Math.max(0, this.cooldowns[slot] - delta)
+    this.equipment.update(delta)
+    this.radarTimer = Math.max(0, this.radarTimer - delta)
+    if (this.decoy) {
+      this.decoy.life -= delta
+      if (Math.sin(this.decoy.life * 9) > 0.6) this.effects.muzzle(this.decoy.position.clone().setY(this.decoy.position.y + 0.3), 0xffe066)
+      if (this.decoy.life <= 0) this.decoy = null
     }
     this.killDestroyedEnemies()
   }
@@ -1229,15 +1191,33 @@ export class Game {
         continue
       }
 
+      enemy.marker.visible = this.radarTimer > 0
+      enemy.stunTimer = Math.max(0, enemy.stunTimer - delta)
+      if (enemy.stunTimer > 0) {
+        // Stordito dal flashbang: barcolla sul posto.
+        enemy.model.group.rotation.z = Math.sin(this.elapsed * 11 + enemy.phase) * 0.16
+        enemy.model.leftArm.rotation.x = -0.3
+        enemy.model.rightArm.rotation.x = -0.5
+        moveBody(enemy.body, enemy.knockback.clone().multiplyScalar(delta), delta, enemy.radius, Math.min(enemy.model.height, 1.9), this.obstacles, this.map.arenaLimit)
+        enemy.knockback.multiplyScalar(Math.exp(-delta * 8))
+        continue
+      }
+      // Bersaglio: l'esca se è vicina, una posizione falsata se il giocatore è nel fumo.
+      let targetPoint: THREE.Vector3 = this.player
+      if (this.decoy && enemy.body.position.distanceTo(this.decoy.position) < 22) targetPoint = this.decoy.position
+      else if (this.equipment.isInSmoke(this.camera.position) && enemy.body.position.distanceTo(this.player) > 3) {
+        targetPoint = this.player.clone().add(new THREE.Vector3(Math.sin(enemy.phase) * 6, 0, Math.cos(enemy.phase) * 6))
+      }
       const verticalGap = this.player.y - enemy.body.position.y
       const sameLevel = Math.abs(verticalGap) < 1.3
-      const toPlayer = this.player.clone().sub(enemy.model.group.position).setY(0)
+      const playerDistance = Math.hypot(this.player.x - enemy.body.position.x, this.player.z - enemy.body.position.z)
+      const toPlayer = targetPoint.clone().sub(enemy.model.group.position).setY(0)
       const distance = Math.max(toPlayer.length(), 0.001)
       const direction = toPlayer.clone().divideScalar(distance)
       // Percorso fra piani e porte; inseguimento diretto quando si è nella stessa area.
       enemy.pathTimer -= delta
       if (enemy.pathTimer <= 0 && !(this.navigation.isOnStairs(enemy.body.position) && enemy.path.length > 0)) {
-        enemy.path = this.navigation.findPath(enemy.body.position, this.player, (doorId) => this.doors.some((door) => door.definition.id === doorId && door.open))
+        enemy.path = this.navigation.findPath(enemy.body.position, targetPoint, (doorId) => this.doors.some((door) => door.definition.id === doorId && door.open))
         enemy.pathTimer = 0.45 + Math.random() * 0.2
       }
       advanceWaypoints(enemy.body.position, enemy.path)
@@ -1347,7 +1327,7 @@ export class Game {
         enemy.model.leftArm.rotation.x = -1.2 - swing * 1.4
         enemy.model.rightArm.rotation.x = -1.1 - swing * 1.6
       }
-      if (distance < enemy.radius + 0.65 && sameLevel && enemy.attackCooldown <= 0) {
+      if (playerDistance < enemy.radius + 0.65 && sameLevel && enemy.attackCooldown <= 0) {
         enemy.attackAnim = 1
         this.damagePlayer(enemy.damage)
         enemy.attackCooldown = enemy.attackInterval * (enemy.buffTimer > 0 ? 0.75 : 1)
@@ -1582,14 +1562,6 @@ export class Game {
     this.projectiles.splice(index, 1)
   }
 
-  private removeTurret(index: number): void {
-    const turret = this.turrets[index]
-    if (!turret) return
-    this.scene.remove(turret.animator.model.group)
-    disposeObject(turret.animator.model.group)
-    this.turrets.splice(index, 1)
-  }
-
   private clearEntities(): void {
     this.decals.clear()
     for (const enemy of this.enemies) this.releaseEnemyModel(enemy.kind, enemy.model)
@@ -1610,12 +1582,8 @@ export class Game {
       hazard.mesh.geometry.dispose()
       hazard.mesh.material.dispose()
     }
-    for (const grenade of this.grenades) {
-      this.scene.remove(grenade.model.group)
-      disposeObject(grenade.model.group)
-    }
+    this.equipment.clear()
     this.effects.clear()
-    for (let index = this.turrets.length - 1; index >= 0; index -= 1) this.removeTurret(index)
     this.enemies.length = 0
     this.dyingEnemies.length = 0
     this.projectiles.length = 0
@@ -1623,7 +1591,6 @@ export class Game {
     this.particles.length = 0
     this.tracers.length = 0
     this.hazards.length = 0
-    this.grenades.length = 0
   }
 
   private releaseEnemyModel(kind: EnemyKind, model: EnemyModel): void {
@@ -1655,28 +1622,28 @@ export class Game {
       xpNext: this.xpNext,
       shards: this.shards,
       kills: this.kills,
-      ammo: this.ammo,
-      magazineSize: this.weaponDefinition.magazineSize,
-      reserveAmmo: this.reserveAmmo,
-      weaponName: this.weaponDefinition.name,
-      reloading: this.reloadTimer > 0,
+      ammo: this.weapons.ammo,
+      magazineSize: this.weapons.current?.magazineSize ?? 0,
+      reserveAmmo: this.weapons.reserve,
+      weaponName: this.weapons.weaponName,
+      reloading: this.weapons.reloading,
+      melee: this.weapons.slot === 'melee',
+      scoped: this.weapons.current !== null && this.aiming && this.weaponDefinition.adsFov <= 30,
       aiming: this.aiming,
       waveBreak: this.waveBreak,
       enemiesRemaining: this.enemies.length + this.spawnQueue,
-      grenadeCooldown: this.grenadeCooldown,
-      turretCooldown: this.turretCooldown,
+      equipment: (['lethal', 'tactical', 'gadget'] as const).map((slot) => ({
+        key: slot === 'lethal' ? 'G' : slot === 'tactical' ? 'Q' : 'T',
+        name: EQUIPMENT[this.loadout[slot]].name,
+        cooldown: this.cooldowns[slot],
+      })),
       interaction: (() => {
         const interaction = this.getNearbyInteraction()
         if (!interaction) return null
         const { label, cost } = this.describeInteraction(interaction)
         return { label, cost, canAfford: this.shards >= cost, denied: this.doorDeniedTimer > 0 }
       })(),
-      weaponSlots: WEAPON_ORDER.map((id, index) => ({
-        key: String(index + 1),
-        name: WEAPONS[id].name.split(' //')[0]!,
-        owned: this.ownedWeapons.has(id),
-        active: this.weaponDefinition.id === id,
-      })),
+      weaponSlots: this.weapons.hudSlots,
       stance: this.controller.sliding ? 'slide' : this.controller.crouched ? 'crouch' : 'stand',
       performance: { fps: this.fps, drawCalls: this.renderer.info.render.calls },
     })
@@ -1754,11 +1721,10 @@ export class Game {
     if (this.state !== 'playing') return
     if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.code)) event.preventDefault()
     this.keys.add(event.code)
-    if (/^Digit[1-6]$/.test(event.code)) {
-      const weaponIndex = Number(event.code.at(-1)) - 1
-      const weaponId = WEAPON_ORDER[weaponIndex]
-      if (weaponId) this.switchWeapon(weaponId)
-    }
+    if (event.code === 'Digit1') this.switchSlot('primary')
+    if (event.code === 'Digit2') this.switchSlot('secondary')
+    if (event.code === 'Digit3') this.switchSlot('melee')
+    if (event.code === 'KeyF' && !event.repeat) this.performMelee(true)
     const upgradeIndex = UPGRADE_KEYS.indexOf(event.code)
     if (upgradeIndex >= 0 && !event.repeat) {
       const upgradeId = this.currentUpgradeIds[upgradeIndex]
@@ -1767,8 +1733,9 @@ export class Game {
     if (event.code === 'KeyR') this.startReload()
     if (event.code === 'KeyE') this.interact()
     if (event.code === 'KeyC' && !event.repeat) this.controller.pressCrouch()
-    if (event.code === 'KeyG') this.throwGrenade()
-    if (event.code === 'KeyT') this.deployTurret()
+    if (event.code === 'KeyG') this.useEquipment('lethal')
+    if (event.code === 'KeyQ') this.useEquipment('tactical')
+    if (event.code === 'KeyT') this.useEquipment('gadget')
     if (event.code === 'Space' && !event.repeat) this.controller.jump(this.obstacles)
   }
 
@@ -1781,7 +1748,7 @@ export class Game {
     this.yaw -= event.movementX * this.mouseSensitivity
     this.pitch -= event.movementY * this.mouseSensitivity
     this.pitch = THREE.MathUtils.clamp(this.pitch, -1.45, 1.45)
-    this.weaponAnimator.addLook(event.movementX, event.movementY)
+    this.weapons.animator.addLook(event.movementX, event.movementY)
   }
 
   private readonly onMouseButtonDown = (event: MouseEvent): void => {
@@ -1791,12 +1758,19 @@ export class Game {
       this.requestMouse()
       return
     }
-    if (event.button === 0) this.firing = true
+    if (event.button === 0) {
+      this.firing = true
+      if (this.weapons.slot === 'melee') this.performMelee(false)
+      else this.weapons.setTrigger(true)
+    }
     if (event.button === 2) this.aiming = true
   }
 
   private readonly onMouseButtonUp = (event: MouseEvent): void => {
-    if (event.button === 0) this.firing = false
+    if (event.button === 0) {
+      this.firing = false
+      this.weapons.setTrigger(false)
+    }
     if (event.button === 2) this.aiming = false
   }
 
