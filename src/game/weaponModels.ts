@@ -195,7 +195,8 @@ export function createViewWeapon(weapon: WeaponDefinition, attachments: Attachme
     add(new THREE.BoxGeometry(0.185, 0.025, shape.receiver * 0.35), accent, 0, shape.height / 2 - 0.005, -0.28 - shape.receiver * 0.2)
   }
 
-  // Caricatore.
+  // Caricatore: le sue parti finiscono in un gruppo a sé, così la ricarica può farlo cadere e reinserirlo.
+  const magazineStart = group.children.length
   const extended = attachments.magazine === 'extended-mag'
   const magScale = extended ? 1.45 : 1
   const magZ = shape.pistol ? 0.02 : -0.42
@@ -211,6 +212,13 @@ export function createViewWeapon(weapon: WeaponDefinition, attachments: Attachme
   } else if (shape.magazine === 'pistol' && extended) {
     add(new RoundedBoxGeometry(0.075, 0.12, 0.08, 2, 0.015), dark, 0, -0.29, 0.06, -0.22)
   }
+  if (shape.magazine === 'pistol') {
+    // Caricatore nell'impugnatura: se ne vede il fondello, e cade intero durante la ricarica.
+    add(new RoundedBoxGeometry(0.07, 0.2, 0.085, 2, 0.012), metal, 0, -0.16, 0.035, -0.22)
+  }
+  const magazine = new THREE.Group()
+  for (const part of group.children.slice(magazineStart)) magazine.add(part)
+  group.add(magazine)
 
   // Ottiche.
   const opticY = shape.pistol ? 0.1 : shape.height / 2 + 0.07
@@ -259,10 +267,14 @@ export function createViewWeapon(weapon: WeaponDefinition, attachments: Attachme
     muzzleZ -= 0.1
   }
 
+  let supportHand: THREE.Object3D | undefined
   if (options.hands !== false) {
     add(new RoundedBoxGeometry(0.16, 0.15, 0.22, 3, 0.045), glove, 0.03, shape.pistol ? -0.15 : -0.19, shape.pistol ? 0.04 : -0.05)
-    add(new RoundedBoxGeometry(0.17, 0.14, 0.24, 3, 0.045), glove, shape.pistol ? -0.06 : -0.02, shape.pistol ? -0.17 : -0.1, shape.pistol ? 0.08 : receiverFront - 0.1)
+    supportHand = add(new RoundedBoxGeometry(0.17, 0.14, 0.24, 3, 0.045), glove, shape.pistol ? -0.06 : -0.02, shape.pistol ? -0.17 : -0.1, shape.pistol ? 0.08 : receiverFront - 0.1)
+    supportHand.userData.base = supportHand.position.clone()
+    supportHand.userData.magazineZ = magZ
   }
+  const reloadStyle = weapon.id === 'r-44' ? 'cylinder' : shape.magazine === 'none' ? 'shells' : shape.pistol ? 'pistol' : 'magazine'
 
   const muzzle = new THREE.Object3D()
   muzzle.position.set(0, 0.035, muzzleZ - 0.01)
@@ -277,7 +289,7 @@ export function createViewWeapon(weapon: WeaponDefinition, attachments: Attachme
   flash.add(new THREE.PointLight(0xffa34d, attachments.muzzle === 'suppressor' ? 2 : 7, 3))
   muzzle.add(flash)
   group.visible = false
-  return { group, muzzle, flash }
+  return { group, muzzle, flash, magazine, supportHand, reloadStyle }
 }
 
 /** Arma bianca in prima persona. */

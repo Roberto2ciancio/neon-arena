@@ -235,6 +235,8 @@ export class Game {
   private firePunch = 0
   private punchRoll = 1
   private precisionHitThisShot = false
+  /** Colpi alla testa o ai punti deboli nella run (statistiche del profilo). */
+  private precisionHits = 0
   private groanTimer = 2
   private reducedMotion = false
   private mouseSensitivity = 0.002
@@ -472,6 +474,7 @@ export class Game {
     this.shards = 0
     this.shardsCollected = 0
     this.kills = 0
+    this.precisionHits = 0
     this.elapsed = 0
     this.weapons.configure(this.loadout)
     this.equipment.clear()
@@ -615,6 +618,8 @@ export class Game {
       shards: this.shardsCollected + Math.floor(this.score / 500) + (won ? 10 : 0),
       time: Math.floor(this.elapsed),
       won,
+      map: this.map.name,
+      precisionHits: this.precisionHits,
     }
   }
 
@@ -1053,7 +1058,10 @@ export class Game {
     const precisionHit = hit.zone === 'head' || hit.zone === 'generator' || hit.zone === 'core'
       || hit.zone === 'spine' || hit.zone === 'throat'
     if (precisionHit) this.score += hit.zone === 'head' ? 25 : 50
-    if (precisionHit) this.precisionHitThisShot = true
+    if (precisionHit) {
+      this.precisionHitThisShot = true
+      this.precisionHits += 1
+    }
     this.events.onHit(precisionHit)
     this.spawnBurst(hit.point, precisionHit ? 0xffd166 : 0x9b3147, precisionHit ? 7 : 4)
   }

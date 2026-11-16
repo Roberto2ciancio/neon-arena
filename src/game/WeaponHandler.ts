@@ -1,3 +1,5 @@
+import { getReloadCues } from './reloadAnimation'
+import type { ReloadCue } from './reloadAnimation'
 import { getGunSoundProfile } from './gunSounds'
 import type { GunSoundProfile } from './gunSounds'
 import * as THREE from 'three'
@@ -32,7 +34,7 @@ export interface FrameInput {
   fireRateMultiplier?: number
 }
 
-export type MechanicalSound = 'dry' | 'reloadOut' | 'reloadIn'
+export type MechanicalSound = 'dry' | ReloadCue
 
 export interface FrameResult {
   /** Colpi da risolvere in questo frame (raycast a carico del motore). */
@@ -74,6 +76,7 @@ export class WeaponHandler {
   private scoped = false
   visualRecoil = 0
   private pendingSounds: MechanicalSound[] = []
+  private reloadCueIndex = 0
 
   constructor(private readonly parent: THREE.Object3D) {}
 
@@ -261,7 +264,7 @@ export class WeaponHandler {
     if (!current || this.reloadTimer > 0 || current.magazine.ammo >= current.weapon.magazineSize || current.magazine.reserveAmmo === 0) return false
     this.reloadTimer = current.weapon.reloadDuration
     this.burstRemaining = 0
-    this.pendingSounds.push('reloadOut')
+    this.reloadCueIndex = 0
     return true
   }
 
@@ -292,10 +295,16 @@ export class WeaponHandler {
     let shots = 0
     if (current && this.reloadTimer > 0) {
       this.reloadTimer -= delta
+      // Rumori meccanici sincronizzati con le fasi dell'animazione.
+      const progress = Math.min(1, 1 - this.reloadTimer / current.weapon.reloadDuration)
+      const cues = getReloadCues(current.model.reloadStyle ?? 'magazine')
+      while (this.reloadCueIndex < cues.length && progress >= cues[this.reloadCueIndex]!.at) {
+        this.pendingSounds.push(cues[this.reloadCueIndex]!.sound)
+        this.reloadCueIndex += 1
+      }
       if (this.reloadTimer <= 0) {
         this.reloadTimer = 0
         current.magazine = reloadMagazine(current.magazine, current.weapon)
-        this.pendingSounds.push('reloadIn')
       }
     }
     if (current && this.reloadTimer <= 0 && this.meleeTimer <= 0 && !input.blocked && this.drawTimer <= 0) {
@@ -356,7 +365,8 @@ export class WeaponHandler {
     const swing = this.meleeTimer > 0 ? 1 - this.meleeTimer / MELEE_SWING : -1
     const group = this.meleeTimer > 0 || this.activeSlot === 'melee' ? this.meleeModel : current?.model.group
     if (!group) return
-    this.animator.apply(group, delta, { ...pose, recoil: this.visualRecoil, reloadProgress, swing })
+    this.animator.apply(group, delta, { ...pose, recoil: this.visualRecoil, reloadProgress, swing, reloadStyle: current?.model.reloadStyle })
+    if (current) this.animator.applyParts(current.model, reloadProgress)
   }
 
   dispose(): void {

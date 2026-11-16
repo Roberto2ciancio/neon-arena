@@ -85,6 +85,10 @@ export interface RunResult {
   shards: number
   time: number
   won?: boolean
+  /** Mappa giocata (per lo storico del profilo). */
+  map?: string
+  /** Colpi a segno su testa o punti deboli. */
+  precisionHits?: number
 }
 
 export interface LeaderboardEntry {

@@ -1,5 +1,6 @@
 import { AccountSaves, mergeSaves } from './game/accountSave'
 import type { PlayerSave } from './game/accountSave'
+import { AccountNames, checkUsername, USERNAME_MESSAGES, UsernameError } from './game/accountName'
 import { AUTH_ERROR_MESSAGES, AuthError, SupabaseAuth } from './game/auth'
 
 const WELCOME_KEY = 'neon-arena:welcome:v1'
@@ -12,6 +13,8 @@ interface AccountPanelOptions {
   getLocal: () => PlayerSave
   applyMerged: (save: PlayerSave) => void
   onProfileChange: () => void
+  /** Nome utente dell'account appena letto o cambiato (null se non ancora scelto). */
+  onUsername: (username: string | null) => void
 }
 
 function byId<T extends HTMLElement>(id: string): T {
@@ -27,12 +30,19 @@ function byId<T extends HTMLElement>(id: string): T {
  */
 export class AccountPanel {
   private readonly saves: AccountSaves | null
+  private readonly names: AccountNames | null
+  private currentUsername: string | null = null
   private mode: 'login' | 'signup' = 'login'
   private saveTimer = 0
   private busy = false
 
   constructor(private readonly options: AccountPanelOptions) {
     this.saves = options.auth ? new AccountSaves(options.auth) : null
+    this.names = options.auth ? new AccountNames(options.auth) : null
+    byId<HTMLFormElement>('account-name-form').addEventListener('submit', (event) => {
+      event.preventDefault()
+      void this.saveUsername(byId<HTMLInputElement>('account-name-input').value)
+    })
     byId('account-button').addEventListener('click', () => this.open())
     byId('account-close').addEventListener('click', () => this.close())
     byId('welcome-guest').addEventListener('click', () => this.dismissWelcome())
@@ -70,6 +80,11 @@ export class AccountPanel {
   async accountCredentials(): Promise<{ accessToken: string; userId: string } | null> {
     const session = await this.options.auth?.getValidSession()
     return session ? { accessToken: session.accessToken, userId: session.user.id } : null
+  }
+
+  /** Nome utente dell'account, o null da ospite o se non è ancora stato scelto. */
+  get username(): string | null {
+    return this.signedIn ? this.currentUsername : null
   }
 
   get email(): string {
@@ -128,6 +143,7 @@ export class AccountPanel {
     })
     byId('account-submit').querySelector('span')!.textContent = mode === 'signup' ? 'CREA ACCOUNT' : 'ACCEDI'
     byId<HTMLInputElement>('account-password').autocomplete = mode === 'signup' ? 'new-password' : 'current-password'
+    byId('account-username-row').classList.toggle('hidden', mode !== 'signup')
     this.setStatus(mode === 'signup' ? 'Il profilo ospite attuale verrà salvato nel nuovo account.' : '')
   }
 
@@ -144,6 +160,10 @@ export class AccountPanel {
     byId('account-form').classList.toggle('hidden', signedIn || !available)
     byId('account-signed').classList.toggle('hidden', !signedIn)
     byId('account-email-display').textContent = this.email
+    byId('account-name-label').textContent = this.currentUsername ? 'NOME UTENTE' : 'SCEGLI IL TUO NOME UTENTE'
+    const nameInput = byId<HTMLInputElement>('account-name-input')
+    if (document.activeElement !== nameInput) nameInput.value = this.currentUsername ?? ''
+    byId<HTMLButtonElement>('account-name-save').disabled = this.busy
     byId('account-button').textContent = signedIn ? 'ACCOUNT' : 'ACCEDI / REGISTRATI'
     byId('account-close').textContent = signedIn ? 'CHIUDI' : 'CONTINUA COME OSPITE'
     byId('welcome-account').toggleAttribute('disabled', !available)
@@ -160,7 +180,13 @@ export class AccountPanel {
     this.setStatus(this.mode === 'signup' ? 'Creazione dell’account...' : 'Accesso in corso...')
     try {
       if (this.mode === 'signup') {
-        const result = await auth.signUp(email, password)
+        const username = byId<HTMLInputElement>('account-username').value.trim()
+        const problem = checkUsername(username)
+        if (problem) {
+          this.setStatus(USERNAME_MESSAGES[problem], true)
+          return
+        }
+        const result = await auth.signUp(email, password, username)
         if (result.needsConfirmation) {
           this.setStatus('Account creato: apri il link di conferma che ti abbiamo inviato via email, poi accedi.', false, true)
           this.setMode('login')
@@ -192,9 +218,54 @@ export class AccountPanel {
     } catch {
       this.setStatus('Accesso riuscito, ma il salvataggio online non è raggiungibile: riproverò più tardi.', true)
     }
+    await this.resolveUsername()
     byId('welcome-card').classList.add('hidden')
     this.render()
     this.options.onProfileChange()
+  }
+
+  /**
+   * Legge il nome utente dell'account. Al primo accesso rivendica quello scelto alla
+   * registrazione; se è stato preso nel frattempo, chiede di sceglierne un altro.
+   */
+  private async resolveUsername(): Promise<void> {
+    if (!this.names) return
+    try {
+      this.currentUsername = await this.names.load()
+      const wanted = this.options.auth?.session?.user.username
+      if (!this.currentUsername && wanted) {
+        try {
+          this.currentUsername = await this.names.claim(wanted)
+        } catch (error) {
+          if (error instanceof UsernameError && error.code === 'taken') this.setStatus(`Il nome ${wanted} è stato preso da un altro giocatore: scegline uno nuovo.`, true)
+        }
+      }
+      if (!this.currentUsername) {
+        this.open()
+        byId<HTMLInputElement>('account-name-input').focus()
+      }
+    } catch {
+      // Riproveremo al prossimo accesso; nel frattempo resta il callsign locale.
+    }
+    this.options.onUsername(this.currentUsername)
+    this.render()
+  }
+
+  private async saveUsername(value: string): Promise<void> {
+    if (!this.names || this.busy) return
+    this.busy = true
+    this.render()
+    try {
+      this.currentUsername = await this.names.claim(value)
+      this.setStatus(`Nome utente salvato: ${this.currentUsername}.`, false, true)
+      this.options.onUsername(this.currentUsername)
+    } catch (error) {
+      this.setStatus(error instanceof UsernameError ? error.message : USERNAME_MESSAGES.network, true)
+    } finally {
+      this.busy = false
+      this.render()
+      this.options.onProfileChange()
+    }
   }
 
   private async push(): Promise<void> {
@@ -210,6 +281,8 @@ export class AccountPanel {
     window.clearTimeout(this.saveTimer)
     await this.push()
     await this.options.auth?.signOut()
+    this.currentUsername = null
+    this.options.onUsername(null)
     this.setStatus('Disconnesso. I progressi restano anche su questo dispositivo.', false, true)
     this.render()
     this.options.onProfileChange()

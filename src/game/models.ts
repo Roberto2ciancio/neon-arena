@@ -3,10 +3,16 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { createFabricTexture, createOrganicTexture } from './textures'
 import type { EnemyKind } from './types'
 
+export type ReloadStyle = 'magazine' | 'pistol' | 'shells' | 'cylinder'
+
 export interface WeaponModel {
   group: THREE.Group
   muzzle: THREE.Object3D
   flash: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>
+  /** Parti mosse dall'animazione di ricarica (assenti nei modelli di terza persona). */
+  magazine?: THREE.Object3D
+  supportHand?: THREE.Object3D
+  reloadStyle?: ReloadStyle
 }
 
 export interface EnemyModel {

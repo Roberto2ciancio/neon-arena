@@ -1,4 +1,6 @@
 import * as THREE from 'three'
+import type { ReloadStyle, WeaponModel } from './models'
+import { getReloadParts, getReloadPose } from './reloadAnimation'
 
 export interface WeaponPoseInput {
   aiming: boolean
@@ -15,6 +17,8 @@ export interface WeaponPoseInput {
   reducedMotion: boolean
   /** Avanzamento del fendente 0–1, oppure -1. */
   swing?: number
+  /** Tipo di ricarica dell'arma impugnata. */
+  reloadStyle?: ReloadStyle
 }
 
 const HIP = new THREE.Vector3(0.32, -0.29, -0.8)
@@ -57,6 +61,21 @@ export class WeaponAnimator {
     this.switchTimer = 0
   }
 
+  /** Muove caricatore e mano di supporto; con avanzamento -1 li riporta a riposo. */
+  applyParts(model: WeaponModel, reloadProgress: number): void {
+    const style = model.reloadStyle ?? 'magazine'
+    const hand = model.supportHand
+    const handBase = hand?.userData.base as THREE.Vector3 | undefined
+    const magazineZ = typeof hand?.userData.magazineZ === 'number' ? hand.userData.magazineZ : 0
+    const parts = getReloadParts(style, reloadProgress, magazineZ, handBase?.z ?? 0)
+    if (model.magazine) {
+      model.magazine.position.y = parts.magazineY
+      model.magazine.rotation.x = parts.magazineRotX
+      model.magazine.visible = parts.magazineVisible
+    }
+    if (hand && handBase) hand.position.set(handBase.x + parts.handX, handBase.y + parts.handY, handBase.z + parts.handZ)
+  }
+
   apply(group: THREE.Object3D, delta: number, input: WeaponPoseInput): void {
     this.time += delta
     this.switchTimer = Math.max(0, this.switchTimer - delta)
@@ -72,6 +91,10 @@ export class WeaponAnimator {
       target.y += breathe * 0.3
     }
     target.y -= input.crouchAmount * 0.03 + input.landingKick * 0.35 * motion
+    const reloadPose = getReloadPose(input.reloadStyle ?? 'magazine', input.reloadProgress)
+    target.x += reloadPose.x * motion
+    target.y += reloadPose.y * motion
+    target.z += reloadPose.z * motion
     if (input.airborne) target.y += 0.025 * motion
     target.z += input.recoil * 0.09
     // Cambio arma: l'arma scende e risale.
@@ -96,10 +119,12 @@ export class WeaponAnimator {
     this.position.lerp(target, 1 - Math.exp(-delta * (swing >= 0 ? 30 : input.aiming ? 20 : 14)))
     group.position.copy(this.position)
 
-    const reload = input.reloadProgress >= 0 ? Math.sin(input.reloadProgress * Math.PI) * motion : 0
-    const rotX = -input.recoil * 0.7 + reload * 0.75 + switchPhase * 0.7 + this.swayY * 1.2 * swayScale + (input.sprinting ? -0.12 : 0)
-    const rotY = this.swayX * 1.4 * swayScale + (input.sprinting ? 0.45 : 0)
-    const rotZ = reload * 0.5 - input.strafe * 0.06 * motion + (input.sliding ? 0.28 : 0) + (input.sprinting ? 0.15 : 0)
+    // Durante la ricarica niente posa di scatto: l'arma resta davanti per mostrare il caricatore.
+    const reloading = input.reloadProgress >= 0
+    const sprintPose = input.sprinting && !reloading
+    const rotX = -input.recoil * 0.7 + reloadPose.rotX * motion + switchPhase * 0.7 + this.swayY * 1.2 * swayScale + (sprintPose ? -0.12 : 0)
+    const rotY = this.swayX * 1.4 * swayScale + reloadPose.rotY * motion + (sprintPose ? 0.45 : 0)
+    const rotZ = reloadPose.rotZ * motion - input.strafe * 0.06 * motion + (input.sliding ? 0.28 : 0) + (sprintPose ? 0.15 : 0)
     if (swing >= 0) {
       const progress = swing < 0.25 ? -swing / 0.25 : (swing - 0.25) / 0.75
       group.rotation.set(-0.3 + Math.abs(progress) * 0.2, 0.9 - progress * 1.8, -0.5 + progress * 1.1)

@@ -2,8 +2,8 @@ import { normalizeArmory } from './armory'
 import type { ArmoryState } from './armory'
 import type { SupabaseAuth } from './auth'
 import { normalizeCallsign } from './identity'
-import { createDefaultProgress } from './progression'
-import type { MetaProgress } from './progression'
+import { createDefaultProgress, HISTORY_LIMIT, normalizeHistory, normalizeStats } from './progression'
+import type { MetaProgress, PlayerStats } from './progression'
 import type { LeaderboardEntry } from './types'
 
 /** Tutto ciò che un account conserva fra dispositivi. */
@@ -38,6 +38,8 @@ export function normalizeProgress(value: unknown): MetaProgress {
       power: Math.min(5, safeInteger(upgrades.power ?? base.upgrades.power)),
       mobility: Math.min(5, safeInteger(upgrades.mobility ?? base.upgrades.mobility)),
     },
+    stats: normalizeStats(source.stats),
+    history: normalizeHistory(source.history),
   }
 }
 
@@ -67,6 +69,12 @@ export function mergeSaves(local: PlayerSave, remote: PlayerSave | null): Player
       power: Math.max(local.progress.upgrades.power, remote.progress.upgrades.power),
       mobility: Math.max(local.progress.upgrades.mobility, remote.progress.upgrades.mobility),
     },
+    // Contatori: il massimo dei due, come per record e run (lo stesso profilo può esistere su più dispositivi).
+    stats: Object.fromEntries(Object.keys(local.progress.stats).map((key) => [key, Math.max(local.progress.stats[key as keyof PlayerStats], remote.progress.stats[key as keyof PlayerStats])])) as unknown as PlayerStats,
+    history: [...local.progress.history, ...remote.progress.history]
+      .filter((entry, index, all) => index === all.findIndex((other) => other.at === entry.at && other.score === entry.score))
+      .sort((a, b) => b.at - a.at)
+      .slice(0, HISTORY_LIMIT),
   }
   const armory = rankArmory(remote.armory) >= rankArmory(local.armory) ? remote.armory : local.armory
   const callsign = remote.callsign !== 'PLAYER' ? remote.callsign : local.callsign

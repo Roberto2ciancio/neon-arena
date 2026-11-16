@@ -6,6 +6,14 @@ const REFRESH_MARGIN_MS = 60_000
 export interface AuthUser {
   id: string
   email: string
+  /** Nome utente scelto alla registrazione (metadati), rivendicato al primo accesso. */
+  username?: string
+}
+
+function metadataUsername(user: Record<string, unknown>): string | undefined {
+  const metadata = (user.user_metadata ?? user.username) as Record<string, unknown> | string | undefined
+  if (typeof metadata === 'string') return metadata
+  return typeof metadata?.username === 'string' ? metadata.username : undefined
 }
 
 export interface AuthSession {
@@ -60,7 +68,7 @@ function parseSession(body: Record<string, unknown>, now: number): AuthSession |
     accessToken: body.access_token,
     refreshToken: body.refresh_token,
     expiresAt: now + expiresIn * 1000,
-    user: { id: user.id, email: typeof user.email === 'string' ? user.email : '' },
+    user: { id: user.id, email: typeof user.email === 'string' ? user.email : '', username: metadataUsername(user) },
   }
 }
 
@@ -69,7 +77,7 @@ function normalizeStoredSession(value: unknown): AuthSession | null {
   const data = value as Record<string, unknown>
   const user = data.user as Record<string, unknown> | undefined
   if (typeof data.accessToken !== 'string' || typeof data.refreshToken !== 'string' || typeof data.expiresAt !== 'number' || !user || typeof user.id !== 'string') return null
-  return { accessToken: data.accessToken, refreshToken: data.refreshToken, expiresAt: data.expiresAt, user: { id: user.id, email: typeof user.email === 'string' ? user.email : '' } }
+  return { accessToken: data.accessToken, refreshToken: data.refreshToken, expiresAt: data.expiresAt, user: { id: user.id, email: typeof user.email === 'string' ? user.email : '', username: metadataUsername(user) } }
 }
 
 /**
@@ -101,10 +109,10 @@ export class SupabaseAuth {
     return this.current
   }
 
-  async signUp(email: string, password: string): Promise<{ session: AuthSession | null; needsConfirmation: boolean }> {
+  async signUp(email: string, password: string, username?: string): Promise<{ session: AuthSession | null; needsConfirmation: boolean }> {
     if (!isValidEmail(email)) throw new AuthError('invalid-email')
     if (password.length < 6) throw new AuthError('weak-password')
-    const body = await this.post('/auth/v1/signup', { email: email.trim(), password })
+    const body = await this.post('/auth/v1/signup', { email: email.trim(), password, data: username ? { username: username.trim() } : {} })
     const session = parseSession(body, this.now())
     if (session) this.store(session)
     return { session, needsConfirmation: !session }

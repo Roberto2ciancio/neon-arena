@@ -2,6 +2,34 @@ import type { LeaderboardEntry, MetaBonuses, RunResult } from './types'
 
 export type MetaUpgradeId = 'vitality' | 'power' | 'mobility'
 
+/** Statistiche cumulative mostrate nel profilo. */
+export interface PlayerStats {
+  /** Secondi giocati in modalità Zombie. */
+  playTime: number
+  wins: number
+  shardsEarned: number
+  precisionHits: number
+  bestKills: number
+  tctMatches: number
+  tctWins: number
+  tctKills: number
+  tctDeaths: number
+}
+
+/** Run recente nello storico del profilo (le più nuove per prime). */
+export interface RunHistoryEntry {
+  score: number
+  wave: number
+  kills: number
+  time: number
+  won: boolean
+  map: string
+  /** Momento della fine della run (millisecondi dall'epoca). */
+  at: number
+}
+
+export const HISTORY_LIMIT = 10
+
 export interface MetaProgress {
   cores: number
   bestScore: number
@@ -10,6 +38,14 @@ export interface MetaProgress {
   runs: number
   leaderboard: LeaderboardEntry[]
   upgrades: Record<MetaUpgradeId, number>
+  stats: PlayerStats
+  history: RunHistoryEntry[]
+}
+
+export interface TctMatchRecord {
+  kills: number
+  deaths: number
+  outcome: 'win' | 'loss' | 'draw'
 }
 
 export interface KeyValueStorage {
@@ -42,7 +78,38 @@ export function createDefaultProgress(): MetaProgress {
     runs: 0,
     leaderboard: [],
     upgrades: { vitality: 0, power: 0, mobility: 0 },
+    stats: createDefaultStats(),
+    history: [],
   }
+}
+
+export function createDefaultStats(): PlayerStats {
+  return { playTime: 0, wins: 0, shardsEarned: 0, precisionHits: 0, bestKills: 0, tctMatches: 0, tctWins: 0, tctKills: 0, tctDeaths: 0 }
+}
+
+/** Statistiche lette da dati non affidabili (localStorage o database). */
+export function normalizeStats(value: unknown): PlayerStats {
+  const source = typeof value === 'object' && value !== null ? value as Record<string, unknown> : {}
+  const stats = createDefaultStats()
+  for (const key of Object.keys(stats) as (keyof PlayerStats)[]) stats[key] = safeInteger(source[key])
+  return stats
+}
+
+export function normalizeHistory(value: unknown): RunHistoryEntry[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((entry): RunHistoryEntry[] => {
+    if (typeof entry !== 'object' || entry === null) return []
+    const row = entry as Record<string, unknown>
+    return [{
+      score: safeInteger(row.score),
+      wave: safeInteger(row.wave, 15),
+      kills: safeInteger(row.kills),
+      time: safeInteger(row.time),
+      won: row.won === true,
+      map: typeof row.map === 'string' ? row.map.slice(0, 32) : '',
+      at: safeInteger(row.at),
+    }]
+  }).sort((a, b) => b.at - a.at).slice(0, HISTORY_LIMIT)
 }
 
 function safeInteger(value: unknown, maximum = Number.MAX_SAFE_INTEGER): number {
@@ -88,6 +155,8 @@ export function loadProgress(storage: KeyValueStorage): MetaProgress {
         power: safeInteger(parsed.upgrades?.power, MAX_META_LEVEL),
         mobility: safeInteger(parsed.upgrades?.mobility, MAX_META_LEVEL),
       },
+      stats: normalizeStats(parsed.stats),
+      history: normalizeHistory(parsed.history),
     }
   } catch {
     return createDefaultProgress()
@@ -102,7 +171,7 @@ export function saveProgress(storage: KeyValueStorage, progress: MetaProgress): 
   }
 }
 
-export function recordRun(progress: MetaProgress, result: RunResult): MetaProgress {
+export function recordRun(progress: MetaProgress, result: RunResult, at = Date.now()): MetaProgress {
   const entry: LeaderboardEntry = {
     score: safeInteger(result.score),
     wave: safeInteger(result.wave),
@@ -118,6 +187,29 @@ export function recordRun(progress: MetaProgress, result: RunResult): MetaProgre
     bestWave: Math.max(progress.bestWave, safeInteger(result.wave)),
     totalKills: progress.totalKills + safeInteger(result.kills),
     runs: progress.runs + 1,
+    stats: {
+      ...progress.stats,
+      playTime: progress.stats.playTime + entry.time,
+      wins: progress.stats.wins + (entry.won ? 1 : 0),
+      shardsEarned: progress.stats.shardsEarned + safeInteger(result.shards),
+      precisionHits: progress.stats.precisionHits + safeInteger(result.precisionHits),
+      bestKills: Math.max(progress.stats.bestKills, entry.kills),
+    },
+    history: [{ ...entry, map: result.map ?? '', at }, ...progress.history].slice(0, HISTORY_LIMIT),
+  }
+}
+
+/** Registra una partita TCT nelle statistiche del profilo. */
+export function recordTctMatch(progress: MetaProgress, match: TctMatchRecord): MetaProgress {
+  return {
+    ...progress,
+    stats: {
+      ...progress.stats,
+      tctMatches: progress.stats.tctMatches + 1,
+      tctWins: progress.stats.tctWins + (match.outcome === 'win' ? 1 : 0),
+      tctKills: progress.stats.tctKills + safeInteger(match.kills),
+      tctDeaths: progress.stats.tctDeaths + safeInteger(match.deaths),
+    },
   }
 }
 

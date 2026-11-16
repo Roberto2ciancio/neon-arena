@@ -6,7 +6,7 @@ import type { AudioPosition, SpatialSound } from './spatialAudio'
 export type SoundName =
   | 'shoot' | 'enemyShoot' | 'hit' | 'headshot' | 'kill' | 'damage' | 'dash' | 'pickup' | 'upgrade'
   | 'dry' | 'reloadOut' | 'reloadIn' | 'shell' | 'melee' | 'meleeHit' | 'switch' | 'explosion'
-  | 'groan' | 'groanBig' | 'powerUp'
+  | 'groan' | 'groanBig' | 'powerUp' | 'reloadRack' | 'shellLoad'
 
 /** Voci contemporanee massime: oltre, i suoni nuovi vengono saltati per non saturare CPU e mix. */
 const MAX_VOICES = 48
@@ -182,6 +182,16 @@ export class GameAudio {
         this.click(1100, 0.04, options)
         this.click(1800, 0.03, { ...options, delay: 0.14 })
         this.click(1300, 0.04, { ...options, delay: 0.22 })
+        break
+      case 'reloadRack':
+        // Leva di armamento o carrello: indietro e avanti.
+        this.click(900, 0.04, options)
+        this.noise({ type: 'bandpass', frequency: 1600, gain: 0.1, decay: 0.05, q: 3 }, { ...options, delay: 0.02 })
+        this.click(1400, 0.05, { ...options, delay: 0.11 })
+        break
+      case 'shellLoad':
+        this.click(1250, 0.035, options)
+        this.tone(2600, 2400, 0.03, 'triangle', 0.025, { ...options, delay: 0.015 })
         break
       case 'shell':
         // Bossolo che rimbalza a terra.

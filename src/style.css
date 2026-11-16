@@ -443,3 +443,36 @@ kbd { display: inline-block; color: #aab4cb; font-family: 'Chakra Petch', sans-s
 }
 .pause-summary { margin: -6px 0 18px; white-space: pre-line; color: #8a93ad; font-family: 'Chakra Petch', sans-serif; font-size: 11px; letter-spacing: 0.1em; line-height: 1.6; }
 .power-up i { transition: width 1s linear; }
+
+/* Profilo e nome utente. */
+.profile-chip[role='button'] { cursor: pointer; }
+.profile-chip[role='button']:hover strong, .profile-chip[role='button']:focus-visible strong { color: var(--cyan); }
+.profile-panel { display: grid; gap: 18px; }
+.profile-header { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 12px 14px; }
+.profile-avatar-large { width: 56px; height: 56px; font-size: 24px; }
+.profile-title { display: block; font-family: 'Chakra Petch', sans-serif; font-size: 22px; letter-spacing: 0.06em; overflow-wrap: anywhere; }
+.profile-header small { display: block; color: #8a93ad; font-size: 10px; letter-spacing: 0.08em; }
+.profile-header small.signed { color: var(--cyan); }
+.profile-level-line { display: block; margin: 8px 0 4px; color: var(--violet); font-family: 'Chakra Petch', sans-serif; font-size: 11px; letter-spacing: 0.08em; }
+.profile-account-button { grid-column: 1 / -1; width: 100%; min-height: 38px; }
+.profile-section h3 { margin: 0 0 8px; color: #c3c9de; font-family: 'Chakra Petch', sans-serif; font-size: 12px; letter-spacing: 0.12em; }
+.profile-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.profile-stat { display: grid; gap: 3px; padding: 10px 12px; border: 1px solid var(--line); background: rgba(12, 15, 30, 0.8); }
+.profile-stat strong { font-family: 'Chakra Petch', sans-serif; font-size: 20px; font-weight: 500; }
+.profile-stat small { color: #7f88a2; font-size: 10px; line-height: 1.4; }
+.profile-list { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.profile-list li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 12px; border: 1px solid var(--line); background: rgba(12, 15, 30, 0.8); font-size: 12px; }
+.profile-list .stars { color: #ffd166; font-weight: 400; letter-spacing: 2px; }
+.profile-history li.won { border-color: rgba(88, 245, 229, 0.5); }
+.profile-history strong { display: block; font-family: 'Chakra Petch', sans-serif; font-size: 12px; letter-spacing: 0.08em; }
+.profile-history small { display: block; color: #7f88a2; font-size: 10px; }
+.profile-history-numbers { text-align: right; }
+.profile-history-numbers span { font-family: 'Chakra Petch', sans-serif; font-size: 15px; }
+.account-username-row { display: grid; gap: 6px; margin-bottom: 4px; }
+.account-hint { color: #7f88a2; font-size: 10px; line-height: 1.5; }
+.account-name-form { display: grid; gap: 6px; margin: 4px 0 12px; }
+.account-name-row { display: flex; gap: 6px; }
+.account-name-row input { flex: 1; min-width: 0; padding: 10px 12px; color: #eef1fb; border: 1px solid var(--line); background: #0c1020; font-size: 14px; }
+.account-name-row input:focus { border-color: var(--cyan); outline: none; }
+.account-name-row .primary-button { min-width: 0; min-height: 40px; margin: 0; padding: 0 16px; gap: 0; font-size: 10px; }
+#callsign:disabled { opacity: 0.6; cursor: not-allowed; }

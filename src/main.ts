@@ -12,7 +12,7 @@ import { MAPS, STATION_13 } from './game/maps'
 import { normalizeGraphicsQuality } from './game/graphics'
 import type { GraphicsQuality } from './game/graphics'
 import { AutomaticQuality } from './game/automaticQuality'
-import { META_COSTS, META_UPGRADES, MAX_META_LEVEL, getMetaBonuses, loadProgress, purchaseMetaUpgrade, recordRun, saveProgress } from './game/progression'
+import { META_COSTS, META_UPGRADES, MAX_META_LEVEL, getMetaBonuses, loadProgress, purchaseMetaUpgrade, recordRun, recordTctMatch, saveProgress } from './game/progression'
 import { UPGRADE_BY_ID } from './game/upgrades'
 import { WEAPONS } from './game/weapons'
 import { NetSession, NetSessionError } from './game/net/NetSession'
@@ -23,6 +23,7 @@ import { addXp, loadArmory, MAX_LEVEL, resolveLoadout, saveArmory, XP_REWARDS, x
 import type { ArmoryState } from './game/armory'
 import { ArmoryScreen } from './armoryScreen'
 import { AccountPanel } from './accountPanel'
+import { renderProfilePanel } from './profilePanel'
 import { SupabaseAuth } from './game/auth'
 import type { PlayerSave } from './game/accountSave'
 import { ATTACHMENTS } from './game/attachments'
@@ -404,6 +405,10 @@ async function submitOnlineRun(result: RunResult): Promise<void> {
     byId('cloud-status').textContent = 'OSPITE // ACCEDI PER LA CLASSIFICA ONLINE'
     return
   }
+  if (!accountPanel?.username) {
+    byId('cloud-status').textContent = 'SCEGLI UN NOME UTENTE PER LA CLASSIFICA ONLINE'
+    return
+  }
   try {
     await cloud.submitRun(account, identity.callsign, result)
     await refreshOnlineLeaderboard()
@@ -424,9 +429,15 @@ function setArmory(next: ArmoryState): void {
 // ---------------------------------------------------------------------------
 
 function renderProfile(): void {
-  byId('profile-name').textContent = identity.callsign
-  byId('profile-avatar').textContent = identity.callsign.charAt(0) || 'P'
   const signedIn = accountPanel?.signedIn ?? false
+  const username = accountPanel?.username ?? null
+  const name = username ?? identity.callsign
+  byId('profile-name').textContent = name
+  byId('profile-avatar').textContent = name.charAt(0).toUpperCase() || 'P'
+  // Con un nome utente il callsign non si modifica dalle impostazioni ma dall'account.
+  const callsignInput = byId<HTMLInputElement>('callsign')
+  callsignInput.disabled = username !== null
+  callsignInput.title = username ? 'Con un account il nome è il tuo nome utente: cambialo dalla schermata account.' : ''
   byId('profile-kind').textContent = signedIn ? `ACCOUNT // ${accountPanel?.email ?? ''}` : 'OSPITE // PROGRESSI SU QUESTO DISPOSITIVO'
   byId('profile-kind').parentElement?.parentElement?.classList.toggle('signed', signedIn)
   byId<HTMLInputElement>('callsign').value = identity.callsign
@@ -449,6 +460,7 @@ function applyMergedSave(save: PlayerSave): void {
 }
 
 const DRAWER_TITLES: Record<string, string> = {
+  profile: 'PROFILO',
   workshop: 'OFFICINA',
   leaderboard: 'CLASSIFICA',
   settings: 'IMPOSTAZIONI',
@@ -457,11 +469,26 @@ const DRAWER_TITLES: Record<string, string> = {
 
 function openDrawer(panel: string): void {
   byId('drawer-title').textContent = DRAWER_TITLES[panel] ?? ''
+  if (panel === 'profile') renderProfileSection()
   document.querySelectorAll<HTMLElement>('[data-drawer-panel]').forEach((section) => {
     section.classList.toggle('active', section.dataset.drawerPanel === panel)
   })
   byId('menu-drawer').classList.remove('hidden')
   byId<HTMLButtonElement>('drawer-close').focus()
+}
+
+function renderProfileSection(): void {
+  const username = accountPanel?.username
+  renderProfilePanel(byId('profile-panel'), {
+    name: username ?? identity.callsign,
+    signedIn: accountPanel?.signedIn ?? false,
+    email: accountPanel?.email ?? '',
+    progress,
+    armory,
+  }, () => {
+    closeDrawer()
+    accountPanel?.open()
+  })
 }
 
 function closeDrawer(): void {
@@ -531,6 +558,9 @@ function completeRun(result: RunResult): void {
 }
 
 function completeTctMatch(result: TctResult): void {
+  progress = recordTctMatch(progress, { kills: result.kills, deaths: result.deaths, outcome: result.outcome })
+  saveProgress(window.localStorage, progress)
+  syncCloudProfile()
   byId('result-score-label').textContent = 'SQUADRA'
   byId('result-wave-label').textContent = 'AVVERSARI'
   byId('result-kills-label').textContent = 'ELIMINAZIONI / MORTI'
@@ -970,6 +1000,21 @@ accountPanel = new AccountPanel({
   getLocal: localSave,
   applyMerged: applyMergedSave,
   onProfileChange: renderProfile,
+  onUsername: (username) => {
+    // Con un account il nome mostrato (classifica, TCT) è il nome utente; da ospite resta il callsign libero.
+    if (username) {
+      identity = { ...identity, callsign: normalizeCallsign(username) }
+      saveIdentity(window.localStorage, identity)
+    }
+    renderProfile()
+  },
+})
+byId('profile-chip').addEventListener('click', () => openDrawer('profile'))
+byId('profile-chip').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault()
+    openDrawer('profile')
+  }
 })
 document.querySelectorAll<HTMLButtonElement>('[data-drawer]').forEach((button) => {
   button.addEventListener('click', () => openDrawer(button.dataset.drawer ?? ''))
