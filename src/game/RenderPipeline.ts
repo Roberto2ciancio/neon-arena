@@ -28,7 +28,7 @@ export class RenderPipeline {
     pmrem.dispose()
     this.composer = new EffectComposer(renderer)
     this.composer.addPass(new RenderPass(scene, camera))
-    this.ambientOcclusion = new SSAOPass(scene, camera, 1, 1)
+    this.ambientOcclusion = new SSAOPass(scene, camera, 1, 1, 16)
     this.ambientOcclusion.kernelRadius = 0.7
     this.ambientOcclusion.minDistance = 0.002
     this.ambientOcclusion.maxDistance = 0.08
@@ -51,8 +51,10 @@ export class RenderPipeline {
   }
 
   setSize(width: number, height: number): void {
-    this.composer.setPixelRatio(this.renderer.getPixelRatio())
+    const pixelRatio = this.renderer.getPixelRatio()
+    this.composer.setPixelRatio(pixelRatio)
     this.composer.setSize(width, height)
+    this.ambientOcclusion.setSize(Math.max(1, Math.round(width * pixelRatio * 0.5)), Math.max(1, Math.round(height * pixelRatio * 0.5)))
   }
 
   render(): void {

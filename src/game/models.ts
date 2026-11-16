@@ -150,11 +150,13 @@ export function createEnemyModel(kind: EnemyKind, color: number, appearance: 'zo
     wound.scale.set(1, 0.65, 0.15)
     wound.position.set(width * 0.15, 0.06, -0.215 * scale)
     body.add(wound)
+    details.push(wound)
     for (let index = 0; index < 4; index += 1) {
       const rag = new THREE.Mesh(new THREE.PlaneGeometry(width * 0.24, 0.28 * scale), clothes)
       rag.position.set((index - 1.5) * width * 0.21, -0.46 * scale, -0.21 * scale)
       rag.rotation.z = (index - 1.5) * 0.12
       body.add(rag)
+      details.push(rag)
     }
   }
 
@@ -171,6 +173,7 @@ export function createEnemyModel(kind: EnemyKind, color: number, appearance: 'zo
     socket.scale.set(1.2, 0.75, 0.35)
     socket.position.set(side * 0.105 * scale, 0.05 * scale, -0.255 * scale)
     head.add(socket)
+    details.push(socket)
     const eye = new THREE.Mesh(new THREE.SphereGeometry(0.032 * scale, 10, 8), glow)
     eye.position.set(side * 0.105 * scale, 0.05 * scale, -0.285 * scale)
     head.add(eye)
@@ -179,14 +182,17 @@ export function createEnemyModel(kind: EnemyKind, color: number, appearance: 'zo
   jaw.position.set(0, -0.18 * scale, -0.19 * scale)
   if (kind === 'screamer') jaw.rotation.x = -0.4
   head.add(jaw)
+  details.push(jaw)
   if (!soldier) {
     const mouth = new THREE.Mesh(new RoundedBoxGeometry(0.2 * scale, 0.065 * scale, 0.025, 2, 0.01), woundMaterial)
     mouth.position.set(0, -0.12 * scale, -0.285 * scale)
     head.add(mouth)
+    details.push(mouth)
     for (const x of [-0.07, 0, 0.07]) {
       const tooth = new THREE.Mesh(new THREE.ConeGeometry(0.018 * scale, 0.065 * scale, 5), toothMaterial)
       tooth.position.set(x * scale, -0.09 * scale, -0.305 * scale)
       head.add(tooth)
+      details.push(tooth)
     }
   }
 
@@ -245,6 +251,7 @@ export function createEnemyModel(kind: EnemyKind, color: number, appearance: 'zo
         claw.position.set(x * scale, -0.53 * scale, -0.04)
         claw.rotation.x = -0.3
         arm.add(claw)
+        details.push(claw)
       }
     }
   }
@@ -259,6 +266,7 @@ export function createEnemyModel(kind: EnemyKind, color: number, appearance: 'zo
       const vertebra = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.2, 6), toothMaterial)
       vertebra.position.set(0, 0.88, z)
       group.add(vertebra)
+      details.push(vertebra)
     }
   } else if (kind === 'spitter' || kind === 'screamer') {
     weakPoint = new THREE.Mesh(new THREE.SphereGeometry(0.2, 16, 12), glow)
@@ -305,6 +313,7 @@ export function createEnemyModel(kind: EnemyKind, color: number, appearance: 'zo
   floorRing.rotation.x = -Math.PI / 2
   floorRing.position.y = 0.02
   group.add(floorRing)
+  details.push(floorRing)
 
   return { group, body, head, leftLeg, rightLeg, leftArm, rightArm, weakPoint, details, height }
 }

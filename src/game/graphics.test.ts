@@ -10,8 +10,8 @@ describe('impostazioni grafiche', () => {
   })
 
   it('riduce risoluzione e disattiva ombre al preset basso', () => {
-    expect(getGraphicsSettings('low')).toEqual({ pixelRatioCap: 0.65, shadows: false })
-    expect(getGraphicsSettings('medium')).toEqual({ pixelRatioCap: 1.5, shadows: false })
-    expect(getGraphicsSettings('high')).toEqual({ pixelRatioCap: 2, shadows: true })
+    expect(getGraphicsSettings('low')).toEqual({ pixelRatioCap: 0.6, shadows: false, staticLights: 0 })
+    expect(getGraphicsSettings('medium')).toEqual({ pixelRatioCap: 0.85, shadows: false, staticLights: 2 })
+    expect(getGraphicsSettings('high')).toEqual({ pixelRatioCap: 1.5, shadows: true, staticLights: 4 })
   })
 })

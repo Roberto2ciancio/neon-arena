@@ -57,7 +57,7 @@ export function buildMap(map: MapDefinition): BuiltMap {
   const keyLight = new THREE.DirectionalLight(0xffe2c0, 3.2)
   keyLight.position.set(-extent * 0.45, extent * 0.9, extent * 0.55)
   keyLight.castShadow = true
-  keyLight.shadow.mapSize.set(2048, 2048)
+  keyLight.shadow.mapSize.set(1024, 1024)
   keyLight.shadow.camera.left = -extent
   keyLight.shadow.camera.right = extent
   keyLight.shadow.camera.top = extent

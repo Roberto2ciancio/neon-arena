@@ -27,6 +27,7 @@ import { CombatEffects } from './effects'
 import { createStationModel, disposeObject, STATION_COLORS } from './equipmentModels'
 import type { StationModel } from './equipmentModels'
 import { buildMap } from './mapBuilder'
+import { disposeMaterialVariants, setLambertMaterials } from './materialQuality'
 import type { BuiltDoor } from './mapBuilder'
 import type { AccessibilitySettings } from './accessibility'
 import { STATION_13 } from './maps'
@@ -176,6 +177,7 @@ export class Game {
   private readonly projectiles: Projectile[] = []
   private readonly pickups: Pickup[] = []
   private readonly particles: Particle[] = []
+  private readonly particlePool: Particle[] = []
   private readonly tracers: Tracer[] = []
   private readonly hazards: Hazard[] = []
   private map: MapDefinition = STATION_13
@@ -279,8 +281,9 @@ export class Game {
     this.renderer.shadowMap.enabled = settings.shadows
     this.renderer.shadowMap.needsUpdate = true
     this.effects.setLightsEnabled(quality !== 'low')
+    let staticLightIndex = 0
     this.mapContent.group.traverse((object) => {
-      if (object instanceof THREE.PointLight) object.visible = quality !== 'low'
+      if (object instanceof THREE.PointLight) object.visible = staticLightIndex++ < settings.staticLights
       if (!(object instanceof THREE.Mesh)) return
       const materials = Array.isArray(object.material) ? object.material : [object.material]
       for (const material of materials) {
@@ -294,6 +297,7 @@ export class Game {
         material.needsUpdate = true
       }
     })
+    setLambertMaterials(this.mapContent.group, quality === 'low')
   }
 
   get isAudioMuted(): boolean {
@@ -376,8 +380,11 @@ export class Game {
     this.mapContent.group.traverse((object) => {
       if (!(object instanceof THREE.Mesh) && !(object instanceof THREE.Line) && !(object instanceof THREE.Points)) return
       object.geometry.dispose()
-      const materials = Array.isArray(object.material) ? object.material : [object.material]
-      materials.forEach((material) => material.dispose())
+      if (object instanceof THREE.Mesh) disposeMaterialVariants(object)
+      else {
+        const materials = Array.isArray(object.material) ? object.material : [object.material]
+        materials.forEach((material) => material.dispose())
+      }
     })
     this.map = map
     this.mapContent = buildMap(map)
@@ -1211,6 +1218,9 @@ export class Game {
       const verticalGap = this.player.y - enemy.body.position.y
       const sameLevel = Math.abs(verticalGap) < 1.3
       const playerDistance = Math.hypot(this.player.x - enemy.body.position.x, this.player.z - enemy.body.position.z)
+      const detailDistance = this.graphicsQuality === 'low' ? 14 : this.graphicsQuality === 'high' ? 24 : 18
+      const detailed = playerDistance < detailDistance
+      for (const detail of enemy.model.details) detail.visible = detailed
       const toPlayer = targetPoint.clone().sub(enemy.model.group.position).setY(0)
       const distance = Math.max(toPlayer.length(), 0.001)
       const direction = toPlayer.clone().divideScalar(distance)
@@ -1492,13 +1502,21 @@ export class Game {
   private spawnBurst(position: THREE.Vector3, color: number, count: number): void {
     const available = Math.max(0, 130 - this.particles.length)
     for (let index = 0; index < Math.min(count, available); index += 1) {
-      const material = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1 })
-      const mesh = new THREE.Mesh(this.particleGeometry, material)
-      mesh.position.copy(position)
-      const velocity = new THREE.Vector3((Math.random() - 0.5) * 6, Math.random() * 3.5, (Math.random() - 0.5) * 6)
-      const life = 0.25 + Math.random() * 0.35
-      this.scene.add(mesh)
-      this.particles.push({ mesh, velocity, life, maxLife: life })
+      const particle = this.particlePool.pop() ?? {
+        mesh: new THREE.Mesh(this.particleGeometry, new THREE.MeshBasicMaterial({ transparent: true })),
+        velocity: new THREE.Vector3(),
+        life: 0,
+        maxLife: 0,
+      }
+      particle.mesh.material.color.setHex(color)
+      particle.mesh.material.opacity = 1
+      particle.mesh.position.copy(position)
+      particle.mesh.scale.setScalar(1)
+      particle.velocity.set((Math.random() - 0.5) * 6, Math.random() * 3.5, (Math.random() - 0.5) * 6)
+      particle.life = 0.25 + Math.random() * 0.35
+      particle.maxLife = particle.life
+      this.scene.add(particle.mesh)
+      this.particles.push(particle)
     }
   }
 
@@ -1527,8 +1545,8 @@ export class Game {
       particle.mesh.scale.setScalar(Math.max(0.1, particle.life / particle.maxLife))
       if (particle.life <= 0) {
         this.scene.remove(particle.mesh)
-        particle.mesh.material.dispose()
         this.particles.splice(index, 1)
+        this.particlePool.push(particle)
       }
     }
     for (let index = this.tracers.length - 1; index >= 0; index -= 1) {
@@ -1570,7 +1588,7 @@ export class Game {
     for (const pickup of this.pickups) this.scene.remove(pickup.mesh)
     for (const particle of this.particles) {
       this.scene.remove(particle.mesh)
-      particle.mesh.material.dispose()
+      this.particlePool.push(particle)
     }
     for (const tracer of this.tracers) {
       this.scene.remove(tracer.line)

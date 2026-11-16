@@ -11,6 +11,7 @@ import { PlayerController, readMovementInput } from './PlayerController'
 import { CombatEffects } from './effects'
 import { disposeObject } from './equipmentModels'
 import { buildMap } from './mapBuilder'
+import { disposeMaterialVariants, setLambertMaterials } from './materialQuality'
 import { DEPOT_06, MAPS } from './maps'
 import type { MapDefinition } from './maps'
 import type { EnemyModel } from './models'
@@ -174,8 +175,9 @@ export class TctGame {
     this.renderer.shadowMap.enabled = settings.shadows
     this.renderer.shadowMap.needsUpdate = true
     this.effects.setLightsEnabled(quality !== 'low')
+    let staticLightIndex = 0
     this.mapContent.group.traverse((object) => {
-      if (object instanceof THREE.PointLight) object.visible = quality !== 'low'
+      if (object instanceof THREE.PointLight) object.visible = staticLightIndex++ < settings.staticLights
       if (!(object instanceof THREE.Mesh)) return
       const materials = Array.isArray(object.material) ? object.material : [object.material]
       for (const material of materials) {
@@ -189,6 +191,7 @@ export class TctGame {
         material.needsUpdate = true
       }
     })
+    setLambertMaterials(this.mapContent.group, quality === 'low')
   }
 
   get isAudioMuted(): boolean {
@@ -320,8 +323,11 @@ export class TctGame {
     this.mapContent.group.traverse((object) => {
       if (!(object instanceof THREE.Mesh) && !(object instanceof THREE.Line) && !(object instanceof THREE.Points)) return
       object.geometry.dispose()
-      const materials = Array.isArray(object.material) ? object.material : [object.material]
-      materials.forEach((material) => material.dispose())
+      if (object instanceof THREE.Mesh) disposeMaterialVariants(object)
+      else {
+        const materials = Array.isArray(object.material) ? object.material : [object.material]
+        materials.forEach((material) => material.dispose())
+      }
     })
     this.map = map
     this.mapContent = buildMap(map)
