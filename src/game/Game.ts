@@ -1,3 +1,4 @@
+import { getLowHealthWarning, getMedkitDropChance, getPassiveRegen, MEDKIT_PICKUP_HEAL, MEDKIT_PICKUP_LIFETIME } from './healing'
 import { FIELD_TIERS, getFieldTier, getFieldWeaponCost, rollStationWeapons } from './fieldWeapons'
 import * as THREE from 'three'
 import { GameAudio } from './audio'
@@ -114,6 +115,13 @@ interface Pickup {
   baseY: number
 }
 
+/** Kit medico caduto da uno zombie: cura passandoci sopra. */
+interface MedkitPickup {
+  group: THREE.Group
+  baseY: number
+  life: number
+}
+
 interface Particle {
   mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>
   velocity: THREE.Vector3
@@ -216,6 +224,9 @@ export class Game {
   private readonly acidGeometry = new THREE.SphereGeometry(0.16, 7, 7)
   private readonly acidMaterial = new THREE.MeshBasicMaterial({ color: 0x8cff62 })
   private readonly pickupGeometry = new THREE.OctahedronGeometry(0.25)
+  private readonly medkitBoxGeometry = new THREE.BoxGeometry(0.42, 0.42, 0.36)
+  private readonly medkitBoxMaterial = new THREE.MeshStandardMaterial({ color: 0xf2f4f7, emissive: 0x2a3a30, emissiveIntensity: 0.6, roughness: 0.5 })
+  private readonly medkitCrossMaterial = new THREE.MeshBasicMaterial({ color: 0xff3b4f })
   private readonly pickupMaterial = new THREE.MeshStandardMaterial({ color: 0x6affea, emissive: 0x24c9b7, emissiveIntensity: 1.4 })
 
   private state: GameState = 'menu'
@@ -240,6 +251,10 @@ export class Game {
   private firePunch = 0
   private punchRoll = 1
   private precisionHitThisShot = false
+  private medkits: MedkitPickup[] = []
+  /** Secondi dall'ultimo danno subito (rigenerazione naturale). */
+  private sinceDamage = 0
+  private heartbeatTimer = 0
   /** Colpi alla testa o ai punti deboli nella run (statistiche del profilo). */
   private precisionHits = 0
   private groanTimer = 2
@@ -826,6 +841,18 @@ export class Game {
     this.invulnerability = Math.max(0, this.invulnerability - delta)
     this.doorDeniedTimer = Math.max(0, this.doorDeniedTimer - delta)
     this.health = Math.min(this.stats.maxHealth, this.health + this.stats.regen * delta)
+    this.sinceDamage += delta
+    this.health += getPassiveRegen(this.health, this.stats.maxHealth, this.sinceDamage, delta)
+    const warning = getLowHealthWarning(this.health, this.stats.maxHealth)
+    if (warning.intensity > 0) {
+      this.heartbeatTimer -= delta
+      if (this.heartbeatTimer <= 0) {
+        this.audio.play('heartbeat')
+        this.heartbeatTimer = warning.heartbeatInterval
+      }
+    } else {
+      this.heartbeatTimer = 0
+    }
 
     const input = readMovementInput(this.keys, this.aiming || this.firing || this.weapons.reloading)
     const result = this.controller.update(delta, input, this.yaw, {
@@ -1189,7 +1216,7 @@ export class Game {
   private describeInteraction(interaction: Interaction): { label: string; cost: number } {
     if (interaction.kind === 'door') return { label: 'APRI PORTA', cost: interaction.door.definition.cost }
     const { definition } = interaction.station
-    if (definition.kind === 'medkit') return { label: 'KIT MEDICO', cost: definition.cost }
+    if (definition.kind === 'medkit') return { label: 'KIT MEDICO // CURA COMPLETA', cost: definition.cost }
     if (definition.kind === 'ammo') return { label: 'RIFORNIMENTO MUNIZIONI', cost: definition.cost }
     const station = interaction.station
     const weaponId = station.weapon!
@@ -1224,7 +1251,8 @@ export class Game {
       if (definition.kind === 'medkit' && this.health >= this.stats.maxHealth) return
       this.shards -= cost
       if (definition.kind === 'medkit') {
-        this.health = Math.min(this.stats.maxHealth, this.health + this.stats.maxHealth * 0.5)
+        this.health = this.stats.maxHealth
+        this.audio.play('heal')
       } else if (definition.kind === 'ammo') {
         this.weapons.refill()
         this.cooldowns.lethal = 0
@@ -1639,6 +1667,7 @@ export class Game {
     const active = new Set<PowerUpId>([...this.activePowerUps.keys(), ...this.powerPickups.map((pickup) => pickup.id)])
     const dropped = rollPowerUp(enemy.kind, Math.random, active)
     if (dropped) this.spawnPowerPickup(position, dropped)
+    if (Math.random() < getMedkitDropChance(enemy.kind, this.health / this.stats.maxHealth)) this.spawnMedkit(position)
     this.spawnBurst(position.clone().setY(position.y + enemy.model.height * 0.5), color, enemy.kind === 'brute' ? 28 : 12)
     if (enemy.kind === 'brute') {
       for (let drop = 0; drop < 8; drop += 1) {
@@ -1781,6 +1810,47 @@ export class Game {
     }
   }
 
+  private spawnMedkit(position: THREE.Vector3): void {
+    const group = new THREE.Group()
+    const box = new THREE.Mesh(this.medkitBoxGeometry, this.medkitBoxMaterial)
+    group.add(box)
+    for (const [width, height] of [[0.34, 0.1], [0.1, 0.34]] as const) {
+      const cross = new THREE.Mesh(new THREE.BoxGeometry(width, height, 0.02), this.medkitCrossMaterial)
+      cross.position.z = 0.19
+      group.add(cross)
+      const back = cross.clone()
+      back.position.z = -0.19
+      group.add(back)
+    }
+    const baseY = getGroundHeight(position.x, position.z, position.y + 0.3, 0.2, this.obstacles)
+    group.position.set(position.x + (Math.random() - 0.5) * 0.8, baseY + 0.45, position.z + (Math.random() - 0.5) * 0.8)
+    this.scene.add(group)
+    this.medkits.push({ group, baseY, life: MEDKIT_PICKUP_LIFETIME })
+  }
+
+  private updateMedkits(delta: number): void {
+    for (let index = this.medkits.length - 1; index >= 0; index -= 1) {
+      const medkit = this.medkits[index]!
+      medkit.life -= delta
+      medkit.group.rotation.y += delta * 1.8
+      medkit.group.position.y = medkit.baseY + 0.45 + Math.sin(this.elapsed * 3 + index) * 0.08
+      medkit.group.visible = medkit.life > 5 || Math.sin(this.elapsed * 14) > 0
+      const close = Math.hypot(medkit.group.position.x - this.player.x, medkit.group.position.z - this.player.z) < 1.1
+        && Math.abs(this.player.y - medkit.baseY) < 1.2
+      // Si raccoglie solo se serve: a vita piena resta a terra per dopo.
+      const take = close && this.health < this.stats.maxHealth
+      if (!take && medkit.life > 0) continue
+      if (take) {
+        this.health = Math.min(this.stats.maxHealth, this.health + this.stats.maxHealth * MEDKIT_PICKUP_HEAL)
+        this.effects.pulse(medkit.group.position.clone().setY(medkit.baseY), 0x7dff9b, 1.2)
+        this.events.onNotice?.('KIT MEDICO', `+${Math.round(MEDKIT_PICKUP_HEAL * 100)}% integrità`, 0x7dff9b)
+        this.audio.play('heal')
+      }
+      this.scene.remove(medkit.group)
+      this.medkits.splice(index, 1)
+    }
+  }
+
   private spawnPickup(position: THREE.Vector3, value: number): void {
     const mesh = new THREE.Mesh(this.pickupGeometry, this.pickupMaterial)
     const baseY = getGroundHeight(position.x, position.z, position.y + 0.3, 0.2, this.obstacles)
@@ -1882,6 +1952,7 @@ export class Game {
     if (this.state !== 'playing' || this.invulnerability > 0 || this.activePowerUps.has('barrier')) return
     this.health = Math.max(0, this.health - Math.max(1, amount - this.stats.armor))
     this.invulnerability = 0.32
+    this.sinceDamage = 0
     this.cameraShake = 0.4
     this.events.onDamage()
     this.audio.play('damage')
@@ -1896,6 +1967,9 @@ export class Game {
   }
 
   private clearEntities(): void {
+    for (const medkit of this.medkits) this.scene.remove(medkit.group)
+    this.medkits = []
+    this.sinceDamage = 0
     this.decals.clear()
     for (const enemy of this.enemies) this.releaseEnemyModel(enemy.kind, enemy.model)
     for (const dying of this.dyingEnemies) this.releaseEnemyModel(dying.kind, dying.model)
@@ -2008,6 +2082,7 @@ export class Game {
     this.updateHazards(delta)
     if (this.state !== 'playing') return
     this.updatePickups(delta)
+    this.updateMedkits(delta)
     this.updatePowerUps(delta)
     this.updateGroans(delta)
     this.updateEffects(delta)

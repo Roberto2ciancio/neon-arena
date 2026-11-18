@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import './style.css'
 import { GameAudio } from './game/audio'
+import { getLowHealthWarning } from './game/healing'
 import { Game } from './game/Game'
 import { loadAccessibility, saveAccessibility } from './game/accessibility'
 import { SupabaseCloud } from './game/cloud'
@@ -227,6 +228,13 @@ function updateHud(data: HudData): void {
   }
   hudEl('health-fill').style.width = `${healthPercentage}%`
   hudEl('health-fill').classList.toggle('critical', healthPercentage < 30)
+  // Vita bassa: bordo rosso pulsante più intenso e più rapido quanto meno vita resta.
+  const warning = currentState === 'playing' ? getLowHealthWarning(data.health, data.maxHealth) : { intensity: 0, heartbeatInterval: 0 }
+  const lowHealth = hudEl('low-health')
+  lowHealth.style.setProperty('--intensity', warning.intensity.toFixed(2))
+  lowHealth.style.setProperty('--beat', `${(warning.heartbeatInterval || 1).toFixed(2)}s`)
+  lowHealth.classList.toggle('active', warning.intensity > 0)
+  hudEl('low-health-text').classList.toggle('hidden', warning.intensity < 0.6)
   hudEl('xp-fill').style.width = `${Math.min(100, (data.xp / data.xpNext) * 100)}%`
   setText(hudEl('level-text'), String(data.level))
   setText(hudEl('score-label'), data.tct ? `${data.tct.team.toUpperCase()} // AVVERSARI` : 'PUNTEGGIO')

@@ -6,7 +6,7 @@ import type { AudioPosition, SpatialSound } from './spatialAudio'
 export type SoundName =
   | 'shoot' | 'enemyShoot' | 'hit' | 'headshot' | 'kill' | 'damage' | 'dash' | 'pickup' | 'upgrade'
   | 'dry' | 'reloadOut' | 'reloadIn' | 'shell' | 'melee' | 'meleeHit' | 'switch' | 'explosion'
-  | 'groan' | 'groanBig' | 'powerUp' | 'reloadRack' | 'shellLoad'
+  | 'groan' | 'groanBig' | 'powerUp' | 'reloadRack' | 'shellLoad' | 'heartbeat' | 'heal'
 
 /** Voci contemporanee massime: oltre, i suoni nuovi vengono saltati per non saturare CPU e mix. */
 const MAX_VOICES = 48
@@ -188,6 +188,15 @@ export class GameAudio {
         this.click(900, 0.04, options)
         this.noise({ type: 'bandpass', frequency: 1600, gain: 0.1, decay: 0.05, q: 3 }, { ...options, delay: 0.02 })
         this.click(1400, 0.05, { ...options, delay: 0.11 })
+        break
+      case 'heartbeat':
+        // Doppio battito sordo.
+        this.tone(62, 48, 0.12, 'sine', 0.35, options)
+        this.tone(58, 44, 0.12, 'sine', 0.25, { ...options, delay: 0.16 })
+        break
+      case 'heal':
+        this.tone(440, 880, 0.18, 'sine', 0.08, options)
+        this.tone(660, 1320, 0.22, 'triangle', 0.05, { ...options, delay: 0.08 })
         break
       case 'shellLoad':
         this.click(1250, 0.035, options)
