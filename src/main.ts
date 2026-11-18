@@ -25,6 +25,7 @@ import type { ArmoryState } from './game/armory'
 import { ArmoryScreen } from './armoryScreen'
 import { AccountPanel } from './accountPanel'
 import { renderProfilePanel } from './profilePanel'
+import { CoopLobby } from './coopLobby'
 import { SupabaseAuth } from './game/auth'
 import type { PlayerSave } from './game/accountSave'
 import { ATTACHMENTS } from './game/attachments'
@@ -190,6 +191,32 @@ function setText(element: HTMLElement, value: string): void {
   if (element.textContent !== value) element.textContent = value
 }
 
+let coopTeamKey = ''
+
+function renderCoopHud(coop: HudData['coop']): void {
+  hudEl('coop-team').classList.toggle('hidden', !coop || coop.team.length === 0)
+  const banner = hudEl('downed-banner')
+  banner.classList.toggle('hidden', !coop || coop.status === 'alive' || currentState !== 'playing' && currentState !== 'paused')
+  if (coop && coop.status !== 'alive') {
+    setText(hudEl('downed-title'), coop.status === 'down' ? `SEI A TERRA // ${Math.ceil(coop.bleedOut)}s` : 'ELIMINATO')
+    setText(hudEl('downed-text'), coop.status === 'down' ? 'Un compagno può rianimarti tenendo premuto E vicino a te.' : 'Rientri in campo all’inizio della prossima ondata.')
+  }
+  if (!coop) return
+  const key = coop.team.map((mate) => `${mate.name}:${Math.round(mate.health / 10)}:${mate.status}`).join('|')
+  if (key === coopTeamKey) return
+  coopTeamKey = key
+  hudEl('coop-team').replaceChildren(...coop.team.map((mate) => {
+    const item = document.createElement('li')
+    item.className = `coop-mate ${mate.status}`
+    const name = document.createElement('span')
+    name.textContent = mate.status === 'alive' ? mate.name : `${mate.name} // ${mate.status === 'down' ? 'A TERRA' : 'ELIMINATO'}`
+    const bar = document.createElement('i')
+    bar.style.width = `${Math.max(0, Math.min(100, mate.health))}%`
+    item.append(name, bar)
+    return item
+  }))
+}
+
 let powerUpsKey = ''
 
 function renderPowerUps(powerUps: HudData['powerUps']): void {
@@ -281,6 +308,7 @@ function updateHud(data: HudData): void {
   crosshair.classList.toggle('crouched', data.stance !== 'stand')
   renderWeaponSlots(data.weaponSlots)
   renderPowerUps(data.powerUps)
+  renderCoopHud(data.coop)
   if (data.tct) updateTctOverlay(data.tct)
 }
 
@@ -541,8 +569,8 @@ function currentLoadout(mode: 'zombies' | 'tct' = 'zombies') {
 }
 
 function completeRun(result: RunResult): void {
-  byId('restart-button').textContent = 'NUOVA RUN'
-  byId('menu-button').textContent = 'TORNA ALL’OFFICINA'
+  byId('restart-button').textContent = coopLobby.active ? 'TORNA ALLA SQUADRA' : 'NUOVA RUN'
+  byId('menu-button').textContent = coopLobby.active ? 'ESCI DALLA SQUADRA' : 'TORNA ALL’OFFICINA'
   byId('result-score-label').textContent = 'PUNTEGGIO'
   byId('result-wave-label').textContent = 'ONDATA'
   byId('result-kills-label').textContent = 'ELIMINAZIONI'
@@ -709,8 +737,31 @@ function flashDamage(): void {
 
 function startRun(): void {
   if (selectedMode === 'tct') returnToLobby()
-  else game.start(getMetaBonuses(progress), selectedMap, currentLoadout())
+  else if (coopLobby.active) {
+    // Squadra: si torna alla stanza; l'host può avviare una nuova partita.
+    game.returnToMenu()
+    coopLobby.backToLobby()
+  } else game.start(getMetaBonuses(progress), selectedMap, currentLoadout())
 }
+
+const coopLobby = new CoopLobby({
+  transport: transportKind,
+  getName: () => identity.callsign,
+  getCosmetics: () => armory.cosmetics,
+  getMapId: () => selectedMap.id,
+  onStart: (coopSession, mapId, players) => {
+    closeDrawer()
+    game.startCoop(coopSession, mapId, players, getMetaBonuses(progress), currentLoadout('zombies'))
+  },
+  onClosed: () => {
+    if (game.isCoop) game.returnToMenu()
+  },
+  onRoomChange: (inRoom, isHost) => {
+    byId('start-button').classList.toggle('hidden', inRoom || selectedMode === 'tct')
+    document.querySelectorAll<HTMLButtonElement>('[data-map]').forEach((option) => { option.disabled = inRoom && !isHost })
+    document.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((option) => { option.disabled = inRoom })
+  },
+})
 
 // ---------------------------------------------------------------------------
 // TCT online: stanza P2P con host autorevole
@@ -885,6 +936,8 @@ document.querySelectorAll<HTMLButtonElement>('[data-map]').forEach((button) => {
     if (selectedMode === 'tct') {
       session?.setMap(map.id)
       tctGame.previewMap(map.id)
+    } else {
+      coopLobby.setMap(map.id)
     }
     document.querySelectorAll<HTMLButtonElement>('[data-map]').forEach((option) => {
       const selected = option === button
@@ -900,6 +953,7 @@ document.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((button) => 
     game.setActive(selectedMode === 'zombies')
     tctGame.setActive(selectedMode === 'tct')
     byId('tct-lobby').classList.toggle('hidden', selectedMode !== 'tct')
+    byId('coop-lobby').classList.toggle('hidden', selectedMode === 'tct')
     byId('start-button').classList.toggle('hidden', selectedMode === 'tct')
     byId('abandon-button').textContent = selectedMode === 'tct' ? 'ESCI DALLA PARTITA' : 'TERMINA RUN'
     if (selectedMode === 'tct') document.querySelector<HTMLButtonElement>('[data-map="depot-06"]')?.click()
@@ -965,10 +1019,12 @@ byId<HTMLButtonElement>('pause-button').addEventListener('click', () => activeGa
 byId<HTMLButtonElement>('resume-button').addEventListener('click', () => activeGame().resume())
 byId<HTMLButtonElement>('abandon-button').addEventListener('click', () => {
   if (selectedMode === 'tct') leaveRoom()
+  else coopLobby.leave()
   activeGame().abandon()
 })
 byId<HTMLButtonElement>('menu-button').addEventListener('click', () => {
   if (selectedMode === 'tct') leaveRoom()
+  else coopLobby.leave()
   activeGame().returnToMenu()
 })
 byId<HTMLButtonElement>('create-room').addEventListener('click', () => void createRoom())

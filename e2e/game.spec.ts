@@ -279,6 +279,87 @@ test('le armi si potenziano con i frammenti e non hanno munizioni infinite', asy
   expect(errors).toEqual([])
 })
 
+test('la modalità Zombie si gioca in squadra ed è più difficile in due', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 480, height: 360 } })
+  await context.addInitScript(() => {
+    window.localStorage.setItem('neon-arena:graphics:v1', 'low')
+    window.localStorage.setItem('neon-arena:welcome:v1', '1')
+  })
+  const host = await context.newPage()
+  const guest = await context.newPage()
+  const errors: string[] = []
+  for (const page of [host, guest]) page.on('pageerror', (error) => errors.push(error.message))
+  await host.goto('/?net=local')
+  await guest.goto('/?net=local')
+
+  await host.bringToFront()
+  await host.locator('#coop-lobby summary').click()
+  await host.getByRole('button', { name: 'CREA SQUADRA' }).click()
+  await expect(host.locator('#coop-code-display')).toHaveText(/^[A-Z2-9]{5}$/)
+  await expect(host.locator('#start-button')).toBeHidden()
+  const code = await host.locator('#coop-code-display').textContent()
+
+  await guest.bringToFront()
+  await guest.locator('#coop-lobby summary').click()
+  await guest.locator('#coop-code').fill(code ?? '')
+  await guest.locator('#coop-join').click()
+  await expect(guest.locator('#coop-players li')).toHaveCount(2)
+  await expect(host.locator('#coop-players li')).toHaveCount(2)
+  await expect(host.locator('#coop-difficulty')).toContainText('2/4')
+  await expect(guest.locator('#coop-start')).toBeHidden()
+
+  await host.bringToFront()
+  await host.locator('#coop-start').click()
+  for (const page of [host, guest]) await expect(page.locator('#app')).toHaveAttribute('data-state', 'playing')
+
+  // In due l'ondata ha il 50% di zombie in più (12 → 18) e gli zombie del compagno arrivano dall'host.
+  const hostWave = await host.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    return { total: game.enemies.length + game.spawnQueue, players: game.coopPlayers }
+  })
+  expect(hostWave).toEqual({ total: 18, players: 2 })
+  await guest.bringToFront()
+  await expect.poll(() => guest.evaluate(() => (window as any).__neonArena.game.enemies.length), { timeout: 20000 }).toBeGreaterThan(0)
+  await expect(guest.locator('#coop-team li')).toHaveCount(1)
+
+  // Un colpo del compagno viene applicato dallo zombie dell'host.
+  // Lo zombie deve essere già emerso dal terreno: durante la risalita è invulnerabile anche in solitaria.
+  await host.bringToFront()
+  await expect.poll(() => host.evaluate(() => (window as any).__neonArena.game.enemies.find((candidate: any) => candidate.spawnTimer <= 0)?.netId ?? 0), { timeout: 15000 }).toBeGreaterThan(0)
+  const target = await host.evaluate(() => (window as any).__neonArena.game.enemies.find((candidate: any) => candidate.spawnTimer <= 0).netId)
+  await guest.bringToFront()
+  await expect.poll(() => guest.evaluate((id) => {
+    const game = (window as any).__neonArena.game
+    const enemy = game.enemies.find((candidate: any) => candidate.netId === id)
+    if (!enemy) return false
+    game.dealDamage(enemy, 5)
+    return true
+  }, target), { timeout: 10000 }).toBe(true)
+  await host.bringToFront()
+  await expect.poll(() => host.evaluate((id) => {
+    const enemy = (window as any).__neonArena.game.enemies.find((candidate: any) => candidate.netId === id)
+    return enemy ? enemy.maxHealth - enemy.health : 5
+  }, target), { timeout: 10000 }).toBeGreaterThanOrEqual(5)
+
+  // Il compagno finisce a terra, l'host lo vede e lo rianima.
+  await guest.bringToFront()
+  await guest.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    game.invulnerability = 0
+    game.damagePlayer(9999)
+  })
+  await expect(guest.locator('#downed-banner')).toBeVisible()
+  await host.bringToFront()
+  await expect.poll(() => host.evaluate(() => (window as any).__neonArena.game.teammates.all[0]?.status), { timeout: 10000 }).toBe('down')
+  await expect(host.locator('#app')).toHaveAttribute('data-state', 'playing')
+  await host.evaluate(() => (window as any).__neonArena.game.applyRevive((window as any).__neonArena.game.teammates.all[0].id, 'host'))
+  await guest.bringToFront()
+  await expect(guest.locator('#downed-banner')).toBeHidden()
+  expect(await guest.evaluate(() => (window as any).__neonArena.game.coopStatus)).toBe('alive')
+  expect(errors).toEqual([])
+  await context.close()
+})
+
 test('il TCT online segnala codici stanza non validi o inesistenti', async ({ page }) => {
   await page.goto('/?net=local')
   await page.locator('[data-mode="tct"]').click()

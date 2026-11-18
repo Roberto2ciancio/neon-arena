@@ -86,6 +86,8 @@
       <div id="respawn-banner" class="respawn-banner hidden">RIENTRO IN COMBATTIMENTO</div>
 
       <div id="low-health" class="low-health" aria-hidden="true"></div>
+      <div id="downed-banner" class="downed-banner hidden" role="status"><strong id="downed-title">SEI A TERRA</strong><span id="downed-text"></span></div>
+      <ul id="coop-team" class="coop-team hidden" aria-label="Squadra"></ul>
       <div id="low-health-text" class="low-health-text hidden" role="status">INTEGRITÀ CRITICA // CERCA UN KIT MEDICO</div>
       <div id="power-banner" class="power-banner hidden" aria-live="assertive"><strong id="power-banner-title">BONUS</strong><span id="power-banner-text"></span></div>
       <div id="quality-notice" class="quality-notice hidden" role="status"></div>
@@ -171,6 +173,27 @@
             </div>
             <p id="lobby-status" class="lobby-status" aria-live="polite">Crea una stanza o inserisci il codice di un amico.</p>
           </section>
+          <details id="coop-lobby" class="coop-lobby">
+            <summary><strong>GIOCA IN SQUADRA</strong><span>2–4 giocatori online · più siete, più è difficile</span></summary>
+            <div id="coop-connect" class="lobby-connect">
+              <button id="coop-create" class="primary-button" type="button"><span>CREA SQUADRA</span><span aria-hidden="true">+</span></button>
+              <div class="lobby-join">
+                <label for="coop-code" class="visually-hidden">Codice squadra</label>
+                <input id="coop-code" maxlength="5" placeholder="CODICE" autocomplete="off" spellcheck="false" />
+                <button id="coop-join" class="secondary-button" type="button">ENTRA</button>
+              </div>
+            </div>
+            <div id="coop-room" class="lobby-room hidden">
+              <div class="lobby-code"><span>CODICE SQUADRA</span><strong id="coop-code-display">-----</strong><small>Condividilo con gli amici</small></div>
+              <ul id="coop-players" class="coop-players"></ul>
+              <small id="coop-difficulty" class="coop-difficulty"></small>
+              <div class="lobby-actions">
+                <button id="coop-start" class="primary-button" type="button"><span>AVVIA PARTITA</span><span aria-hidden="true">↗</span></button>
+                <button id="coop-leave" class="secondary-button" type="button">ESCI DALLA SQUADRA</button>
+              </div>
+            </div>
+            <p id="coop-status" class="lobby-status" aria-live="polite">Facoltativo: in squadra gli zombie sono più numerosi e resistenti.</p>
+          </details>
           <div class="menu-actions">
             <button id="start-button" class="primary-button" type="button"><span>INIZIA RUN</span><span aria-hidden="true">↗</span></button>
             <button id="armory-button" class="secondary-button armory-button" type="button">ARMERIA</button>

@@ -74,6 +74,15 @@ export interface HudData {
   stance: 'stand' | 'crouch' | 'slide'
   /** Bonus attivi con il tempo residuo. */
   powerUps: { id: string; name: string; icon: string; remaining: number; duration: number; color: number }[]
+  /** Solo partite Zombie cooperative. */
+  coop?: {
+    status: 'alive' | 'down' | 'dead'
+    /** Secondi rimasti prima di essere eliminati quando si è a terra. */
+    bleedOut: number
+    /** Avanzamento 0–1 della rianimazione di un compagno. */
+    revive: number
+    team: { name: string; health: number; status: 'alive' | 'down' | 'dead' }[]
+  }
   tct?: TctHudData
   performance?: { fps: number; drawCalls: number }
 }

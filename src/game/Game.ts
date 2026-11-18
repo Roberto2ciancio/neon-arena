@@ -1,3 +1,12 @@
+import { getSpatialSound } from './spatialAudio'
+import { CoopTeammates } from './coop/CoopTeammates'
+import type { CoopSession } from './coop/CoopSession'
+import { COOP_HOST_ID } from './coop/CoopSession'
+import { BLEED_OUT_SECONDS, getCoopScaling, isTeamWiped, MAX_COOP_HIT_DAMAGE, respawnAtWave, REVIVE_HEALTH_SHARE, REVIVE_RANGE, REVIVE_SECONDS, scaleMaxActive } from './coop/coopRules'
+import type { CoopPlayerStatus } from './coop/coopRules'
+import { ENEMY_FLAG_ATTACK, ENEMY_FLAG_ELITE, ENEMY_FLAG_RISING, packEnemy, unpackEnemy } from './coop/coopProtocol'
+import type { CoopClientMessage, CoopHostMessage, CoopLobbyPlayer, CoopPlayerState, Vec3 } from './coop/coopProtocol'
+import { gunshotProfileForRemote } from './coop/coopAudio'
 import { getLowHealthWarning, getMedkitDropChance, getPassiveRegen, MEDKIT_PICKUP_HEAL, MEDKIT_PICKUP_LIFETIME } from './healing'
 import { FIELD_TIERS, getFieldTier, getFieldWeaponCost, rollStationWeapons } from './fieldWeapons'
 import * as THREE from 'three'
@@ -32,7 +41,7 @@ import { buildMap } from './mapBuilder'
 import { disposeMaterialVariants, setLambertMaterials } from './materialQuality'
 import type { BuiltDoor } from './mapBuilder'
 import type { AccessibilitySettings } from './accessibility'
-import { FIELD_ATTACHMENTS, STATION_13, STATION_COSTS } from './maps'
+import { FIELD_ATTACHMENTS, MAPS, STATION_13, STATION_COSTS } from './maps'
 import type { MapDefinition, PurchasableWeapon, StationDefinition } from './maps'
 import { createEnemyModel } from './models'
 import type { EnemyModel } from './models'
@@ -46,6 +55,8 @@ import type { PowerUpId } from './powerups'
 import type { EnemyKind, GameEvents, GameState, HitZone, MetaBonuses, RunResult } from './types'
 
 interface PowerUpPickup {
+  /** Identificativo condiviso in co-op. */
+  netId: number
   id: PowerUpId
   group: THREE.Group
   life: number
@@ -56,6 +67,13 @@ interface PowerUpPickup {
 interface Enemy {
   model: EnemyModel
   elite: boolean
+  /** Identificativo condiviso fra host e compagni in co-op. */
+  netId: number
+  /** Ultimo giocatore che l'ha colpito (null = giocatore locale): riceve la ricompensa. */
+  lastHitBy: string | null
+  /** Solo client co-op: posizione e rotazione ricevute dall'host. */
+  netTarget: THREE.Vector3 | null
+  netYaw: number
   maxHealth: number
   /** Il corpo condivide la posizione del modello: `y` è la quota dei piedi. */
   body: Body
@@ -251,6 +269,20 @@ export class Game {
   private firePunch = 0
   private punchRoll = 1
   private precisionHitThisShot = false
+  // --- Co-op -------------------------------------------------------------------------------
+  private coop: CoopSession | null = null
+  private coopUnsubscribe: (() => void)[] = []
+  private readonly teammates = new CoopTeammates(this.scene)
+  /** Giocatori della partita co-op (1 = da solo). */
+  private coopPlayers = 1
+  private coopStatus: CoopPlayerStatus = 'alive'
+  private bleedOut = 0
+  private reviveProgress = 0
+  private coopNetTimer = 0
+  private coopRemaining = 0
+  private readonly teammateKills = new Map<string, number>()
+  private nextEnemyId = 1
+  private nextPowerId = 1
   private medkits: MedkitPickup[] = []
   /** Secondi dall'ultimo danno subito (rigenerazione naturale). */
   private sinceDamage = 0
@@ -381,7 +413,7 @@ export class Game {
       damage: (target, amount, source) => {
         const enemy = this.targetOwners.get(target)
         if (!enemy || enemy.health <= 0) return
-        enemy.health -= this.scaleDamage(enemy, amount * (this.stats.damage / 20))
+        this.dealDamage(enemy, this.scaleDamage(enemy, amount * (this.stats.damage / 20)))
         enemy.hitFlash = 0.1
         enemy.flinch = Math.min(1, enemy.flinch + (source === 'molotov' ? 0.15 : 0.6))
         if (source === 'molotov') enemy.burnTimer = Math.max(enemy.burnTimer, 0.6)
@@ -497,6 +529,12 @@ export class Game {
     this.prewarmEnemies()
     this.introducedKinds.clear()
     this.introducedKinds.add('walker')
+    this.coopStatus = 'alive'
+    this.bleedOut = 0
+    this.reviveProgress = 0
+    this.coopRemaining = 0
+    this.nextEnemyId = 1
+    this.nextPowerId = 1
     this.stats = createBaseStats(bonuses)
     this.health = this.stats.maxHealth
     this.score = 0
@@ -544,6 +582,46 @@ export class Game {
     this.requestMouse()
   }
 
+  /**
+   * Avvia una partita Zombie cooperativa. L'host simula zombie, ondate e bonus; i compagni
+   * ricevono lo stato del mondo e inviano posizione e colpi.
+   */
+  startCoop(session: CoopSession, mapId: string, players: readonly CoopLobbyPlayer[], bonuses: MetaBonuses, loadout?: ResolvedLoadout): void {
+    this.detachCoop()
+    this.coop = session
+    this.coopPlayers = Math.max(1, players.length)
+    this.teammateKills.clear()
+    const map = MAPS.find((candidate) => candidate.id === mapId) ?? STATION_13
+    this.start(bonuses, map, loadout)
+    this.teammates.sync(players, session.localId, map.playerSpawn)
+    if (session.isHost) {
+      this.coopUnsubscribe.push(session.onClient((peerId, message) => this.handleCoopClient(peerId, message)))
+      this.coopUnsubscribe.push(session.onPeerLeft((peerId) => {
+        this.teammates.remove(peerId)
+        this.coopPlayers = Math.max(1, this.teammates.all.length + 1)
+      }))
+    } else {
+      this.coopUnsubscribe.push(session.onHost((message) => this.handleCoopHost(message)))
+    }
+  }
+
+  get isCoop(): boolean {
+    return this.coop !== null
+  }
+
+  private get coopRole(): 'host' | 'client' | null {
+    return this.coop ? (this.coop.isHost ? 'host' : 'client') : null
+  }
+
+  private detachCoop(): void {
+    for (const unsubscribe of this.coopUnsubscribe) unsubscribe()
+    this.coopUnsubscribe = []
+    this.coop = null
+    this.coopPlayers = 1
+    this.coopStatus = 'alive'
+    this.teammates.clear()
+  }
+
   pause(): void {
     if (this.state !== 'playing') return
     this.firing = false
@@ -560,12 +638,14 @@ export class Game {
   }
 
   abandon(): void {
+    this.detachCoop()
     if (!this.isRunActive()) return
     this.events.onRunEnd(this.createRunResult())
     this.returnToMenu()
   }
 
   returnToMenu(): void {
+    this.detachCoop()
     this.clearEntities()
     this.firing = false
     this.aiming = false
@@ -674,8 +754,10 @@ export class Game {
     if (this.wave > 1) {
       this.events.onNotice?.(tier > previousTier ? `ARMI ${FIELD_TIERS[tier].name} DISPONIBILI` : 'POSTAZIONI AGGIORNATE', tier > previousTier ? 'Le postazioni ora vendono armi più potenti, a un prezzo più alto.' : 'Le armi in vendita sulla mappa sono cambiate: controlla le postazioni.', 0x8f6bff)
     }
-    this.spawnQueue = getWaveSpawnCount(this.wave)
+    this.spawnQueue = Math.round(getWaveSpawnCount(this.wave) * getCoopScaling(this.coopPlayers).spawnCount)
     this.spawnTimer = 0.65
+    this.onCoopWave()
+    if (this.coopRole === 'host') this.coop?.broadcast({ t: 'wave', wave: this.wave })
     this.waveBreak = 0
     this.waveActive = true
     this.events.onWave(this.wave)
@@ -710,15 +792,15 @@ export class Game {
   private updateSpawning(delta: number): void {
     if (this.spawnQueue > 0) {
       // Il resto dell'ondata aspetta finché ci sono troppi zombie vivi.
-      if (this.enemies.length >= getMaxActiveZombies(this.graphicsQuality)) return
+      if (this.enemies.length >= scaleMaxActive(getMaxActiveZombies(this.graphicsQuality), this.coopPlayers)) return
       this.spawnTimer -= delta
       if (this.spawnTimer <= 0) {
         const bossWave = this.wave % 5 === 0
-        const extraBoss = this.wave >= 10 && this.spawnQueue === Math.floor(getWaveSpawnCount(this.wave) / 2)
+        const extraBoss = this.wave >= 10 && this.spawnQueue === Math.floor(getWaveSpawnCount(this.wave) * getCoopScaling(this.coopPlayers).spawnCount / 2)
         const kind = bossWave && (this.spawnQueue === 1 || extraBoss) ? 'brute' : this.randomEnemyKind()
         this.spawnEnemy(kind)
         this.spawnQueue -= 1
-        this.spawnTimer = Math.max(0.2, 0.75 - this.wave * 0.035)
+        this.spawnTimer = Math.max(0.12, (0.75 - this.wave * 0.035) * getCoopScaling(this.coopPlayers).spawnInterval)
       }
       return
     }
@@ -726,6 +808,7 @@ export class Game {
     if (this.waveActive) {
       this.waveActive = false
       if (this.wave >= FINAL_WAVE) {
+        if (this.coopRole === 'host') this.coop?.broadcast({ t: 'end', wave: this.wave, won: true })
         this.finishRun(true)
         return
       }
@@ -763,9 +846,11 @@ export class Game {
     return (pool[Math.floor(Math.random() * pool.length)] ?? candidates[0] ?? new THREE.Vector3(0, 0, -this.map.enemySpawnRadius)).clone()
   }
 
-  private spawnEnemy(kind: EnemyKind): void {
-    const elite = kind !== 'brute' && Math.random() < getEliteChance(this.wave)
-    const stats = getZombieStats(kind, this.wave, elite)
+  private spawnEnemy(kind: EnemyKind, replica?: { id: number; elite: boolean; position: THREE.Vector3; rising: boolean }): void {
+    const scaling = getCoopScaling(this.coopPlayers)
+    const elite = replica ? replica.elite : kind !== 'brute' && Math.random() < getEliteChance(this.wave) + scaling.eliteBonus
+    const baseStats = getZombieStats(kind, this.wave, elite)
+    const stats = { ...baseStats, health: baseStats.health * scaling.health, damage: baseStats.damage * scaling.damage }
     if (!this.introducedKinds.has(kind)) {
       this.introducedKinds.add(kind)
       const color = getZombieColor(kind)
@@ -782,7 +867,7 @@ export class Game {
     model.rightLeg.rotation.x = 0
     model.leftArm.rotation.x = 0
     model.rightArm.rotation.x = 0
-    model.group.position.copy(this.pickSpawnPoint(stats.radius))
+    model.group.position.copy(replica ? replica.position : this.pickSpawnPoint(stats.radius))
     this.scene.add(model.group)
     this.effects.pulse(model.group.position, getZombieColor(kind), 1.4)
     this.spawnBurst(model.group.position.clone().setY(0.3), 0x3a3128, 6)
@@ -800,10 +885,14 @@ export class Game {
     const enemy: Enemy = {
       model,
       elite,
+      netId: replica ? replica.id : this.nextEnemyId++,
+      lastHitBy: null,
+      netTarget: replica ? replica.position.clone() : null,
+      netYaw: 0,
       body: { position: model.group.position, velocityY: 0, grounded: true },
       path: [],
       pathTimer: 0,
-      spawnTimer: SPAWN_RISE,
+      spawnTimer: replica && !replica.rising ? 0 : SPAWN_RISE,
       flinch: 0,
       attackAnim: 0,
       stunTimer: 0,
@@ -862,7 +951,7 @@ export class Game {
     })
     if (result.landingSpeed > 7) this.cameraShake = Math.max(this.cameraShake, Math.min(0.3, (result.landingSpeed - 7) * 0.05))
 
-    const frameInput = { aiming: this.aiming, crouched: this.controller.crouched, blocked: this.controller.sprinting, fireRateMultiplier: (this.stats.fireRate / 8.5) * (this.activePowerUps.has('rapid-fire') ? 1.6 : 1) }
+    const frameInput = { aiming: this.aiming, crouched: this.controller.crouched, blocked: this.controller.sprinting || this.coopStatus !== 'alive' || this.state !== 'playing', fireRateMultiplier: (this.stats.fireRate / 8.5) * (this.activePowerUps.has('rapid-fire') ? 1.6 : 1) }
     const frame = this.weapons.update(delta, frameInput)
     for (const sound of frame.sounds) this.audio.play(sound)
     this.pitch = THREE.MathUtils.clamp(this.pitch - frame.recovery.pitch, -1.45, 1.45)
@@ -888,6 +977,11 @@ export class Game {
     this.firePunch = Math.max(0, this.firePunch - delta * 9)
     const punch = this.reducedMotion ? 0 : this.firePunch
     this.camera.rotation.set(this.pitch + punch * 0.012, this.yaw, (this.reducedMotion ? 0 : this.controller.roll) + punch * this.punchRoll * 0.01)
+    if (this.coopStatus !== 'alive') {
+      // A terra: visuale rasoterra e inclinata, come sdraiati.
+      this.camera.position.y -= 1.15
+      this.camera.rotation.z += 0.35
+    }
 
     const weapon = this.weapons.current
     const aiming = this.aiming && weapon !== null
@@ -942,7 +1036,7 @@ export class Game {
       if (distance > 0.3 && offset.divideScalar(distance).dot(forward) < minimumDot) continue
       // Dopo l'ondata 4 un fendente non basta più a uccidere: toglie al massimo il 60% della vita.
       const shieldFactor = enemy.kind === 'shielder' && this.isShieldFacing(enemy, this.player) ? 0.3 : 1
-      enemy.health -= this.scaleDamage(enemy, getMeleeDamage(melee.damage * (this.stats.damage / 20), this.wave, enemy.maxHealth) * shieldFactor)
+      this.dealDamage(enemy, this.scaleDamage(enemy, getMeleeDamage(melee.damage * (this.stats.damage / 20), this.wave, enemy.maxHealth) * shieldFactor))
       enemy.hitFlash = 0.12
       enemy.flinch = 1
       enemy.knockback.addScaledVector(forward, enemy.kind === 'brute' ? 1 : 4)
@@ -1047,6 +1141,11 @@ export class Game {
       const wallPoint = wallDistance === null ? null : origin.clone().addScaledVector(direction, wallDistance)
       const endPoint = targets.at(-1)?.point ?? wallPoint ?? origin.clone().addScaledVector(direction, this.weaponDefinition.range)
       this.spawnTracer(muzzlePosition, endPoint)
+      if (this.coop && shot === 0) {
+        const message = { t: 'shot' as const, from: toVec3(muzzlePosition), to: toVec3(endPoint) }
+        if (this.coop.isHost) this.coop.broadcast({ ...message, by: COOP_HOST_ID })
+        else this.coop.send(message)
+      }
       if (targets.length === 0 && wallPoint) {
         this.effects.sparks(wallPoint, origin.clone().sub(wallPoint).normalize(), 0xffd59a, 4)
         this.decals.spawn(wallPoint, origin)
@@ -1095,7 +1194,8 @@ export class Game {
     }
 
     const damage = this.scaleDamage(enemy, baseDamage * multiplier * (critical ? this.stats.critMultiplier : 1))
-    enemy.health -= damage
+    const precisionZone = hit.zone === 'head' || hit.zone === 'generator' || hit.zone === 'core' || hit.zone === 'spine' || hit.zone === 'throat' || hit.zone === 'back' || hit.zone === 'belly'
+    this.dealDamage(enemy, damage, precisionZone)
     enemy.hitFlash = 0.08
     // Reazione al colpo: sobbalzo e piccola spinta all'indietro.
     enemy.flinch = Math.min(1, enemy.flinch + (enemy.kind === 'brute' ? 0.25 : 0.7))
@@ -1126,7 +1226,7 @@ export class Game {
         if (enemy === hit.enemy || enemy.health <= 0) continue
         const distance = enemy.model.group.position.distanceTo(hit.point)
         if (distance > HEADSHOT_EXPLOSION_RADIUS) continue
-        enemy.health -= damage * Math.max(0.35, 1 - distance / HEADSHOT_EXPLOSION_RADIUS)
+        this.dealDamage(enemy, damage * Math.max(0.35, 1 - distance / HEADSHOT_EXPLOSION_RADIUS))
         enemy.hitFlash = 0.1
       }
     }
@@ -1145,7 +1245,7 @@ export class Game {
       const direction = target.clone().sub(origin)
       const blocked = raycastObstacles(origin, direction.normalize(), candidate.distance, this.obstacles) !== null
       if (blocked) continue
-      candidate.enemy.health -= getChainLightningDamage(this.stats.chainLightning, this.stats.damage)
+      this.dealDamage(candidate.enemy, getChainLightningDamage(this.stats.chainLightning, this.stats.damage))
       candidate.enemy.hitFlash = 0.08
       this.spawnTracer(origin, target)
       linked += 1
@@ -1160,13 +1260,14 @@ export class Game {
     this.tracers.push({ line, life: 0.065, maxLife: 0.065 })
   }
 
-  private fireAcid(enemy: Enemy): void {
+  private fireAcid(enemy: Enemy, target: THREE.Vector3 = this.camera.position): void {
     const mesh = new THREE.Mesh(this.acidGeometry, this.acidMaterial)
     mesh.position.copy(enemy.model.group.position)
     mesh.position.y += enemy.model.height * 0.72
-    const direction = this.camera.position.clone().sub(mesh.position).normalize()
+    const direction = target.clone().sub(mesh.position).normalize()
     this.scene.add(mesh)
     this.projectiles.push({ mesh, velocity: direction.multiplyScalar(7.5), damage: enemy.damage, life: 4, radius: 0.25 })
+    if (this.coopRole === 'host') this.coop?.broadcast({ t: 'acid', pos: toVec3(mesh.position), vel: toVec3(direction) })
     this.audio.playAt('enemyShoot', enemy.model.group.position, this.player, this.yaw)
   }
 
@@ -1228,7 +1329,7 @@ export class Game {
   }
 
   private interact(): void {
-    if (this.state !== 'playing') return
+    if (this.state !== 'playing' || this.coopStatus !== 'alive') return
     const interaction = this.getNearbyInteraction()
     if (!interaction) return
     const { cost } = this.describeInteraction(interaction)
@@ -1240,12 +1341,9 @@ export class Game {
     }
     if (interaction.kind === 'door') {
       this.shards -= cost
-      const door = interaction.door
-      door.open = true
-      const obstacleIndex = this.obstacles.indexOf(door.obstacle)
-      if (obstacleIndex >= 0) this.obstacles.splice(obstacleIndex, 1)
-      this.spawnBurst(door.group.position.clone().setY(1), 0xffb657, 16)
-      this.effects.pulse(door.group.position, 0xffb657, 2.4)
+      this.openDoor(interaction.door)
+      if (this.coopRole === 'client') this.coop?.send({ t: 'door', id: interaction.door.definition.id })
+      else if (this.coopRole === 'host') this.coop?.broadcast({ t: 'door', id: interaction.door.definition.id })
     } else {
       const { definition, model } = interaction.station
       if (definition.kind === 'medkit' && this.health >= this.stats.maxHealth) return
@@ -1268,6 +1366,15 @@ export class Game {
     }
     this.audio.play('upgrade')
     this.emitHud()
+  }
+
+  private openDoor(door: Door): void {
+    if (door.open) return
+    door.open = true
+    const obstacleIndex = this.obstacles.indexOf(door.obstacle)
+    if (obstacleIndex >= 0) this.obstacles.splice(obstacleIndex, 1)
+    this.spawnBurst(door.group.position.clone().setY(1), 0xffb657, 16)
+    this.effects.pulse(door.group.position, 0xffb657, 2.4)
   }
 
   private updateStations(delta: number): void {
@@ -1374,18 +1481,19 @@ export class Game {
         continue
       }
       // Bersaglio: l'esca se è vicina, una posizione falsata se il giocatore è nel fumo.
-      let targetPoint: THREE.Vector3 = this.player
+      const victim = this.chooseVictim(enemy)
+      let targetPoint: THREE.Vector3 = victim.position
       if (this.decoy && enemy.body.position.distanceTo(this.decoy.position) < 22) targetPoint = this.decoy.position
-      else if (this.equipment.isInSmoke(this.camera.position) && enemy.body.position.distanceTo(this.player) > 3) {
+      else if (victim.id === null && this.equipment.isInSmoke(this.camera.position) && enemy.body.position.distanceTo(this.player) > 3) {
         targetPoint = this.frameVectors.target.copy(this.player)
         targetPoint.x += Math.sin(enemy.phase) * 6
         targetPoint.z += Math.cos(enemy.phase) * 6
       }
-      const verticalGap = this.player.y - enemy.body.position.y
+      const verticalGap = victim.position.y - enemy.body.position.y
       const sameLevel = Math.abs(verticalGap) < 1.3
-      const playerDistance = Math.hypot(this.player.x - enemy.body.position.x, this.player.z - enemy.body.position.z)
+      const playerDistance = Math.hypot(victim.position.x - enemy.body.position.x, victim.position.z - enemy.body.position.z)
       const detailDistance = this.graphicsQuality === 'low' ? 14 : 18
-      const detailed = playerDistance < detailDistance
+      const detailed = Math.hypot(this.player.x - enemy.body.position.x, this.player.z - enemy.body.position.z) < detailDistance
       for (const detail of enemy.model.details) detail.visible = detailed
       const toPlayer = this.frameVectors.toPlayer.copy(targetPoint).sub(enemy.model.group.position).setY(0)
       const distance = Math.max(toPlayer.length(), 0.001)
@@ -1424,10 +1532,11 @@ export class Game {
         if (!followingPath && distance < 7) movement.multiplyScalar(-1)
         else if (!followingPath && distance < 11) movement.set(-direction.z, 0, direction.x)
         const eye = this.frameVectors.eye.copy(enemy.model.group.position).setY(enemy.body.position.y + enemy.model.height * 0.72)
-        const aim = this.frameVectors.aim.copy(this.camera.position).sub(eye).normalize()
-        const clearShot = raycastObstacles(eye, aim, eye.distanceTo(this.camera.position), this.obstacles) === null
+        const victimEye = victim.id === null ? this.camera.position : victim.position.clone().setY(victim.position.y + 1.6)
+        const aim = this.frameVectors.aim.copy(victimEye).sub(eye).normalize()
+        const clearShot = raycastObstacles(eye, aim, eye.distanceTo(victimEye), this.obstacles) === null
         if (distance < 17 && enemy.specialCooldown <= 0 && clearShot) {
-          this.fireAcid(enemy)
+          this.fireAcid(enemy, victimEye)
           enemy.specialCooldown = 2.4
         }
       }
@@ -1523,7 +1632,7 @@ export class Game {
       }
       if (playerDistance < enemy.radius + 0.65 && sameLevel && enemy.attackCooldown <= 0) {
         enemy.attackAnim = 1
-        this.damagePlayer(enemy.damage)
+        this.hitVictim(victim.id, enemy.damage)
         enemy.attackCooldown = enemy.attackInterval * (enemy.buffTimer > 0 ? 0.75 : 1)
         if (charging) {
           enemy.chargeTimer = 0
@@ -1585,6 +1694,17 @@ export class Game {
         this.damagePlayer(projectile.damage)
         this.spawnHazard(projectile.mesh.position)
         this.removeProjectile(index)
+        continue
+      }
+      if (this.coopRole === 'host' && projectile.damage > 0) {
+        const struck = this.teammates.all.find((mate) => mate.status === 'alive'
+          && Math.hypot(mate.feet.x - projectile.mesh.position.x, mate.feet.z - projectile.mesh.position.z) < projectile.radius + 0.45
+          && projectile.mesh.position.y > mate.feet.y - 0.2 && projectile.mesh.position.y < mate.feet.y + 2)
+        if (struck) {
+          this.hitVictim(struck.id, projectile.damage)
+          this.spawnHazard(projectile.mesh.position)
+          this.removeProjectile(index)
+        }
       }
     }
   }
@@ -1598,6 +1718,15 @@ export class Game {
       const dx = this.player.x - hazard.mesh.position.x
       const dz = this.player.z - hazard.mesh.position.z
       if (dx * dx + dz * dz < 1.55 ** 2 && Math.abs(this.player.y - hazard.mesh.position.y) < 0.6) this.damagePlayer(5)
+      if (this.coopRole === 'host') {
+        for (const mate of this.teammates.all) {
+          if (mate.status !== 'alive' || mate.hazardCooldown > 0) continue
+          if ((mate.feet.x - hazard.mesh.position.x) ** 2 + (mate.feet.z - hazard.mesh.position.z) ** 2 < 1.55 ** 2 && Math.abs(mate.feet.y - hazard.mesh.position.y) < 0.6) {
+            mate.hazardCooldown = 0.32
+            this.hitVictim(mate.id, 5)
+          }
+        }
+      }
       if (hazard.life <= 0) {
         this.scene.remove(hazard.mesh)
         hazard.mesh.geometry.dispose()
@@ -1649,6 +1778,12 @@ export class Game {
     if (playerDistance < BLOATER_BLAST.radius && Math.abs(this.player.y - position.y) < 1.6) {
       this.damagePlayer(BLOATER_BLAST.playerDamage * Math.max(0.3, 1 - playerDistance / BLOATER_BLAST.radius))
     }
+    if (this.coopRole === 'host') {
+      for (const mate of this.teammates.all) {
+        const distance = mate.feet.distanceTo(position)
+        if (mate.status === 'alive' && distance < BLOATER_BLAST.radius) this.hitVictim(mate.id, BLOATER_BLAST.playerDamage * Math.max(0.3, 1 - distance / BLOATER_BLAST.radius))
+      }
+    }
     for (const other of this.enemies) {
       if (other.health <= 0 || other.body.position.distanceTo(position) > BLOATER_BLAST.radius) continue
       other.health -= BLOATER_BLAST.zombieDamage
@@ -1662,26 +1797,34 @@ export class Game {
     const position = enemy.model.group.position.clone()
     if (enemy.kind === 'bloater') this.explodeBloater(position)
     const color = getZombieColor(enemy.kind)
-    this.score += enemy.score * this.wave * this.lootMultiplier
-    this.kills += 1
+    const score = enemy.score * this.wave * this.lootMultiplier
+    const shards = enemy.kind === 'brute' ? 8 : Math.random() < 0.26 ? 1 : 0
+    const killer = enemy.lastHitBy
     const active = new Set<PowerUpId>([...this.activePowerUps.keys(), ...this.powerPickups.map((pickup) => pickup.id)])
     const dropped = rollPowerUp(enemy.kind, Math.random, active)
     if (dropped) this.spawnPowerPickup(position, dropped)
-    if (Math.random() < getMedkitDropChance(enemy.kind, this.health / this.stats.maxHealth)) this.spawnMedkit(position)
     this.spawnBurst(position.clone().setY(position.y + enemy.model.height * 0.5), color, enemy.kind === 'brute' ? 28 : 12)
-    if (enemy.kind === 'brute') {
-      for (let drop = 0; drop < 8; drop += 1) {
-        const offset = new THREE.Vector3((Math.random() - 0.5) * 3, 0, (Math.random() - 0.5) * 3)
-        this.spawnPickup(position.clone().add(offset), 1)
-      }
-    } else if (Math.random() < 0.26) {
-      this.spawnPickup(position, 1)
+    if (this.coopRole === 'host') {
+      this.coop?.broadcast({ t: 'kill', enemy: enemy.netId, by: killer ?? COOP_HOST_ID, kind: enemy.kind, pos: toVec3(position), score, xp: enemy.xp, shards, precision: false })
+      if (killer) this.teammateKills.set(killer, (this.teammateKills.get(killer) ?? 0) + 1)
     }
+    if (killer === null) this.rewardKill(enemy.kind, position, score, enemy.xp, shards)
     this.enemies.splice(index, 1)
     enemy.model.group.rotation.x = 0
     this.dyingEnemies.push({ model: enemy.model, kind: enemy.kind, life: 0.65, direction: Math.random() < 0.5 ? -1 : 1, baseY: position.y })
-    this.gainXp(enemy.xp)
     this.audio.playAt('kill', position, this.player, this.yaw)
+  }
+
+  /** Ricompense dell'uccisione per il giocatore locale: punti, esperienza, frammenti e kit. */
+  private rewardKill(kind: EnemyKind, position: THREE.Vector3, score: number, xp: number, shards: number): void {
+    this.score += score
+    this.kills += 1
+    if (Math.random() < getMedkitDropChance(kind, this.health / this.stats.maxHealth)) this.spawnMedkit(position)
+    for (let drop = 0; drop < shards; drop += 1) {
+      const offset = shards > 1 ? new THREE.Vector3((Math.random() - 0.5) * 3, 0, (Math.random() - 0.5) * 3) : new THREE.Vector3()
+      this.spawnPickup(position.clone().add(offset), 1)
+    }
+    this.gainXp(xp)
     this.events.onKill?.()
   }
 
@@ -1695,7 +1838,8 @@ export class Game {
     return enemy.kind === 'brute' ? damage * INSTA_KILL_BOSS_MULTIPLIER : Math.max(damage, enemy.health + 1)
   }
 
-  private spawnPowerPickup(position: THREE.Vector3, id: PowerUpId): void {
+  private spawnPowerPickup(position: THREE.Vector3, id: PowerUpId, netId?: number): void {
+    if (this.coopRole === 'client' && netId === undefined) return
     const definition = POWER_UPS[id]
     const group = new THREE.Group()
     const core = new THREE.Mesh(
@@ -1736,7 +1880,9 @@ export class Game {
     group.position.set(position.x, baseY + 0.6, position.z)
     this.scene.add(group)
     this.effects.pulse(group.position.clone().setY(baseY), definition.color, 1.4)
-    this.powerPickups.push({ id, group, life: POWER_UP_LIFETIME, baseY, phase: Math.random() * Math.PI * 2 })
+    const shared = netId ?? this.nextPowerId++
+    this.powerPickups.push({ netId: shared, id, group, life: POWER_UP_LIFETIME, baseY, phase: Math.random() * Math.PI * 2 })
+    if (this.coopRole === 'host') this.coop?.broadcast({ t: 'power-spawn', id: shared, power: id, pos: toVec3(position) })
   }
 
   private removePowerPickup(index: number): void {
@@ -1747,7 +1893,7 @@ export class Game {
     this.powerPickups.splice(index, 1)
   }
 
-  private activatePowerUp(id: PowerUpId): void {
+  private activatePowerUp(id: PowerUpId, origin: THREE.Vector3 = this.player): void {
     const definition = POWER_UPS[id]
     this.audio.play('upgrade')
     this.effects.pulse(this.player, definition.color, 3)
@@ -1758,13 +1904,16 @@ export class Game {
       this.cooldowns.lethal = 0
       this.cooldowns.tactical = 0
     } else if (id === 'shockwave') {
-      this.effects.explosion(this.player.clone().setY(this.player.y + 1), 6, definition.color, this.player.y)
+      this.effects.explosion(origin.clone().setY(origin.y + 1), 6, definition.color, origin.y)
       this.cameraShake = Math.max(this.cameraShake, 0.4)
-      for (const enemy of this.enemies) {
-        if (enemy.kind === 'brute' || enemy.health <= 0) continue
-        if (enemy.body.position.distanceTo(this.player) <= SHOCKWAVE_RADIUS) enemy.health = 0
+      // L'onda d'urto elimina gli zombie: in co-op lo decide l'host.
+      if (this.coopRole !== 'client') {
+        for (const enemy of this.enemies) {
+          if (enemy.kind === 'brute' || enemy.health <= 0) continue
+          if (enemy.body.position.distanceTo(origin) <= SHOCKWAVE_RADIUS) enemy.health = 0
+        }
+        this.killDestroyedEnemies()
       }
-      this.killDestroyedEnemies()
     }
     if (definition.duration > 0) this.activePowerUps.set(id, definition.duration)
     this.emitHud()
@@ -1782,11 +1931,18 @@ export class Game {
       pickup.group.position.y = pickup.baseY + 0.6 + Math.sin(this.elapsed * 3 + pickup.phase) * 0.15
       // Negli ultimi secondi lampeggia prima di sparire.
       pickup.group.visible = pickup.life > 5 || Math.sin(pickup.life * 14) > 0
-      const close = Math.hypot(pickup.group.position.x - this.player.x, pickup.group.position.z - this.player.z) < 1.5
-      if (close && Math.abs(pickup.baseY - this.player.y) < 1.4) {
+      // In co-op solo l'host decide chi lo raccoglie (lui o un compagno): l'effetto vale per tutti.
+      if (this.coopRole === 'client') {
+        if (pickup.life <= 0) this.removePowerPickup(index)
+        continue
+      }
+      const near = (feet: THREE.Vector3) => Math.hypot(pickup.group.position.x - feet.x, pickup.group.position.z - feet.z) < 1.5 && Math.abs(pickup.baseY - feet.y) < 1.4
+      const taker = this.coopStatus === 'alive' && near(this.player) ? COOP_HOST_ID : this.teammates.all.find((mate) => mate.status === 'alive' && near(mate.feet))?.id
+      if (taker) {
         const id = pickup.id
+        if (this.coopRole === 'host') this.coop?.broadcast({ t: 'power-take', id: pickup.netId, power: id, by: taker })
         this.removePowerPickup(index)
-        this.activatePowerUp(id)
+        this.activatePowerUp(id, taker === COOP_HOST_ID ? this.player : this.teammates.get(taker)?.feet)
         continue
       }
       if (pickup.life <= 0) this.removePowerPickup(index)
@@ -1949,14 +2105,17 @@ export class Game {
   }
 
   private damagePlayer(amount: number): void {
-    if (this.state !== 'playing' || this.invulnerability > 0 || this.activePowerUps.has('barrier')) return
+    if (this.state !== 'playing' && !(this.coop && this.state === 'paused')) return
+    if (this.invulnerability > 0 || this.activePowerUps.has('barrier') || this.coopStatus !== 'alive') return
     this.health = Math.max(0, this.health - Math.max(1, amount - this.stats.armor))
     this.invulnerability = 0.32
     this.sinceDamage = 0
     this.cameraShake = 0.4
     this.events.onDamage()
     this.audio.play('damage')
-    if (this.health <= 0) this.finishRun(false)
+    if (this.health > 0) return
+    if (this.coop) this.goDown()
+    else this.finishRun(false)
   }
 
   private removeProjectile(index: number): void {
@@ -2018,6 +2177,344 @@ export class Game {
     })
   }
 
+  // =========================================================================================
+  // Co-op
+  // =========================================================================================
+
+  /** Compagno a terra abbastanza vicino da essere rianimato. */
+  private findRevivable(): { id: string; name: string } | null {
+    if (!this.coop) return null
+    const mate = this.teammates.all.find((candidate) => candidate.status === 'down' && candidate.feet.distanceTo(this.player) < REVIVE_RANGE)
+    return mate ? { id: mate.id, name: mate.name } : null
+  }
+
+  /** Zombie: insegue il giocatore in piedi più vicino (in solitaria sempre quello locale). */
+  private chooseVictim(enemy: Enemy): { position: THREE.Vector3; id: string | null } {
+    let best: { position: THREE.Vector3; id: string | null } = { position: this.player, id: null }
+    if (!this.coop) return best
+    const score = (feet: THREE.Vector3) => Math.hypot(feet.x - enemy.body.position.x, feet.z - enemy.body.position.z) + Math.abs(feet.y - enemy.body.position.y) * 3
+    let bestScore = this.coopStatus === 'alive' ? score(this.player) : Number.POSITIVE_INFINITY
+    for (const mate of this.teammates.all) {
+      if (mate.status !== 'alive') continue
+      const value = score(mate.feet)
+      if (value < bestScore) {
+        bestScore = value
+        best = { position: mate.feet, id: mate.id }
+      }
+    }
+    return best
+  }
+
+  private hitVictim(id: string | null, amount: number): void {
+    if (id === null) this.damagePlayer(amount)
+    else this.coop?.sendTo(id, { t: 'damage', target: id, amount: Math.round(amount * 10) / 10 })
+  }
+
+  /** Danno inflitto dal giocatore locale. Il client lo dichiara all'host e non uccide da solo. */
+  private dealDamage(enemy: Enemy, amount: number, precision = false): void {
+    if (amount <= 0 || enemy.health <= 0) return
+    if (this.coopRole === 'client') {
+      this.coop?.send({ t: 'hit', enemy: enemy.netId, damage: Math.min(MAX_COOP_HIT_DAMAGE, Math.round(amount * 10) / 10), precision })
+      enemy.health = Math.max(1, enemy.health - amount)
+      return
+    }
+    enemy.health -= amount
+    enemy.lastHitBy = null
+  }
+
+  private goDown(): void {
+    this.coopStatus = 'down'
+    this.bleedOut = BLEED_OUT_SECONDS
+    this.health = 0
+    this.firing = false
+    this.aiming = false
+    this.weapons.setVisible(false)
+    this.sendCoopState()
+  }
+
+  private standUp(healthShare: number): void {
+    this.weapons.setVisible(true)
+    this.coopStatus = 'alive'
+    this.bleedOut = 0
+    this.health = this.stats.maxHealth * healthShare
+    this.invulnerability = 1.5
+    this.sinceDamage = 0
+    this.audio.play('heal')
+    this.sendCoopState()
+  }
+
+  /** Inizio ondata: chi era eliminato rientra con vita piena. */
+  private onCoopWave(): void {
+    if (!this.coop) return
+    if (respawnAtWave(this.coopStatus) === 'alive' && this.coopStatus === 'dead') {
+      this.controller.reset(this.map.playerSpawn.x, 0, this.map.playerSpawn.z)
+      this.standUp(1)
+      this.events.onNotice?.('DI NUOVO IN CAMPO', 'Nuova ondata: rientri con la vita piena.', 0x58f5e5)
+    }
+  }
+
+  private updateCoop(delta: number): void {
+    const coop = this.coop
+    if (!coop) return
+    this.teammates.update(delta, this.elapsed)
+    // Dissanguamento a terra.
+    if (this.coopStatus === 'down') {
+      this.bleedOut = Math.max(0, this.bleedOut - delta)
+      if (this.bleedOut <= 0) {
+        this.coopStatus = 'dead'
+        this.sendCoopState()
+      }
+    }
+    // Rianimazione: tieni premuto E vicino a un compagno a terra.
+    const downed = this.coopStatus === 'alive' && this.state === 'playing' && this.keys.has('KeyE') ? this.findRevivable() : null
+    if (downed) {
+      this.reviveProgress += delta
+      if (this.reviveProgress >= REVIVE_SECONDS) {
+        this.reviveProgress = 0
+        if (coop.isHost) this.applyRevive(downed.id, COOP_HOST_ID)
+        else coop.send({ t: 'revive', target: downed.id })
+      }
+    } else {
+      this.reviveProgress = 0
+    }
+    this.coopNetTimer -= delta
+    if (this.coopNetTimer > 0) return
+    this.coopNetTimer = 1 / 15
+    if (coop.isHost) {
+      this.broadcastWorld()
+      const statuses = [this.coopStatus, ...this.teammates.all.map((mate) => mate.status)]
+      if (isTeamWiped(statuses) && this.isRunActive()) {
+        coop.broadcast({ t: 'end', wave: this.wave, won: false })
+        this.finishRun(false)
+      }
+    } else {
+      this.sendCoopState()
+    }
+  }
+
+  private sendCoopState(): void {
+    if (this.coopRole !== 'client') return
+    this.coop?.send({
+      t: 'state', x: round2(this.player.x), y: round2(this.player.y), z: round2(this.player.z), yaw: round2(this.yaw), pitch: round2(this.pitch),
+      crouch: this.controller.crouched, health: Math.round(this.health), status: this.coopStatus,
+    })
+  }
+
+  private localPlayerState(id: string): CoopPlayerState {
+    return { id, x: round2(this.player.x), y: round2(this.player.y), z: round2(this.player.z), yaw: round2(this.yaw), pitch: round2(this.pitch), crouch: this.controller.crouched, health: Math.round(this.health), status: this.coopStatus, kills: this.kills }
+  }
+
+  private broadcastWorld(): void {
+    const enemies = this.enemies.filter((enemy) => enemy.health > 0).map((enemy) => packEnemy(
+      enemy.netId, enemy.kind, enemy.body.position.x, enemy.body.position.y, enemy.body.position.z, enemy.model.group.rotation.y,
+      enemy.health / enemy.maxHealth,
+      (enemy.elite ? ENEMY_FLAG_ELITE : 0) | (enemy.spawnTimer > 0 ? ENEMY_FLAG_RISING : 0) | (enemy.attackAnim > 0 ? ENEMY_FLAG_ATTACK : 0),
+    ))
+    const players: CoopPlayerState[] = [
+      this.localPlayerState(COOP_HOST_ID),
+      ...this.teammates.all.map((mate) => ({ id: mate.id, x: round2(mate.target.x), y: round2(mate.target.y), z: round2(mate.target.z), yaw: round2(mate.targetYaw), pitch: 0, crouch: mate.crouch, health: Math.round(mate.health), status: mate.status, kills: this.teammateKills.get(mate.id) ?? 0 })),
+    ]
+    this.coop?.broadcast({ t: 'world', wave: this.wave, waveBreak: round2(this.waveBreak), remaining: this.enemies.length + this.spawnQueue, enemies, players })
+  }
+
+  private applyRevive(target: string, by: string): void {
+    if (this.coopRole === 'host') this.coop?.broadcast({ t: 'revived', target, by })
+    if (target === this.coop?.localId) {
+      if (this.coopStatus === 'down') this.standUp(REVIVE_HEALTH_SHARE)
+      return
+    }
+    const mate = this.teammates.get(target)
+    if (mate && mate.status === 'down') {
+      this.teammates.setStatus(mate, 'alive')
+      mate.health = Math.round(100 * REVIVE_HEALTH_SHARE)
+    }
+  }
+
+  /** Host: messaggi dei compagni. */
+  private handleCoopClient(peerId: string, message: CoopClientMessage): void {
+    switch (message.t) {
+      case 'state': {
+        const mate = this.teammates.get(peerId)
+        if (!mate) return
+        const limit = this.map.arenaLimit
+        this.teammates.applyState({
+          id: peerId, x: THREE.MathUtils.clamp(message.x, -limit, limit), y: THREE.MathUtils.clamp(message.y, 0, 16), z: THREE.MathUtils.clamp(message.z, -limit, limit),
+          yaw: message.yaw, pitch: message.pitch, crouch: message.crouch, health: message.health, status: message.status, kills: this.teammateKills.get(peerId) ?? 0,
+        })
+        return
+      }
+      case 'hit': {
+        const enemy = this.enemies.find((candidate) => candidate.netId === message.enemy)
+        if (!enemy || enemy.health <= 0 || enemy.spawnTimer > 0) return
+        enemy.health -= this.scaleDamage(enemy, message.damage)
+        enemy.hitFlash = 0.08
+        enemy.flinch = Math.min(1, enemy.flinch + 0.5)
+        enemy.lastHitBy = peerId
+        this.killDestroyedEnemies()
+        return
+      }
+      case 'shot':
+        this.coop?.broadcast({ t: 'shot', by: peerId, from: message.from, to: message.to })
+        this.showRemoteShot(message.from, message.to)
+        return
+      case 'door': {
+        const door = this.doors.find((candidate) => candidate.definition.id === message.id)
+        if (!door) return
+        this.openDoor(door)
+        this.coop?.broadcast({ t: 'door', id: message.id })
+        return
+      }
+      case 'revive':
+        this.applyRevive(message.target, peerId)
+        return
+      default:
+        return
+    }
+  }
+
+  /** Client: messaggi dell'host. */
+  private handleCoopHost(message: CoopHostMessage): void {
+    if (!this.isRunActive() && message.t !== 'end') return
+    const localId = this.coop?.localId
+    switch (message.t) {
+      case 'world': {
+        this.waveBreak = message.waveBreak
+        this.coopRemaining = message.remaining
+        if (message.wave !== this.wave && message.wave > 0) this.applyRemoteWave(message.wave)
+        const seen = new Set<number>()
+        for (const packed of message.enemies) {
+          const data = unpackEnemy(packed)
+          seen.add(data.id)
+          const enemy = this.enemies.find((candidate) => candidate.netId === data.id)
+          if (!enemy) {
+            this.spawnEnemy(data.kind, { id: data.id, elite: (data.flags & ENEMY_FLAG_ELITE) !== 0, position: new THREE.Vector3(data.x, data.y, data.z), rising: (data.flags & ENEMY_FLAG_RISING) !== 0 })
+            continue
+          }
+          enemy.netTarget?.set(data.x, data.y, data.z)
+          enemy.netYaw = data.yaw
+          enemy.health = Math.max(1, data.healthShare * enemy.maxHealth)
+          if ((data.flags & ENEMY_FLAG_ATTACK) !== 0 && enemy.attackAnim <= 0) enemy.attackAnim = 1
+        }
+        // Zombie spariti senza messaggio di uccisione (es. fuori sincronia): si rimuovono.
+        for (let index = this.enemies.length - 1; index >= 0; index -= 1) {
+          const enemy = this.enemies[index]!
+          if (seen.has(enemy.netId)) continue
+          this.enemies.splice(index, 1)
+          this.releaseEnemyModel(enemy.kind, enemy.model)
+        }
+        for (const player of message.players) if (player.id !== localId) this.teammates.applyState(player)
+        return
+      }
+      case 'wave':
+        this.applyRemoteWave(message.wave)
+        return
+      case 'kill': {
+        const index = this.enemies.findIndex((candidate) => candidate.netId === message.enemy)
+        const position = new THREE.Vector3(...message.pos)
+        if (index >= 0) {
+          const enemy = this.enemies[index]!
+          this.enemies.splice(index, 1)
+          enemy.model.group.rotation.x = 0
+          this.dyingEnemies.push({ model: enemy.model, kind: enemy.kind, life: 0.65, direction: Math.random() < 0.5 ? -1 : 1, baseY: position.y })
+        }
+        if (message.kind === 'bloater') this.effects.explosion(position.clone().setY(position.y + 1), BLOATER_BLAST.radius, getZombieColor('bloater'), position.y)
+        this.spawnBurst(position.clone().setY(position.y + 1), getZombieColor(message.kind), message.kind === 'brute' ? 28 : 12)
+        this.audio.playAt('kill', position, this.player, this.yaw)
+        if (message.by === localId) this.rewardKill(message.kind, position, message.score, message.xp, message.shards)
+        return
+      }
+      case 'damage':
+        if (message.target === localId) this.damagePlayer(message.amount)
+        return
+      case 'acid': {
+        const mesh = new THREE.Mesh(this.acidGeometry, this.acidMaterial)
+        mesh.position.set(...message.pos)
+        this.scene.add(mesh)
+        // Solo effetto visivo: il danno ai giocatori lo calcola l'host.
+        this.projectiles.push({ mesh, velocity: new THREE.Vector3(...message.vel).multiplyScalar(7.5), damage: 0, life: 4, radius: 0.25 })
+        return
+      }
+      case 'power-spawn':
+        this.spawnPowerPickup(new THREE.Vector3(...message.pos), message.power, message.id)
+        return
+      case 'power-take': {
+        const index = this.powerPickups.findIndex((pickup) => pickup.netId === message.id)
+        if (index >= 0) this.removePowerPickup(index)
+        const origin = message.by === localId ? this.player : this.teammates.get(message.by)?.feet ?? this.player
+        this.activatePowerUp(message.power, origin)
+        return
+      }
+      case 'door': {
+        const door = this.doors.find((candidate) => candidate.definition.id === message.id)
+        if (door) this.openDoor(door)
+        return
+      }
+      case 'revived':
+        this.applyRevive(message.target, message.by)
+        return
+      case 'shot':
+        if (message.by !== localId) this.showRemoteShot(message.from, message.to)
+        return
+      case 'end':
+        this.finishRun(message.won)
+        return
+      default:
+        return
+    }
+  }
+
+  private applyRemoteWave(wave: number): void {
+    if (wave === this.wave) return
+    this.wave = wave
+    const previousTier = getFieldTier(Math.max(1, wave - 1))
+    this.rotateStations(wave)
+    const tier = getFieldTier(wave)
+    if (wave > 1) this.events.onNotice?.(tier > previousTier ? `ARMI ${FIELD_TIERS[tier].name} DISPONIBILI` : 'POSTAZIONI AGGIORNATE', 'Le armi in vendita sulla mappa sono cambiate: controlla le postazioni.', 0x8f6bff)
+    this.onCoopWave()
+    this.events.onWave(wave)
+  }
+
+  private showRemoteShot(from: Vec3, to: Vec3): void {
+    const start = new THREE.Vector3(...from)
+    this.spawnTracer(start, new THREE.Vector3(...to))
+    this.effects.muzzle(start, 0x8effd9)
+    this.audio.gunshot(gunshotProfileForRemote(), getSpatialSound(start, this.player, this.yaw))
+  }
+
+  /** Client: zombie replicati, interpolati verso lo stato dell'host e animati in locale. */
+  private updateReplicas(delta: number): void {
+    const blend = 1 - Math.exp(-12 * delta)
+    for (const enemy of this.enemies) {
+      if (enemy.spawnTimer > 0) {
+        enemy.spawnTimer = Math.max(0, enemy.spawnTimer - delta)
+        enemy.model.group.position.y = (enemy.netTarget?.y ?? 0) - enemy.model.height * (enemy.spawnTimer / SPAWN_RISE)
+      }
+      const before = enemy.model.group.position.clone()
+      if (enemy.netTarget && enemy.spawnTimer <= 0) enemy.model.group.position.lerp(enemy.netTarget, blend)
+      const yawDelta = Math.atan2(Math.sin(enemy.netYaw - enemy.model.group.rotation.y), Math.cos(enemy.netYaw - enemy.model.group.rotation.y))
+      enemy.model.group.rotation.y += yawDelta * blend
+      enemy.hitFlash = Math.max(0, enemy.hitFlash - delta)
+      enemy.attackAnim = Math.max(0, enemy.attackAnim - delta * 3)
+      const eliteGlow = enemy.elite ? 0.55 + Math.sin(this.elapsed * 5 + enemy.phase) * 0.25 : 0
+      enemy.model.body.material.emissive.setHex(enemy.hitFlash > 0 ? 0x882233 : enemy.elite ? 0x7a5200 : 0x000000)
+      enemy.model.body.material.emissiveIntensity = enemy.hitFlash > 0 ? 1.8 : eliteGlow
+      const speed = before.distanceTo(enemy.model.group.position) / Math.max(delta, 0.001)
+      const walk = Math.sin(this.elapsed * 7 + enemy.phase) * Math.min(1, speed / 2) * 0.6
+      enemy.model.leftLeg.rotation.x = walk
+      enemy.model.rightLeg.rotation.x = -walk
+      const swing = enemy.attackAnim > 0 ? Math.sin(enemy.attackAnim * Math.PI) : 0
+      enemy.model.leftArm.rotation.x = -1.2 - swing * 1.4 - walk * 0.3
+      enemy.model.rightArm.rotation.x = -1.1 - swing * 1.6 + walk * 0.3
+      const detailed = Math.hypot(this.player.x - enemy.body.position.x, this.player.z - enemy.body.position.z) < (this.graphicsQuality === 'low' ? 14 : 18)
+      for (const detail of enemy.model.details) detail.visible = detailed
+      if (enemy.kind === 'stalker') {
+        const distance = enemy.body.position.distanceTo(this.player)
+        const opacity = enemy.hitFlash > 0 ? 1 : THREE.MathUtils.clamp((14 - distance) / 7, 0.1, 1)
+        for (const material of (enemy.model.group.userData.fadeMaterials as THREE.Material[] | undefined) ?? []) material.opacity = opacity
+      }
+    }
+  }
+
   private emitHud(): void {
     this.events.onHud({
       health: this.health,
@@ -2039,7 +2536,13 @@ export class Game {
       scoped: this.weapons.current !== null && this.aiming && this.weaponDefinition.adsFov <= 30,
       aiming: this.aiming,
       waveBreak: this.waveBreak,
-      enemiesRemaining: this.enemies.length + this.spawnQueue,
+      enemiesRemaining: this.coopRole === 'client' ? this.coopRemaining : this.enemies.length + this.spawnQueue,
+      coop: this.coop ? {
+        status: this.coopStatus,
+        bleedOut: this.bleedOut,
+        revive: this.reviveProgress > 0 ? this.reviveProgress / REVIVE_SECONDS : 0,
+        team: this.teammates.all.map((mate) => ({ name: mate.name, health: mate.health, status: mate.status })),
+      } : undefined,
       powerUps: [...this.activePowerUps].map(([id, remaining]) => ({
         id,
         name: POWER_UPS[id].name,
@@ -2054,6 +2557,9 @@ export class Game {
         cooldown: this.cooldowns[slot],
       })),
       interaction: (() => {
+        const downed = this.findRevivable()
+        if (this.coopStatus !== 'alive') return null
+        if (downed) return { label: `TIENI PREMUTO E // RIANIMA ${downed.name}${this.reviveProgress > 0 ? ` ${Math.round((this.reviveProgress / REVIVE_SECONDS) * 100)}%` : ''}`, cost: 0, canAfford: true, denied: false }
         const interaction = this.getNearbyInteraction()
         if (!interaction) return null
         const { label, cost } = this.describeInteraction(interaction)
@@ -2069,11 +2575,17 @@ export class Game {
     this.elapsed += delta
     this.mapContent.ambient.rotation.y += delta * 0.015
     this.updatePlayer(delta)
-    if (this.state !== 'playing') return
-    this.updateSpawning(delta)
-    if (this.state !== 'playing') return
-    this.updateEnemies(delta)
-    if (this.state !== 'playing') return
+    if (!this.isRunActive()) return
+    if (this.coopRole === 'client') {
+      this.updateReplicas(delta)
+    } else {
+      this.updateSpawning(delta)
+      if (!this.isRunActive()) return
+      this.updateEnemies(delta)
+    }
+    if (this.coop) this.updateCoop(delta)
+    if (!this.isRunActive()) return
+    if (!this.isRunActive()) return
     this.updateDoors(delta)
     this.updateStations(delta)
     this.updateEquipment(delta)
@@ -2117,7 +2629,7 @@ export class Game {
       this.fpsFrames = 0
     }
     this.pathBudget = PATH_BUDGET_PER_FRAME
-    if (this.state === 'playing') this.update(delta)
+    if (this.state === 'playing' || (this.state === 'paused' && this.coop)) this.update(delta)
     else if (this.state === 'menu') this.updateMenu(time)
     this.pipeline.render()
     this.animationId = requestAnimationFrame(this.animate)
@@ -2234,4 +2746,12 @@ export class Game {
     this.renderer.domElement.addEventListener('mousedown', this.onMouseButtonDown)
     this.renderer.domElement.addEventListener('contextmenu', this.onContextMenu)
   }
+}
+
+function round2(value: number): number {
+  return Math.round(value * 100) / 100
+}
+
+function toVec3(vector: THREE.Vector3): Vec3 {
+  return [round2(vector.x), round2(vector.y), round2(vector.z)]
 }
