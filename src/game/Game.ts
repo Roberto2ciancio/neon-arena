@@ -1,3 +1,4 @@
+import { FIELD_TIERS, getFieldTier, getFieldWeaponCost, rollStationWeapons } from './fieldWeapons'
 import * as THREE from 'three'
 import { GameAudio } from './audio'
 import { RenderPipeline } from './RenderPipeline'
@@ -24,18 +25,19 @@ import type { EquipmentSlot } from './equipment'
 import { EquipmentSystem } from './EquipmentSystem'
 import type { DeployableKind, EquipmentTarget, ThrowableKind } from './EquipmentSystem'
 import { CombatEffects } from './effects'
-import { createStationModel, disposeObject, STATION_COLORS } from './equipmentModels'
+import { createStationModel, disposeObject, setStationLabel, STATION_COLORS } from './equipmentModels'
 import type { StationModel } from './equipmentModels'
 import { buildMap } from './mapBuilder'
 import { disposeMaterialVariants, setLambertMaterials } from './materialQuality'
 import type { BuiltDoor } from './mapBuilder'
 import type { AccessibilitySettings } from './accessibility'
-import { STATION_13 } from './maps'
-import type { MapDefinition, StationDefinition } from './maps'
+import { FIELD_ATTACHMENTS, STATION_13, STATION_COSTS } from './maps'
+import type { MapDefinition, PurchasableWeapon, StationDefinition } from './maps'
 import { createEnemyModel } from './models'
 import type { EnemyModel } from './models'
 import { applyUpgrade, createBaseStats, FIRST_LEVEL_XP, getNextLevelXp, getUpgradeChoices, UPGRADE_KEYS } from './upgrades'
 import { WEAPONS } from './weapons'
+import type { WeaponId } from './weapons'
 import { BURN_DURATION, CHAIN_LIGHTNING_RADIUS, getBurnDamagePerSecond, getChainLightningDamage, getChainTargetCount, getHeadshotExplosionDamage, HEADSHOT_EXPLOSION_RADIUS } from './specialEffects'
 import { BLOATER_BLAST, ENEMY_FIRST_WAVE, ENEMY_INTEL, FINAL_WAVE, getEliteChance, getMaxActiveZombies, getMeleeDamage, getPrewarmCount, getSpawnPool, PATH_BUDGET_PER_FRAME, getWaveSpawnCount, getZombieColor, getZombieStats, SHIELD_FRONT_REDUCTION, WAVE_BREAK_SECONDS } from './zombies'
 import { INSTA_KILL_BOSS_MULTIPLIER, POWER_UP_LIFETIME, POWER_UPS, rollPowerUp, SHOCKWAVE_RADIUS } from './powerups'
@@ -133,6 +135,9 @@ interface Hazard {
 interface Station {
   definition: StationDefinition
   model: StationModel
+  /** Arma e prezzo attuali (cambiano a ogni ondata). */
+  weapon?: WeaponId
+  cost: number
 }
 
 type Interaction =
@@ -452,8 +457,22 @@ export class Game {
       model.group.position.set(definition.x, definition.y, definition.z)
       model.group.rotation.y = Math.atan2(this.map.playerSpawn.x - definition.x, this.map.playerSpawn.z - definition.z)
       this.scene.add(model.group)
-      return { definition, model }
+      return { definition, model, weapon: definition.weapon, cost: definition.cost }
     })
+  }
+
+  /** Cambia le armi delle postazioni per l'ondata: stesse armi per tutti, grado e prezzo crescenti. */
+  private rotateStations(wave: number): void {
+    const weaponStations = this.stations.filter((station) => station.definition.kind === 'weapon')
+    const rolled = rollStationWeapons(this.map.id, weaponStations.map((station) => station.definition.id), Math.max(1, wave))
+    const tier = getFieldTier(Math.max(1, wave))
+    for (const station of weaponStations) {
+      const weaponId = rolled[station.definition.id] as PurchasableWeapon | undefined
+      if (!weaponId) continue
+      station.weapon = weaponId
+      station.cost = getFieldWeaponCost(STATION_COSTS[weaponId], tier)
+      setStationLabel(station.model, 'weapon', `${WEAPONS[weaponId].shortName} ${FIELD_TIERS[tier].name}`, `◆ ${station.cost}`)
+    }
   }
 
   start(bonuses: MetaBonuses, map: MapDefinition = STATION_13, loadout?: ResolvedLoadout): void {
@@ -634,6 +653,12 @@ export class Game {
 
   private nextWave(): void {
     this.wave += 1
+    const previousTier = getFieldTier(Math.max(1, this.wave - 1))
+    this.rotateStations(this.wave)
+    const tier = getFieldTier(this.wave)
+    if (this.wave > 1) {
+      this.events.onNotice?.(tier > previousTier ? `ARMI ${FIELD_TIERS[tier].name} DISPONIBILI` : 'POSTAZIONI AGGIORNATE', tier > previousTier ? 'Le postazioni ora vendono armi più potenti, a un prezzo più alto.' : 'Le armi in vendita sulla mappa sono cambiate: controlla le postazioni.', 0x8f6bff)
+    }
     this.spawnQueue = getWaveSpawnCount(this.wave)
     this.spawnTimer = 0.65
     this.waveBreak = 0
@@ -1166,12 +1191,13 @@ export class Game {
     const { definition } = interaction.station
     if (definition.kind === 'medkit') return { label: 'KIT MEDICO', cost: definition.cost }
     if (definition.kind === 'ammo') return { label: 'RIFORNIMENTO MUNIZIONI', cost: definition.cost }
-    const weaponId = definition.weapon!
-    const name = `${WEAPONS[weaponId].shortName} MK II`
+    const station = interaction.station
+    const weaponId = station.weapon!
+    const name = `${WEAPONS[weaponId].shortName} ${FIELD_TIERS[getFieldTier(Math.max(1, this.wave))].name}`
     // Un'arma già posseduta si ricarica a metà prezzo.
     return this.weapons.has(weaponId)
-      ? { label: `MUNIZIONI ${name}`, cost: Math.ceil(definition.cost / 2) }
-      : { label: `ACQUISTA ${name}`, cost: definition.cost }
+      ? { label: `MUNIZIONI ${name}`, cost: Math.ceil(station.cost / 2) }
+      : { label: `ACQUISTA ${name}`, cost: station.cost }
   }
 
   private interact(): void {
@@ -1203,11 +1229,11 @@ export class Game {
         this.weapons.refill()
         this.cooldowns.lethal = 0
         this.cooldowns.tactical = 0
-      } else if (definition.weapon) {
-        const weaponId = definition.weapon
+      } else if (interaction.station.weapon) {
+        const weaponId = interaction.station.weapon as PurchasableWeapon
         // Un'arma nuova sostituisce quella dello stesso slot; una posseduta si ricarica.
         if (this.weapons.has(weaponId)) this.weapons.refill(weaponId)
-        else this.weapons.replace(resolveWeapon(WEAPONS[weaponId], definition.attachments, { fieldVariant: true, level: this.loadout.weaponLevels[weaponId] }))
+        else this.weapons.replace(resolveWeapon(WEAPONS[weaponId], FIELD_ATTACHMENTS[weaponId], { fieldTier: getFieldTier(Math.max(1, this.wave)), level: this.loadout.weaponLevels[weaponId] }))
       }
       this.effects.pulse(model.group.position, STATION_COLORS[definition.kind], 1.8)
       this.spawnBurst(model.group.position.clone().setY(model.group.position.y + 1.3), STATION_COLORS[definition.kind], 14)

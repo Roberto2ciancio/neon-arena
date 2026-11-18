@@ -1,3 +1,5 @@
+import { FIELD_TIERS } from './fieldWeapons'
+import type { FieldTier } from './fieldWeapons'
 import type { AttachmentSlot, WeaponCategory, WeaponDefinition } from './weapons'
 
 export type AttachmentId =
@@ -74,17 +76,21 @@ export interface ResolvedWeapon extends WeaponDefinition {
   weaponLevel: number
   /** Variante da campo trovata sulle mappe Zombie. */
   fieldVariant: boolean
+  /** Grado della variante da campo (0 = arma normale, 1–3 = MK II–MK IV). */
+  fieldTier: number
 }
 
 export const MAX_WEAPON_LEVEL = 5
 /** Costo in frammenti per passare al livello successivo (indice = livello attuale). */
 export const WEAPON_LEVEL_COSTS = [6, 12, 20, 32, 48] as const
-export const FIELD_VARIANT_DAMAGE = 1.35
-export const FIELD_VARIANT_MAGAZINE = 1.2
+export const FIELD_VARIANT_DAMAGE = FIELD_TIERS[1].damage
+export const FIELD_VARIANT_MAGAZINE = FIELD_TIERS[1].magazine
 
 export interface WeaponBonus {
   level?: number
+  /** Equivale a `fieldTier: 1` (MK II). */
   fieldVariant?: boolean
+  fieldTier?: FieldTier
 }
 
 /** Moltiplicatori di un livello d'arma: più danno, meno rinculo, ricarica più rapida. */
@@ -106,10 +112,11 @@ export function resolveWeapon(weapon: WeaponDefinition, selection: AttachmentSel
     if (attachment.adsFov !== undefined) adsFov = Math.min(adsFov, attachment.adsFov)
   }
   const level = getWeaponLevelBonus(bonus.level ?? 0)
-  const field = bonus.fieldVariant === true
-  const fieldDamage = field ? FIELD_VARIANT_DAMAGE : 1
-  const fieldMagazine = field ? FIELD_VARIANT_MAGAZINE : 1
-  const suffix = field ? ' MK II' : ''
+  const tier = bonus.fieldTier ?? (bonus.fieldVariant === true ? 1 : undefined)
+  const field = tier !== undefined
+  const fieldDamage = tier ? FIELD_TIERS[tier].damage : 1
+  const fieldMagazine = tier ? FIELD_TIERS[tier].magazine : 1
+  const suffix = tier ? ` ${FIELD_TIERS[tier].name}` : ''
   return {
     ...weapon,
     name: field ? weapon.name.replace(' //', `${suffix} //`) : weapon.name,
@@ -118,6 +125,7 @@ export function resolveWeapon(weapon: WeaponDefinition, selection: AttachmentSel
     suppressed: applied.muzzle === 'suppressor',
     weaponLevel: Math.min(MAX_WEAPON_LEVEL, Math.max(0, Math.floor(bonus.level ?? 0))),
     fieldVariant: field,
+    fieldTier: tier ?? 0,
     damage: weapon.damage * totals.damage * level.damage * fieldDamage,
     range: weapon.range * totals.range,
     hipSpread: weapon.hipSpread * totals.hipSpread,

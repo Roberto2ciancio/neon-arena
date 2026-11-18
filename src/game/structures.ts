@@ -19,6 +19,8 @@ const WINDOW_BOTTOM = 1
 const WINDOW_TOP = 2.2
 const PARAPET_HEIGHT = 1.05
 const RAILING_HEIGHT = 1.05
+/** Distanza delle scale dal bordo delle torri: oltre la ringhiera (0,1 m) e le colonne d'angolo (0,4 m). */
+const TOWER_STAIR_INSET = 0.5
 
 export type Side = 'north' | 'south' | 'east' | 'west'
 export type StructureStyle = 'concrete' | 'brick' | 'industrial' | 'glass'
@@ -146,8 +148,12 @@ function expandBuilding(definition: BuildingDefinition, out: ExpandedStructures)
     ? { minX: x0, maxX: x1, minZ: z0, maxZ: z1 }
     : { minX: x0 + WALL_THICKNESS, maxX: x1 - WALL_THICKNESS, minZ: z0 + WALL_THICKNESS, maxZ: z1 - WALL_THICKNESS }
 
-  // Scale: una rampa per ogni passaggio di livello, alternando lato ovest ed est.
-  const stairs = Array.from({ length: definition.floors }, (_, level) => getStair(level, interior))
+  // Scale: una rampa per ogni passaggio di livello, alternando lato ovest ed est. Nelle torri il
+  // bordo è occupato da ringhiera e colonne: la rampa ne resta staccata, altrimenti le attraversa.
+  const stairBounds: Rect = tower
+    ? { ...interior, minX: interior.minX + TOWER_STAIR_INSET, maxX: interior.maxX - TOWER_STAIR_INSET }
+    : interior
+  const stairs = Array.from({ length: definition.floors }, (_, level) => getStair(level, stairBounds))
 
   for (let level = 0; level <= definition.floors; level += 1) {
     const baseY = level * FLOOR_HEIGHT

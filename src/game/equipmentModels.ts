@@ -204,6 +204,15 @@ function createLabelTexture(title: string, subtitle: string, color: string): THR
 export const STATION_COLORS = { weapon: 0xffb657, ammo: 0x58f5e5, medkit: 0x72ff8b } as const
 
 /** Terminale d'acquisto con ologramma rotante e cartellino del prezzo. */
+/** Aggiorna titolo e prezzo sullo schermo della postazione (le armi cambiano a ogni ondata). */
+export function setStationLabel(model: StationModel, kind: 'weapon' | 'ammo' | 'medkit', title: string, subtitle: string): void {
+  const css = `#${STATION_COLORS[kind].toString(16).padStart(6, '0')}`
+  const previous = model.screen.material.map
+  model.screen.material.map = createLabelTexture(title, subtitle, css)
+  model.screen.material.needsUpdate = true
+  previous?.dispose()
+}
+
 export function createStationModel(kind: 'weapon' | 'ammo' | 'medkit', title: string, cost: number): StationModel {
   const color = STATION_COLORS[kind]
   const css = `#${color.toString(16).padStart(6, '0')}`

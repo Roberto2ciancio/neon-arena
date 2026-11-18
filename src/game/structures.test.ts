@@ -130,6 +130,17 @@ describe('mappe', () => {
         }
       })
 
+      it('le scale non attraversano ringhiere, parapetti o colonne', () => {
+        const parts = expandStructures(map.buildings).boxes
+        const stairs = parts.filter((part) => part.kind === 'stair')
+        const blockers = parts.filter((part) => part.kind === 'railing' || part.kind === 'parapet' || part.kind === 'column')
+        const overlaps = (a: typeof parts[number], b: typeof parts[number]) => [0, 1, 2].every((axis) => a.min[axis]! < b.max[axis]! - 0.001 && b.min[axis]! < a.max[axis]! - 0.001)
+        for (const stair of stairs) {
+          const hit = blockers.find((blocker) => blocker.buildingId === stair.buildingId && overlaps(stair, blocker))
+          expect(hit?.id, stair.id).toBeUndefined()
+        }
+      })
+
       it('ogni piano e tetto è raggiungibile a piedi dallo spawn', () => {
         const graph = createNavigation(map)
         const structures = getMapStructures(map)

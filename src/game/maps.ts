@@ -53,7 +53,7 @@ export interface MapDefinition {
   stations: readonly StationDefinition[]
 }
 
-type PurchasableWeapon = Exclude<WeaponId, 'ar-07' | 'p-12'>
+export type PurchasableWeapon = Exclude<WeaponId, 'ar-07' | 'p-12'>
 
 export const STATION_COSTS: Record<PurchasableWeapon | 'ammo' | 'medkit', number> = {
   'smg-9': 8,
@@ -192,6 +192,8 @@ export const STATION_13: MapDefinition = {
     weapon('station-lmg', 'lmg-75', 17.5, 0, 15.5),
     weapon('station-ak', 'ak-74r', -6, 0, 18),
     weapon('station-sr', 'sr-50', -1, 3.2, -10),
+    weapon('station-yard', 'vx-45', 20, 0, 6),
+    weapon('station-platform', 'ap-18', -18, 0, 2),
     { id: 'station-ammo', kind: 'ammo', x: 2, y: 3.2, z: -12, cost: STATION_COSTS.ammo },
     { id: 'station-medkit', kind: 'medkit', x: -13, y: 3.2, z: -6, cost: STATION_COSTS.medkit },
   ],
@@ -257,6 +259,8 @@ export const DEPOT_06: MapDefinition = {
     weapon('station-lmg', 'lmg-75', 21, 0, 19.5),
     weapon('station-ak', 'br-3', -3, 0, 8),
     weapon('station-sr', 'sr-50', 20.5, 3.2, -7.2),
+    weapon('station-gate', 'vx-45', -8, 0, 26),
+    weapon('station-crane', 'as-12', 6, 0, 16),
     { id: 'station-ammo', kind: 'ammo', x: 3, y: 0, z: -3, cost: STATION_COSTS.ammo },
     { id: 'station-medkit', kind: 'medkit', x: 4, y: 3.2, z: -17, cost: STATION_COSTS.medkit },
   ],
@@ -323,9 +327,123 @@ export const DISTRICT_ZERO: MapDefinition = {
     weapon('station-lmg', 'lmg-75', 16, 6.4, 24),
     weapon('station-ak', 'ak-74r', 5.5, 0, -12),
     weapon('station-revolver', 'r-44', -5.5, 0, -9),
+    weapon('station-square', 'vx-45', 12, 0, 4),
+    weapon('station-avenue', 'ap-18', -12, 0, -3),
     { id: 'station-ammo', kind: 'ammo', x: 22, y: 3.2, z: -17, cost: STATION_COSTS.ammo },
     { id: 'station-medkit', kind: 'medkit', x: -5.5, y: 0, z: 9, cost: STATION_COSTS.medkit },
   ],
 }
 
-export const MAPS = [STATION_13, DEPOT_06, DISTRICT_ZERO] as const
+// ---------------------------------------------------------------------------
+// Porto 09: banchine con file di container, magazzini, gru e un faro.
+// ---------------------------------------------------------------------------
+
+const PORT_BUILDINGS: BuildingDefinition[] = [
+  { id: 'warehouse-west', name: 'MAGAZZINO A', kind: 'building', x: -20, z: -18, width: 14, depth: 10, floors: 1, doors: ['south', 'east'], style: 'industrial' },
+  { id: 'warehouse-east', name: 'MAGAZZINO B', kind: 'building', x: 19, z: -19, width: 12, depth: 10, floors: 2, doors: ['south'], style: 'industrial' },
+  { id: 'crane', kind: 'tower', x: -26, z: 12, width: 7, depth: 8, floors: 3, doors: [], style: 'industrial' },
+  { id: 'harbor-office', name: 'CAPITANERIA', kind: 'building', x: 22, z: 15, width: 10, depth: 9, floors: 2, doors: ['north'], style: 'brick' },
+  { id: 'lighthouse', kind: 'tower', x: 13, z: -31, width: 7, depth: 8, floors: 3, doors: [], style: 'concrete' },
+]
+
+export const PORT_09: MapDefinition = {
+  id: 'port-09',
+  name: 'Porto 09',
+  arenaLimit: 40,
+  playerSpawn: { x: 0, z: 26 },
+  enemySpawnRadius: 39,
+  buildings: PORT_BUILDINGS,
+  obstacles: [
+    { id: 'containers-west-a', x: -10, z: -3, width: 2.4, height: 2.6, depth: 6, style: 'container' },
+    { id: 'containers-west-b', x: -10, z: 6, width: 2.4, height: 5.2, depth: 6, style: 'container' },
+    { id: 'containers-east-a', x: 10, z: -4, width: 2.4, height: 5.2, depth: 6, style: 'container' },
+    { id: 'containers-east-b', x: 10, z: 5, width: 2.4, height: 2.6, depth: 6, style: 'container' },
+    { id: 'quay-container-north', x: -4, z: -28, width: 6, height: 2.6, depth: 2.4, style: 'container' },
+    { id: 'quay-container-south', x: -22, z: 30, width: 6, height: 2.6, depth: 2.4, style: 'container' },
+    { id: 'forklift-west', x: -16, z: -6, width: 2, height: 1.6, depth: 3, style: 'car' },
+    { id: 'forklift-east', x: 26, z: -6, width: 2, height: 1.6, depth: 3, style: 'car' },
+    { id: 'truck-quay', x: 30, z: 30, width: 6, height: 2.4, depth: 2.6, style: 'car' },
+    { id: 'bollards-north', x: 0, z: -14, width: 5, height: 0.9, depth: 0.6, style: 'cover' },
+    { id: 'bollards-west', x: -30, z: -2, width: 0.6, height: 0.9, depth: 5, style: 'cover' },
+    { id: 'bollards-east', x: 32, z: 4, width: 0.6, height: 0.9, depth: 5, style: 'cover' },
+    { id: 'fence-quay', x: 0, z: 14, width: 7, height: 1.3, depth: 0.3, style: 'wall' },
+    { id: 'net-store', x: 4, z: -22, width: 2.4, height: 2.4, depth: 2.4, style: 'container' },
+    ...crateStack('crates-quay-west', -18, 20),
+    ...crateStack('crates-quay-east', 16, 28),
+    ...crateStack('crates-north', -2, -20, false),
+    ...barrels('barrels-crane', -20, 4),
+    ...barrels('barrels-office', 28, 22),
+    ...barrels('barrels-north', 24, -30),
+    ...cornerPillars(38, 7),
+  ],
+  doors: [buildingDoor('warehouse-east-door', PORT_BUILDINGS[1]!, 'south', 10)],
+  stations: [
+    weapon('station-quay', 'smg-9', -6, 0, 20),
+    weapon('station-containers', 'sg-6', -6, 0, 1),
+    weapon('station-forklift', 'ap-18', 14, 0, 1),
+    weapon('station-crane-base', 'r-44', -20, 0, 18),
+    weapon('station-warehouse', 'dmr-3', -20, 0, -10),
+    weapon('station-office', 'vx-45', 16, 0, 8),
+    weapon('station-lighthouse', 'ak-74r', 6, 0, -30),
+    weapon('station-north', 'br-3', -14, 0, -28),
+    { id: 'station-ammo', kind: 'ammo', x: 4, y: 0, z: 8, cost: STATION_COSTS.ammo },
+    { id: 'station-medkit', kind: 'medkit', x: -26, y: 0, z: -4, cost: STATION_COSTS.medkit },
+  ],
+}
+
+// ---------------------------------------------------------------------------
+// Laboratorio 21: complesso di ricerca con edificio principale a tre piani, dormitorio e reattore.
+// ---------------------------------------------------------------------------
+
+const LAB_BUILDINGS: BuildingDefinition[] = [
+  { id: 'lab-main', name: 'LABORATORIO 21', kind: 'building', x: 0, z: -20, width: 16, depth: 12, floors: 3, doors: ['south', 'east'], style: 'glass' },
+  { id: 'dorm', name: 'DORMITORIO', kind: 'building', x: -25, z: 2, width: 10, depth: 12, floors: 2, doors: ['east'], style: 'concrete' },
+  { id: 'reactor', kind: 'tower', x: 25, z: -6, width: 8, depth: 8, floors: 2, doors: [], style: 'industrial' },
+  { id: 'greenhouse', name: 'SERRA', kind: 'building', x: -24, z: -26, width: 10, depth: 8, floors: 1, doors: ['east'], style: 'glass' },
+  { id: 'clinic', name: 'INFERMERIA', kind: 'building', x: 23, z: 22, width: 10, depth: 9, floors: 1, doors: ['north'], style: 'brick' },
+]
+
+export const LAB_21: MapDefinition = {
+  id: 'lab-21',
+  name: 'Laboratorio 21',
+  arenaLimit: 40,
+  playerSpawn: { x: 0, z: 28 },
+  enemySpawnRadius: 39,
+  buildings: LAB_BUILDINGS,
+  obstacles: [
+    { id: 'courtyard-planter-west', x: -6, z: 4, width: 3, height: 0.9, depth: 3, style: 'cover' },
+    { id: 'courtyard-planter-east', x: 6, z: 4, width: 3, height: 0.9, depth: 3, style: 'cover' },
+    { id: 'courtyard-fountain', x: 0, z: 10, width: 3.4, height: 1, depth: 3.4, style: 'cover' },
+    { id: 'generator-west', x: -12, z: -8, width: 3, height: 2.4, depth: 2, style: 'container' },
+    { id: 'generator-east', x: 14, z: -12, width: 3, height: 2.4, depth: 2, style: 'container' },
+    { id: 'checkpoint-wall-west', x: -9, z: 18, width: 6, height: 2.6, depth: 0.5, style: 'wall' },
+    { id: 'checkpoint-wall-east', x: 9, z: 18, width: 6, height: 2.6, depth: 0.5, style: 'wall' },
+    { id: 'ambulance', x: 14, z: 30, width: 2.6, height: 2.4, depth: 5, style: 'car' },
+    { id: 'service-van', x: -16, z: 14, width: 4.6, height: 2.2, depth: 2.2, style: 'car' },
+    { id: 'barricade-north', x: -14, z: -32, width: 4, height: 1.2, depth: 0.4, style: 'cover' },
+    { id: 'barricade-reactor', x: 30, z: 6, width: 0.4, height: 1.2, depth: 4, style: 'cover' },
+    { id: 'supply-cage', x: 30, z: -24, width: 2.4, height: 2.4, depth: 2.4, style: 'container' },
+    ...crateStack('crates-dorm', -16, -2),
+    ...crateStack('crates-reactor', 16, 4, false),
+    ...crateStack('crates-gate', -26, 26),
+    ...barrels('barrels-lab', 10, -30),
+    ...barrels('barrels-clinic', 30, 30),
+    ...barrels('barrels-serra', -32, -14),
+    ...cornerPillars(38, 7),
+  ],
+  doors: [buildingDoor('clinic-door', LAB_BUILDINGS[4]!, 'north', 10)],
+  stations: [
+    weapon('station-gate', 'smg-9', -4, 0, 22),
+    weapon('station-courtyard', 'sg-6', 4, 0, 0),
+    weapon('station-fountain', 'ap-18', -4, 0, 12),
+    weapon('station-dorm', 'r-44', -16, 0, 6),
+    weapon('station-reactor', 'dmr-3', 18, 0, -2),
+    weapon('station-lab', 'vx-45', 12, 0, -20),
+    weapon('station-serra', 'ak-74r', -14, 0, -22),
+    weapon('station-clinic', 'br-3', 16, 0, 14),
+    { id: 'station-ammo', kind: 'ammo', x: 8, y: 0, z: 12, cost: STATION_COSTS.ammo },
+    { id: 'station-medkit', kind: 'medkit', x: -10, y: 0, z: -2, cost: STATION_COSTS.medkit },
+  ],
+}
+
+export const MAPS = [STATION_13, DEPOT_06, DISTRICT_ZERO, PORT_09, LAB_21] as const
