@@ -89,6 +89,8 @@ interface TctEvents {
 }
 
 export class TctGame {
+  /** Secondi al prossimo aggiornamento della mappa d'ombra. */
+  private shadowTimer = 0
   /** Esperienza delle armi accumulata nella partita. */
   private readonly weaponXp = new Map<string, number>()
   private readonly scene = new THREE.Scene()
@@ -189,6 +191,8 @@ export class TctGame {
     this.pipeline.setQuality(quality)
     this.resize()
     this.renderer.shadowMap.enabled = settings.shadows
+    // La mappa d'ombra si ricalcola a intervalli: quasi tutto ciò che proietta ombre è statico.
+    this.renderer.shadowMap.autoUpdate = false
     this.renderer.shadowMap.needsUpdate = true
     this.effects.setLightsEnabled(quality !== 'low')
     let staticLightIndex = 0
@@ -1007,7 +1011,12 @@ export class TctGame {
         this.camera.rotation.z = 0
         this.camera.lookAt(0, 2, 0)
       }
-      this.pipeline.render()
+      this.shadowTimer -= frameDuration
+    if (this.shadowTimer <= 0) {
+      this.renderer.shadowMap.needsUpdate = true
+      this.shadowTimer = SHADOW_REFRESH_SECONDS
+    }
+    this.pipeline.render()
     }
     this.animationId = requestAnimationFrame(this.animate)
   }
@@ -1135,3 +1144,6 @@ function round(value: number, digits = 2): number {
   const factor = 10 ** digits
   return Math.round(value * factor) / factor
 }
+
+/** Aggiornamento della mappa d'ombra: 10 volte al secondo bastano per giocatori e porte in movimento. */
+const SHADOW_REFRESH_SECONDS = 0.1

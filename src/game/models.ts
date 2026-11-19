@@ -107,8 +107,6 @@ export function createWeaponModel(): WeaponModel {
   )
   flash.scale.set(0.7, 0.7, 2.5)
   flash.visible = false
-  const flashLight = new THREE.PointLight(0xffa34d, 7, 3)
-  flash.add(flashLight)
   muzzle.add(flash)
   group.visible = false
   return { group, muzzle, flash }

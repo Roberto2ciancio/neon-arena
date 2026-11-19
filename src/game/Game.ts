@@ -215,6 +215,8 @@ function getWeakPointZone(kind: EnemyKind): HitZone {
 }
 
 export class Game {
+  /** Secondi al prossimo aggiornamento della mappa d'ombra. */
+  private shadowTimer = 0
   private readonly scene = new THREE.Scene()
   private readonly decals = new DecalEffects(this.scene)
   private readonly effects = new CombatEffects(this.scene)
@@ -404,6 +406,8 @@ export class Game {
     this.pipeline.setQuality(quality)
     this.resize()
     this.renderer.shadowMap.enabled = settings.shadows
+    // La mappa d'ombra si ricalcola a intervalli: quasi tutto ciò che proietta ombre è statico.
+    this.renderer.shadowMap.autoUpdate = false
     this.renderer.shadowMap.needsUpdate = true
     this.effects.setLightsEnabled(quality !== 'low')
     let staticLightIndex = 0
@@ -847,8 +851,19 @@ export class Game {
       this.enemyPool.set(kind, pool)
     }
     if (created.length === 0) return
-    for (const model of created) this.scene.add(model.group)
+    // Un frame vero con tutti i tipi davanti alla telecamera: prepara anche le varianti degli
+    // shader usate da ombre e occlusione ambientale, che compile() da solo non copre.
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion).setY(0).normalize()
+    created.forEach((model, index) => {
+      const offset = (index % 6) - 2.5
+      model.group.position.copy(this.camera.position).addScaledVector(forward, 6 + Math.floor(index / 6) * 1.5)
+      model.group.position.x += offset * 1.2
+      model.group.position.y = 0
+      this.scene.add(model.group)
+    })
     this.renderer.compile(this.scene, this.camera)
+    this.renderer.shadowMap.needsUpdate = true
+    this.pipeline.render()
     for (const model of created) {
       this.scene.remove(model.group)
       model.group.position.set(0, 0, 0)
@@ -2788,6 +2803,11 @@ export class Game {
     this.pathBudget = PATH_BUDGET_PER_FRAME
     if (this.state === 'playing' || (this.state === 'paused' && this.coop)) this.update(delta)
     else if (this.state === 'menu') this.updateMenu(time)
+    this.shadowTimer -= frameDuration
+    if (this.shadowTimer <= 0) {
+      this.renderer.shadowMap.needsUpdate = true
+      this.shadowTimer = SHADOW_REFRESH_SECONDS
+    }
     this.pipeline.render()
     this.animationId = requestAnimationFrame(this.animate)
   }
@@ -2934,3 +2954,6 @@ export interface RunSummary {
   stats: { damage: number; fireRate: number; crit: number; armor: number; regen: number; shield: number; reload: number }
   slots: number
 }
+
+/** Aggiornamento della mappa d'ombra: 10 volte al secondo bastano per giocatori e porte in movimento. */
+const SHADOW_REFRESH_SECONDS = 0.1

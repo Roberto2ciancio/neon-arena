@@ -37,11 +37,21 @@ export class CombatEffects {
   private readonly spark = new THREE.BoxGeometry(0.03, 0.03, 0.22)
   private lightsEnabled = true
 
-  constructor(private readonly scene: THREE.Scene) {}
+  constructor(private readonly scene: THREE.Scene) {
+    for (let index = 0; index < MAX_LIGHTS; index += 1) {
+      const light = new THREE.PointLight(0xffffff, 0, 14, 1.6)
+      this.scene.add(light)
+      this.lights.push({ light, life: 0, maxLife: 1, intensity: 0 })
+    }
+  }
 
   setLightsEnabled(enabled: boolean): void {
     this.lightsEnabled = enabled
-    if (!enabled) for (const entry of this.lights) entry.light.intensity = 0
+    // Visibilità cambiata solo con il preset: durante la partita il numero di luci resta fisso.
+    for (const entry of this.lights) {
+      entry.light.visible = enabled
+      if (!enabled) entry.light.intensity = 0
+    }
   }
 
   private add(mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>, options: Partial<Omit<TimedMesh, 'mesh'>> & { life: number }): void {
@@ -61,14 +71,8 @@ export class CombatEffects {
 
   flash(position: THREE.Vector3, color: number, intensity: number, life: number, distance = 14): void {
     if (!this.lightsEnabled) return
-    let entry = this.lights.find((candidate) => candidate.life <= 0)
-    if (!entry && this.lights.length < MAX_LIGHTS) {
-      const light = new THREE.PointLight(color, 0, distance, 1.6)
-      this.scene.add(light)
-      entry = { light, life: 0, maxLife: life, intensity }
-      this.lights.push(entry)
-    }
-    entry ??= this.lights.reduce((oldest, candidate) => (candidate.life < oldest.life ? candidate : oldest))
+    const entry = this.lights.find((candidate) => candidate.life <= 0)
+      ?? this.lights.reduce((oldest, candidate) => (candidate.life < oldest.life ? candidate : oldest))
     entry.light.color.setHex(color)
     entry.light.distance = distance
     entry.light.position.copy(position)

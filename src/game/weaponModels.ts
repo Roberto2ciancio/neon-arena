@@ -286,7 +286,6 @@ export function createViewWeapon(weapon: WeaponDefinition, attachments: Attachme
   flash.scale.set(0.7, 0.7, 2.5)
   if (attachments.muzzle === 'suppressor') flash.scale.multiplyScalar(0.35)
   flash.visible = false
-  flash.add(new THREE.PointLight(0xffa34d, attachments.muzzle === 'suppressor' ? 2 : 7, 3))
   muzzle.add(flash)
   group.visible = false
   return { group, muzzle, flash, magazine, supportHand, reloadStyle }
@@ -320,11 +319,8 @@ export function createMeleeView(id: MeleeId, gloveColor = 0x181a1d): THREE.Group
   const guard = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.09, 0.025), handle)
   guard.position.set(0, 0, -0.085)
   blade3d.add(guard)
-  if (id === 'plasma') {
-    const light = new THREE.PointLight(0x2ee8ff, 2.5, 2)
-    light.position.copy(blade.position)
-    blade3d.add(light)
-  }
+  // La lama al plasma brilla con il solo materiale emissivo: una luce in più cambierebbe
+  // il numero di luci della scena a ogni cambio d'arma, con ricompilazione degli shader.
   group.visible = false
   return group
 }

@@ -81,7 +81,12 @@ export class WeaponHandler {
   private pendingSounds: MechanicalSound[] = []
   private reloadCueIndex = 0
 
-  constructor(private readonly parent: THREE.Object3D) {}
+  /** Luce del lampo di sparo: sempre nella scena, si accende solo variando l'intensità. */
+  private readonly muzzleLight = new THREE.PointLight(0xffa34d, 0, 3)
+
+  constructor(private readonly parent: THREE.Object3D) {
+    parent.add(this.muzzleLight)
+  }
 
   configure(loadout: ResolvedLoadout): void {
     this.disposeModels()
@@ -230,9 +235,14 @@ export class WeaponHandler {
   private updateVisibility(): void {
     if (!this.slots || !this.meleeModel) return
     const showMelee = this.activeSlot === 'melee' || this.meleeTimer > 0
+    this.muzzleLight.intensity = 0
     for (const [key, slot] of Object.entries(this.slots) as [WeaponSlot, GunSlot][]) {
       slot.model.group.visible = this.visible && !showMelee && !this.scoped && key === this.activeSlot
       slot.model.flash.visible = slot.model.group.visible && this.muzzleTimer > 0
+      if (slot.model.flash.visible) {
+        this.muzzleLight.position.copy(this.parent.worldToLocal(slot.model.muzzle.getWorldPosition(new THREE.Vector3())))
+        this.muzzleLight.intensity = slot.weapon.suppressed ? 2 : 7
+      }
     }
     this.meleeModel.visible = this.visible && showMelee
   }
