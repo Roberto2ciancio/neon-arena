@@ -410,6 +410,8 @@ export class Game {
     this.renderer.shadowMap.autoUpdate = false
     this.renderer.shadowMap.needsUpdate = true
     this.effects.setLightsEnabled(quality !== 'low')
+    // Preset basso: niente pioggia, polvere o spore (meno carico sui computer deboli).
+    if (this.mapContent.weather) this.mapContent.weather.visible = quality !== 'low'
     let staticLightIndex = 0
     this.mapContent.group.traverse((object) => {
       if (object instanceof THREE.PointLight) object.visible = staticLightIndex++ < settings.staticLights

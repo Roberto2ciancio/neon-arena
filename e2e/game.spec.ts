@@ -208,7 +208,10 @@ test('l’armeria equipaggia armi, accessori ed equipaggiamenti e li porta in pa
   page.on('pageerror', (error) => errors.push(error.message))
   await page.goto('/')
   // Livello del giocatore 12; l'AK-74R è al livello d'arma 6 (accessori fino al caricatore esteso).
-  await page.evaluate(() => window.localStorage.setItem('neon-arena:armory:v1', JSON.stringify({ level: 12, xp: 0, mastery: { 'ak-74r': { level: 6, xp: 0, prestige: 0 } } })))
+  await page.evaluate(() => {
+    window.localStorage.setItem('neon-arena:armory:v1', JSON.stringify({ level: 12, xp: 0, mastery: { 'ak-74r': { level: 6, xp: 0, prestige: 0 } } }))
+    window.localStorage.setItem('neon-arena:graphics:v1', 'low')
+  })
   await page.reload()
   await expect(page.locator('#player-level')).toHaveText('12')
   await page.getByRole('button', { name: 'ARMERIA' }).click()
@@ -521,19 +524,20 @@ test('un’ondata piena non provoca cali improvvisi di frame', async ({ page }) 
     game.debugPlace(0, 0, 12, 0, 0)
   })
   await page.waitForFunction(() => (window as any).__neonArena.game.enemies.length >= 18)
+  // Un numero fisso di frame (non un tempo fisso): in CI il rendering software è lento e in
+  // 4 secondi si arrivava a 25–27 frame, troppo pochi per il controllo dei picchi.
   const frames = await page.evaluate(async () => new Promise<number[]>((resolve) => {
     const deltas: number[] = []
     let previous = 0
-    const start = performance.now()
     const frame = (now: number) => {
       if (previous > 0) deltas.push(now - previous)
       previous = now
-      if (now - start >= 4000) resolve(deltas)
+      if (deltas.length >= 60) resolve(deltas)
       else requestAnimationFrame(frame)
     }
     requestAnimationFrame(frame)
   }))
-  expect(frames.length).toBeGreaterThan(30)
+  expect(frames.length).toBe(60)
   // Si misurano i picchi rispetto al frame tipico della stessa macchina, non un valore assoluto:
   // in CI il rendering è software (SwiftShader) e la media sta già intorno ai 40–50 ms.
   // Un picco è un frame oltre il triplo della mediana e oltre 100 ms (blocchi da GC, shader, spawn).
