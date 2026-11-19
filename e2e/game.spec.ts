@@ -36,9 +36,9 @@ test('una run FPS usa mouse, fuoco, mira e ricarica e salva il risultato', async
     await page.keyboard.up('ShiftLeft')
     await page.keyboard.up('KeyW')
   }
-  await expect(page.locator('#door-prompt-text')).toHaveText('APRI PORTA // ◆ 5')
+  await expect(page.locator('#door-prompt-text')).toHaveText('APRI PORTA // ⬢ 5')
   await page.keyboard.press('KeyE')
-  await expect(page.locator('#door-prompt-text')).toHaveText('SERVONO 5 FRAMMENTI')
+  await expect(page.locator('#door-prompt-text')).toHaveText('SERVONO 5 CREDITI')
   await page.keyboard.press('Space')
   const viewport = page.viewportSize()
   await page.mouse.move((viewport?.width ?? 1440) * 0.6, (viewport?.height ?? 900) * 0.45)
@@ -207,7 +207,8 @@ test('l’armeria equipaggia armi, accessori ed equipaggiamenti e li porta in pa
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))
   await page.goto('/')
-  await page.evaluate(() => window.localStorage.setItem('neon-arena:armory:v1', JSON.stringify({ level: 12, xp: 0 })))
+  // Livello del giocatore 12; l'AK-74R è al livello d'arma 6 (accessori fino al caricatore esteso).
+  await page.evaluate(() => window.localStorage.setItem('neon-arena:armory:v1', JSON.stringify({ level: 12, xp: 0, mastery: { 'ak-74r': { level: 6, xp: 0, prestige: 0 } } })))
   await page.reload()
   await expect(page.locator('#player-level')).toHaveText('12')
   await page.getByRole('button', { name: 'ARMERIA' }).click()
@@ -216,9 +217,16 @@ test('l’armeria equipaggia armi, accessori ed equipaggiamenti e li porta in pa
   // Armi bloccate oltre il livello attuale.
   await expect(page.locator('.armory-item', { hasText: 'AS-12' })).toBeDisabled()
   await page.locator('.armory-item', { hasText: 'AK-74R' }).click()
+  // Gli accessori si sbloccano con il livello dell'arma, non del giocatore.
+  await expect(page.locator('.armory-chip', { hasText: 'OTTICA 4×' })).toBeDisabled()
   await page.locator('.armory-chip', { hasText: 'COMPENSATORE' }).click()
   await page.locator('.armory-chip', { hasText: 'CARICATORE ESTESO' }).click()
-  await expect(page.locator('.armory-meta')).toContainText('45 COLPI')
+  await expect(page.locator('.armory-meta').first()).toContainText('45 COLPI')
+  // Al massimo 3 accessori: il quarto viene rifiutato.
+  await page.locator('.armory-chip', { hasText: 'PUNTO ROSSO' }).click()
+  await page.locator('.armory-chip', { hasText: 'IMPUGNATURA VERTICALE' }).click()
+  await expect(page.locator('.armory-hint.error')).toContainText('Massimo 3 accessori')
+  await expect(page.locator('.armory-attachment-count')).toContainText('ACCESSORI 3/3')
   await page.locator('[data-armory-tab="secondary"]').click()
   await page.locator('.armory-item', { hasText: 'R-44' }).click()
   await page.locator('[data-armory-tab="melee"]').click()
@@ -263,14 +271,14 @@ test('le armi si potenziano con i frammenti e non hanno munizioni infinite', asy
   })
   await page.reload()
   await page.getByRole('button', { name: 'ARMERIA' }).click()
-  await expect(page.locator('.armory-level strong')).toHaveText('LIVELLO ARMA 0/5')
+  await expect(page.locator('.armory-level strong')).toHaveText('POTENZIAMENTO 0/10')
   await page.locator('#weapon-upgrade').click()
-  await expect(page.locator('.armory-level strong')).toHaveText('LIVELLO ARMA 1/5')
+  await expect(page.locator('.armory-level strong')).toHaveText('POTENZIAMENTO 1/10')
   await page.locator('#weapon-upgrade').click()
-  await expect(page.locator('.armory-level strong')).toHaveText('LIVELLO ARMA 2/5')
-  // 6 + 12 frammenti spesi: ne restano 2, non bastano per il terzo livello (20).
+  await expect(page.locator('.armory-level strong')).toHaveText('POTENZIAMENTO 2/10')
+  // 8 + 12 frammenti spesi: finiti, il terzo grado (18) non si può comprare.
   await expect(page.locator('#weapon-upgrade')).toBeDisabled()
-  await expect(page.locator('#core-balance-side')).toHaveText('2')
+  await expect(page.locator('#core-balance-side')).toHaveText('0')
   await page.getByRole('button', { name: 'CHIUDI' }).click()
   await page.reload()
   await page.getByRole('button', { name: 'INIZIA RUN' }).click()

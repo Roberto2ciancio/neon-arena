@@ -268,7 +268,7 @@ export function createStationModel(kind: 'weapon' | 'ammo' | 'medkit', title: st
   group.add(beam)
   const screen = new THREE.Mesh(
     new THREE.PlaneGeometry(0.95, 0.475),
-    new THREE.MeshBasicMaterial({ map: createLabelTexture(title, `◆ ${cost}`, css), transparent: true, side: THREE.DoubleSide, depthWrite: false }),
+    new THREE.MeshBasicMaterial({ map: createLabelTexture(title, `⬢ ${cost}`, css), transparent: true, side: THREE.DoubleSide, depthWrite: false }),
   )
   screen.position.y = 2
   group.add(screen)

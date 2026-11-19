@@ -1,11 +1,11 @@
 import { ArmoryPreview } from './game/ArmoryPreview'
 import type { PreviewSubject } from './game/ArmoryPreview'
-import { getWeaponUpgradeCost, isUnlocked, upgradeWeapon, xpForLevel, MAX_LEVEL } from './game/armory'
+import { canPrestigeWeapon, getMastery, getWeaponUpgradeCost, isAttachmentUnlocked, isUnlocked, masteryXpForLevel, MAX_LEVEL, MAX_WEAPON_MASTERY, MAX_WEAPON_PRESTIGE, prestigeWeapon, renameClass, selectClass, upgradeWeapon, xpForLevel } from './game/armory'
 import type { ArmoryState, Loadout } from './game/armory'
-import { ATTACHMENT_SLOT_LABELS, ATTACHMENTS, getCompatibleAttachments, MAX_WEAPON_LEVEL, resolveWeapon } from './game/attachments'
+import { ATTACHMENT_SLOT_LABELS, ATTACHMENTS, getAttachmentLimit, getCompatibleAttachments, MAX_WEAPON_LEVEL, resolveWeapon } from './game/attachments'
 import type { AttachmentId } from './game/attachments'
-import { CAMOS, COSMETIC_CATALOG, COSMETIC_LABELS } from './game/cosmetics'
-import type { CosmeticOption, Cosmetics } from './game/cosmetics'
+import { CAMOS, COSMETIC_CATALOG, COSMETIC_LABELS, isCosmeticUnlocked } from './game/cosmetics'
+import type { CosmeticOption, Cosmetics, CosmeticSlot } from './game/cosmetics'
 import { EQUIPMENT, GADGET_ORDER, LETHAL_ORDER, TACTICAL_ORDER } from './game/equipment'
 import type { EquipmentId, EquipmentSlot } from './game/equipment'
 import { CATEGORY_LABELS, MELEE_ORDER, MELEE_WEAPONS, PRIMARY_WEAPONS, SECONDARY_WEAPONS, WEAPONS } from './game/weapons'
@@ -99,10 +99,39 @@ export class ArmoryScreen {
     this.render()
   }
 
+  /** Classi salvate: si sceglie quella da usare e la si può rinominare. */
+  private renderClasses(): void {
+    const state = this.state
+    const container = this.options.root.querySelector<HTMLElement>('#armory-classes')!
+    const buttons = state.classes.map((entry, index) => {
+      const button = element('button', 'armory-class', entry.name)
+      button.type = 'button'
+      button.classList.toggle('selected', index === state.activeClass)
+      button.setAttribute('aria-pressed', String(index === state.activeClass))
+      button.addEventListener('click', () => {
+        this.options.setState(selectClass(this.state, index))
+        this.render()
+      })
+      return button
+    })
+    const rename = element('input', 'armory-class-name')
+    rename.maxLength = 14
+    rename.placeholder = 'RINOMINA CLASSE'
+    rename.setAttribute('aria-label', 'Nuovo nome della classe attiva')
+    rename.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return
+      this.options.setState(renameClass(this.state, this.state.activeClass, rename.value))
+      rename.value = ''
+      this.render()
+    })
+    container.replaceChildren(...buttons, rename)
+  }
+
   render(): void {
     const state = this.state
     const root = this.options.root
-    root.querySelector('#armory-level')!.textContent = String(state.level)
+    this.renderClasses()
+    root.querySelector('#armory-level')!.textContent = state.prestige > 0 ? `${state.level} ✦${state.prestige}` : String(state.level)
     const xpText = state.level >= MAX_LEVEL ? 'LIVELLO MASSIMO' : `${state.xp} / ${xpForLevel(state.level)} XP`
     root.querySelector('#armory-xp')!.textContent = xpText
     root.querySelectorAll<HTMLButtonElement>('[data-armory-tab]').forEach((button) => {
@@ -132,24 +161,26 @@ export class ArmoryScreen {
     return button
   }
 
-  private chips<T extends string>(label: string, options: { id: T; name: string; unlockLevel: number; color?: number }[], selected: T | undefined, onSelect: (id: T) => void): HTMLElement {
+  private chips<T extends string>(label: string, options: { id: T; name: string; unlockLevel: number; color?: number; locked?: string }[], selected: T | undefined, onSelect: (id: T) => void): HTMLElement {
     const group = element('div', 'armory-chips')
     group.append(element('span', 'hud-label', label))
     const row = element('div', 'armory-chip-row')
     for (const option of options) {
-      const unlocked = isUnlocked(this.state, option.unlockLevel)
+      // `locked` contiene il motivo del blocco quando non dipende dal livello del giocatore.
+      const unlocked = option.locked === undefined ? isUnlocked(this.state, option.unlockLevel) : option.locked === ''
       const chip = element('button', 'armory-chip')
       chip.type = 'button'
       chip.disabled = !unlocked
       chip.classList.toggle('selected', option.id === selected)
       chip.setAttribute('aria-pressed', String(option.id === selected))
-      chip.title = unlocked ? option.name : `${option.name} // ${lockLabel(option.unlockLevel)}`
+      const lockText = option.locked || lockLabel(option.unlockLevel)
+      chip.title = unlocked ? option.name : `${option.name} // ${lockText}`
       if (option.color !== undefined) {
         const swatch = element('i', 'armory-swatch')
         swatch.style.background = `#${option.color.toString(16).padStart(6, '0')}`
         chip.append(swatch)
       }
-      chip.append(document.createTextNode(unlocked ? option.name : `${option.name} 🔒${option.unlockLevel}`))
+      chip.append(document.createTextNode(unlocked ? option.name : `${option.name} 🔒 ${option.locked || option.unlockLevel}`))
       chip.addEventListener('click', () => onSelect(option.id))
       row.append(chip)
     }
@@ -198,34 +229,85 @@ export class ArmoryScreen {
     const weaponLevel = this.state.weaponLevels[equipped] ?? 0
     const resolved = resolveWeapon(weapon, selection, { level: weaponLevel })
     this.info.append(element('p', 'armory-meta', `${mode} // ${resolved.magazineSize} COLPI // RICARICA ${resolved.reloadDuration.toFixed(1).replace('.', ',')}s`))
+    this.info.append(this.masteryBox(equipped))
     this.info.append(this.weaponLevel(equipped, weaponLevel))
     this.info.append(this.stats(weaponStats(equipped, loadout, weaponLevel)))
+    const limit = getAttachmentLimit(weapon)
+    const used = Object.keys(selection).length
+    this.info.append(element('p', 'armory-meta armory-attachment-count', `ACCESSORI ${used}/${limit} // SBLOCCATI CON IL LIVELLO DELL'ARMA`))
     for (const attachmentSlot of weapon.attachmentSlots) {
       const options = getCompatibleAttachments(weapon, attachmentSlot)
       if (options.length === 0) continue
-      const choices: { id: AttachmentId | 'none'; name: string; unlockLevel: number }[] = [
-        { id: 'none', name: 'NESSUNO', unlockLevel: 1 },
-        ...options.map((attachment) => ({ id: attachment.id, name: attachment.name, unlockLevel: attachment.unlockLevel })),
+      const choices: { id: AttachmentId | 'none'; name: string; unlockLevel: number; locked: string }[] = [
+        { id: 'none', name: 'NESSUNO', unlockLevel: 1, locked: '' },
+        ...options.map((attachment) => ({
+          id: attachment.id,
+          name: attachment.name,
+          unlockLevel: 1,
+          locked: isAttachmentUnlocked(this.state, equipped, attachment.id) ? '' : `ARMA LIV ${attachment.unlockMastery}`,
+        })),
       ]
       const chips = this.chips(ATTACHMENT_SLOT_LABELS[attachmentSlot], choices, selection[attachmentSlot] ?? 'none', (id) => {
         const next = { ...selection }
         if (id === 'none') delete next[attachmentSlot as AttachmentSlot]
-        else next[attachmentSlot] = id
+        else {
+          // Accessori limitati: per montarne uno nuovo in uno slot vuoto bisogna toglierne un altro.
+          if (!next[attachmentSlot] && Object.keys(next).length >= limit) {
+            chips.querySelector('.armory-hint')?.remove()
+            chips.append(element('small', 'armory-hint error', `Massimo ${limit} accessori su quest'arma: togline uno prima.`))
+            return
+          }
+          next[attachmentSlot] = id
+        }
         this.update({ attachments: { ...loadout.attachments, [equipped]: next } })
       })
       const current = selection[attachmentSlot]
       if (current) chips.append(element('small', 'armory-hint', ATTACHMENTS[current].description))
       this.info.append(chips)
     }
-    this.info.append(this.chips('MIMETICA', CAMOS.map((option) => ({ ...option })), camo, (id) => {
+    const mastery = getMastery(this.state, equipped)
+    this.info.append(this.chips('MIMETICA', CAMOS.map((option) => ({
+      ...option,
+      locked: isCosmeticUnlocked(option, this.state.prestige > 0 ? Number.POSITIVE_INFINITY : this.state.level, this.state.prestige, mastery.prestige)
+        ? ''
+        : option.weaponPrestige ? `PRESTIGIO ARMA ${option.weaponPrestige}` : option.prestige ? `PRESTIGIO ${option.prestige}` : `LIV ${option.unlockLevel}`,
+    })), camo, (id) => {
       this.update({ camos: { ...loadout.camos, [equipped]: id } })
     }))
   }
 
-  /** Livello dell'arma acquistabile con i frammenti: vale solo nella modalità Zombie. */
+  /** Livello dell'arma: cresce uccidendo con quell'arma, sblocca gli accessori e porta al prestigio dell'arma. */
+  private masteryBox(id: WeaponId): HTMLElement {
+    const mastery = getMastery(this.state, id)
+    const box = element('div', 'armory-mastery')
+    const title = mastery.prestige > 0 ? `LIVELLO ARMA ${mastery.level}/${MAX_WEAPON_MASTERY} ✦${mastery.prestige}` : `LIVELLO ARMA ${mastery.level}/${MAX_WEAPON_MASTERY}`
+    box.append(element('strong', undefined, title))
+    const bar = element('span', 'armory-bar')
+    const fill = element('i')
+    fill.style.width = mastery.level >= MAX_WEAPON_MASTERY ? '100%' : `${Math.round((mastery.xp / masteryXpForLevel(mastery.level)) * 100)}%`
+    bar.append(fill)
+    box.append(bar)
+    const next = Object.values(ATTACHMENTS).filter((attachment) => attachment.unlockMastery > mastery.level && getCompatibleAttachments(WEAPONS[id], attachment.slot).includes(attachment)).sort((a, b) => a.unlockMastery - b.unlockMastery)[0]
+    box.append(element('small', undefined, mastery.level >= MAX_WEAPON_MASTERY
+      ? 'Livello massimo raggiunto.'
+      : `${mastery.xp}/${masteryXpForLevel(mastery.level)} XP arma, guadagnati uccidendo con quest'arma.${next && mastery.prestige === 0 ? ` Prossimo sblocco: ${next.name} al livello ${next.unlockMastery}.` : ''}`))
+    if (canPrestigeWeapon(this.state, id)) {
+      const button = element('button', 'primary-button', `PRESTIGIO ARMA ${mastery.prestige + 1}/${MAX_WEAPON_PRESTIGE}`)
+      button.type = 'button'
+      button.id = 'weapon-prestige'
+      button.addEventListener('click', () => {
+        this.options.setState(prestigeWeapon(this.state, id))
+        this.render()
+      })
+      box.append(button, element('small', undefined, "L'arma torna al livello 1, tiene tutti gli accessori e sblocca una mimetica di maestria esclusiva."))
+    }
+    return box
+  }
+
+  /** Potenziamento comprato con i frammenti: vale solo nella modalità Zombie. */
   private weaponLevel(id: WeaponId, level: number): HTMLElement {
     const box = element('div', 'armory-level')
-    box.append(element('strong', undefined, `LIVELLO ARMA ${level}/${MAX_WEAPON_LEVEL}`))
+    box.append(element('strong', undefined, `POTENZIAMENTO ${level}/${MAX_WEAPON_LEVEL}`))
     box.append(element('span', 'stars', '★'.repeat(level) + '☆'.repeat(MAX_WEAPON_LEVEL - level)))
     const cost = getWeaponUpgradeCost(this.state, id)
     const cores = this.options.getCores()
@@ -241,7 +323,7 @@ export class ArmoryScreen {
       this.render()
     })
     box.append(button)
-    box.append(element('small', undefined, `Hai ◆ ${cores} frammenti. Ogni livello: danno +8%, rinculo −5%, ricarica −4%. Vale solo in Zombie, anche sulle armi MK II trovate sulla mappa.`))
+    box.append(element('small', undefined, `Hai ◆ ${cores} frammenti. Ogni grado: danno +3,5%, rinculo −3%, ricarica −2%. Vale solo in Zombie, anche sulle armi MK trovate sulla mappa.`))
     return box
   }
 
@@ -291,9 +373,13 @@ export class ArmoryScreen {
     const cosmetics = this.state.cosmetics
     this.showPreview({ kind: 'character', cosmetics })
     this.list.append(element('span', 'armory-group', 'PERSONAGGIO'))
-    for (const key of Object.keys(COSMETIC_CATALOG) as (keyof Cosmetics)[]) {
+    const unlock = this.state.prestige > 0 ? Number.POSITIVE_INFINITY : this.state.level
+    for (const key of Object.keys(COSMETIC_CATALOG) as CosmeticSlot[]) {
       const options = COSMETIC_CATALOG[key] as readonly (CosmeticOption<string> & { color?: number })[]
-      this.list.append(this.chips(COSMETIC_LABELS[key], options.map((option) => ({ ...option })), cosmetics[key], (id) => this.updateCosmetics({ [key]: id } as Partial<Cosmetics>)))
+      this.list.append(this.chips(COSMETIC_LABELS[key], options.map((option) => ({
+        ...option,
+        locked: isCosmeticUnlocked(option, unlock, this.state.prestige) ? '' : option.prestige ? `PRESTIGIO ${option.prestige}` : `LIV ${option.unlockLevel}`,
+      })), cosmetics[key], (id) => this.updateCosmetics({ [key]: id } as Partial<Cosmetics>)))
     }
     this.info.append(element('h3', undefined, 'ASPETTO'))
     this.info.append(element('p', 'armory-description', 'Gli altri giocatori vedono il tuo aspetto nel TCT online. Le strisce sulle braccia restano nel colore della squadra.'))

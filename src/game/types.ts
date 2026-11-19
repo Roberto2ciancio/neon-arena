@@ -100,6 +100,8 @@ export interface RunResult {
   map?: string
   /** Colpi a segno su testa o punti deboli. */
   precisionHits?: number
+  /** Esperienza guadagnata da ogni arma durante la run (livello dell'arma). */
+  weaponXp?: Partial<Record<string, number>>
 }
 
 export interface LeaderboardEntry {

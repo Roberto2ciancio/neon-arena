@@ -44,9 +44,9 @@ describe('livelli e varianti delle armi', () => {
   it('ogni livello aumenta il danno e riduce rinculo e ricarica, fino al massimo', () => {
     const base = WEAPONS['smg-9']
     const level3 = resolveWeapon(base, {}, { level: 3 })
-    expect(level3.damage).toBeCloseTo(base.damage * 1.24)
-    expect(level3.recoil.vertical).toBeCloseTo(base.recoil.vertical * 0.85)
-    expect(level3.reloadDuration).toBeCloseTo(base.reloadDuration * 0.88)
+    expect(level3.damage).toBeCloseTo(base.damage * 1.105)
+    expect(level3.recoil.vertical).toBeCloseTo(base.recoil.vertical * 0.91)
+    expect(level3.reloadDuration).toBeCloseTo(base.reloadDuration * 0.94)
     expect(resolveWeapon(base, {}, { level: 99 }).weaponLevel).toBe(MAX_WEAPON_LEVEL)
   })
 

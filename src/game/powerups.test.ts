@@ -19,17 +19,18 @@ describe('bonus lasciati dagli zombie', () => {
 describe('potenziamento delle armi nell’armeria', () => {
   it('spende frammenti crescenti fino al livello massimo', () => {
     let state = normalizeArmory({ level: 10 })
-    expect(getWeaponUpgradeCost(state, 'ar-07')).toBe(6)
-    expect(upgradeWeapon(state, 'ar-07', 5)).toBeNull()
+    expect(getWeaponUpgradeCost(state, 'ar-07')).toBe(8)
+    expect(upgradeWeapon(state, 'ar-07', 7)).toBeNull()
     let spent = 0
-    for (let level = 0; level < 5; level += 1) {
+    for (let level = 0; level < 10; level += 1) {
       const result = upgradeWeapon(state, 'ar-07', 1000)!
       state = result.state
       spent += result.cost
     }
-    expect(state.weaponLevels['ar-07']).toBe(5)
-    expect(spent).toBe(6 + 12 + 20 + 32 + 48)
+    expect(state.weaponLevels['ar-07']).toBe(10)
+    // Massimizzare un'arma richiede molti frammenti: ~500.
+    expect(spent).toBe(8 + 12 + 18 + 26 + 36 + 48 + 62 + 78 + 96 + 120)
     expect(upgradeWeapon(state, 'ar-07', 1000)).toBeNull()
-    expect(normalizeArmory({ weaponLevels: { 'ar-07': 9, laser: 2, 'p-12': -1 } }).weaponLevels).toEqual({ 'ar-07': 5 })
+    expect(normalizeArmory({ weaponLevels: { 'ar-07': 19, laser: 2, 'p-12': -1 } }).weaponLevels).toEqual({ 'ar-07': 10 })
   })
 })

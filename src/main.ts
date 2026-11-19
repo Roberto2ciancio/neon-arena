@@ -1,3 +1,4 @@
+import { prestigeBadge } from './game/cosmetics'
 import * as THREE from 'three'
 import './style.css'
 import { GameAudio } from './game/audio'
@@ -16,11 +17,12 @@ import { AutomaticQuality } from './game/automaticQuality'
 import { META_COSTS, META_UPGRADES, MAX_META_LEVEL, getMetaBonuses, loadProgress, purchaseMetaUpgrade, recordRun, recordTctMatch, saveProgress } from './game/progression'
 import { UPGRADE_BY_ID } from './game/upgrades'
 import { WEAPONS } from './game/weapons'
+import type { WeaponId } from './game/weapons'
 import { NetSession, NetSessionError } from './game/net/NetSession'
 import { generateRoomCode, NET_ERROR_MESSAGES, normalizeRoomCode, otherTeam } from './game/net/protocol'
 import type { HostMessage } from './game/net/protocol'
 import { getTransportKind } from './game/net/transport'
-import { addXp, loadArmory, MAX_LEVEL, resolveLoadout, saveArmory, XP_REWARDS, xpForLevel } from './game/armory'
+import { addXp, loadArmory, MAX_LEVEL, resolveLoadout, saveArmory, XP_REWARDS, xpForLevel, addWeaponXp, getMastery, prestigeUp } from './game/armory'
 import type { ArmoryState } from './game/armory'
 import { ArmoryScreen } from './armoryScreen'
 import { AccountPanel } from './accountPanel'
@@ -28,7 +30,6 @@ import { renderProfilePanel } from './profilePanel'
 import { CoopLobby } from './coopLobby'
 import { SupabaseAuth } from './game/auth'
 import type { PlayerSave } from './game/accountSave'
-import { ATTACHMENTS } from './game/attachments'
 import { CAMOS, COSMETIC_CATALOG } from './game/cosmetics'
 import type { CosmeticOption } from './game/cosmetics'
 import { EQUIPMENT } from './game/equipment'
@@ -241,7 +242,45 @@ function renderPowerUps(powerUps: HudData['powerUps']): void {
 
 let lastHud: HudData | null = null
 
+function renderPauseLoadout(): void {
+  const container = byId('pause-loadout')
+  if (selectedMode === 'tct') {
+    container.replaceChildren()
+    return
+  }
+  const summary = game.getRunSummary()
+  const section = (title: string, rows: HTMLElement[]) => {
+    const box = document.createElement('section')
+    const heading = document.createElement('h3')
+    heading.textContent = title
+    box.append(heading, ...rows)
+    return box
+  }
+  const row = (main: string, detail = '') => {
+    const item = document.createElement('div')
+    item.className = 'pause-row'
+    const strong = document.createElement('strong')
+    strong.textContent = main
+    item.append(strong)
+    if (detail) {
+      const small = document.createElement('small')
+      small.textContent = detail
+      item.append(small)
+    }
+    return item
+  }
+  const weapons = summary.weapons.map((weapon) => row(`${weapon.name}${weapon.level > 0 ? ` ★${weapon.level}` : ''}`, weapon.attachments.length > 0 ? weapon.attachments.join(' · ') : 'Nessun accessorio'))
+  weapons.push(row(summary.melee, 'Arma bianca'), row(summary.equipment.join(' · '), 'G / Q / T'))
+  const upgrades = summary.upgrades.length > 0
+    ? summary.upgrades.map((upgrade) => row(`${upgrade.icon} ${upgrade.name}${upgrade.count > 1 ? ` ×${upgrade.count}` : ''}`, upgrade.description))
+    : [row('Nessun potenziamento', 'Al level up scegli un potenziamento con Z / X / V.')]
+  const { stats } = summary
+  const totals = row(`Danno ${stats.damage >= 0 ? '+' : ''}${stats.damage}% · Cadenza +${stats.fireRate}% · Critico ${stats.crit}%`, `Armatura ${stats.armor} · Rigenerazione ${stats.regen.toFixed(1).replace('.', ',')}/s`)
+  container.replaceChildren(section('LOADOUT', weapons), section('POTENZIAMENTI DELLA RUN', [...upgrades, totals]))
+}
+
 function renderPauseSummary(): void {
+  renderPauseLoadout()
   const data = lastHud
   byId('pause-summary').textContent = !data ? '' : data.tct
     ? `${data.mapName.toUpperCase()} // ${data.tct.teamScore} : ${data.tct.enemyScore}`
@@ -309,8 +348,8 @@ function updateHud(data: HudData): void {
   doorPrompt.classList.toggle('denied', data.interaction?.denied ?? false)
   if (data.interaction) {
     setText(hudEl('door-prompt-text'), data.interaction.denied
-      ? `SERVONO ${data.interaction.cost} FRAMMENTI`
-      : `${data.interaction.label} // ◆ ${data.interaction.cost}`)
+      ? `SERVONO ${data.interaction.cost} CREDITI`
+      : data.interaction.cost > 0 ? `${data.interaction.label} // ⬢ ${data.interaction.cost}` : data.interaction.label)
   }
   crosshair.classList.toggle('crouched', data.stance !== 'stand')
   renderWeaponSlots(data.weaponSlots)
@@ -476,7 +515,7 @@ function renderProfile(): void {
   const signedIn = accountPanel?.signedIn ?? false
   const username = accountPanel?.username ?? null
   const name = username ?? identity.callsign
-  byId('profile-name').textContent = name
+  byId('profile-name').textContent = armory.prestige > 0 ? `${name} ${prestigeBadge(armory.prestige)}` : name
   byId('profile-avatar').textContent = name.charAt(0).toUpperCase() || 'P'
   // Con un nome utente il callsign non si modifica dalle impostazioni ma dall'account.
   const callsignInput = byId<HTMLInputElement>('callsign')
@@ -532,6 +571,11 @@ function renderProfileSection(): void {
   }, () => {
     closeDrawer()
     accountPanel?.open()
+  }, () => {
+    // Prestigio: livello 1, una stella in più e oggetti esclusivi; quello che era sbloccato resta.
+    setArmory(prestigeUp(armory))
+    renderProfile()
+    renderProfileSection()
   })
 }
 
@@ -552,12 +596,25 @@ function unlocksAt(level: number): string[] {
   for (const weapon of Object.values(WEAPONS)) if (weapon.unlockLevel === level) names.push(weapon.shortName)
   for (const melee of Object.values(MELEE_WEAPONS)) if (melee.unlockLevel === level) names.push(melee.name)
   for (const item of Object.values(EQUIPMENT)) if (item.unlockLevel === level) names.push(item.name)
-  for (const attachment of Object.values(ATTACHMENTS)) if (attachment.unlockLevel === level) names.push(attachment.name)
   for (const camo of CAMOS) if (camo.unlockLevel === level) names.push(`MIMETICA ${camo.name}`)
   for (const options of Object.values(COSMETIC_CATALOG) as (readonly CosmeticOption<string>[])[]) {
     for (const option of options) if (option.unlockLevel === level && option.unlockLevel > 1 && !names.includes(option.name)) names.push(option.name)
   }
   return names
+}
+
+/** Esperienza delle armi guadagnata in partita: livelli dell'arma e accessori sbloccati. */
+function grantWeaponXp(gains: Partial<Record<string, number>>): string {
+  const messages: string[] = []
+  let next = armory
+  for (const [id, amount] of Object.entries(gains)) {
+    if (!(id in WEAPONS) || !amount) continue
+    const result = addWeaponXp(next, id as WeaponId, amount)
+    next = result.state
+    if (result.levelsGained > 0) messages.push(`${WEAPONS[id as WeaponId].shortName} livello ${getMastery(next, id as WeaponId).level}`)
+  }
+  if (next !== armory) setArmory(next)
+  return messages.length > 0 ? ` Armi: ${messages.join(', ')}.` : ''
 }
 
 /** Assegna l'XP di fine partita e descrive eventuali nuovi livelli e sblocchi. */
@@ -595,8 +652,8 @@ function completeRun(result: RunResult): void {
   byId('gameover-title').textContent = result.won ? 'STAZIONE SICURA' : 'RUN TERMINATA'
   const xp = result.kills * XP_REWARDS.zombieKill + Math.max(0, result.wave - 1) * XP_REWARDS.wave + XP_REWARDS.runComplete
   byId('gameover-message').textContent = (result.won
-    ? 'Hai superato tutte le 15 ondate. Bonus vittoria: 10 frammenti.'
-    : `L’orda ti ha sopraffatto all’ondata ${result.wave} di 15. I frammenti recuperati sono al sicuro.`) + grantXp(xp)
+    ? 'Hai superato tutte le 15 ondate. Bonus vittoria: 8 frammenti.'
+    : `L’orda ti ha sopraffatto all’ondata ${result.wave} di 15.`) + grantXp(xp) + grantWeaponXp(result.weaponXp ?? {})
   byId('gameover-title').textContent += result.score > previousBest && result.score > 0 ? ' // NUOVO RECORD' : ''
   renderMenu()
 }

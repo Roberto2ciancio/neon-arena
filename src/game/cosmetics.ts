@@ -2,20 +2,24 @@ export interface CosmeticOption<T extends string> {
   id: T
   name: string
   unlockLevel: number
+  /** Prestigio del giocatore richiesto (oggetti esclusivi). */
+  prestige?: number
+  /** Solo mimetiche: prestigio dell'arma richiesto. */
+  weaponPrestige?: number
 }
 
 export interface ColorOption<T extends string> extends CosmeticOption<T> {
   color: number
 }
 
-export type SuitColorId = 'graphite' | 'olive' | 'desert' | 'navy' | 'crimson' | 'arctic' | 'neon' | 'gold'
-export type HeadgearId = 'none' | 'helmet' | 'hood' | 'beret' | 'cyber'
+export type SuitColorId = 'graphite' | 'olive' | 'desert' | 'navy' | 'crimson' | 'arctic' | 'neon' | 'gold' | 'aurora' | 'obsidian'
+export type HeadgearId = 'none' | 'helmet' | 'hood' | 'beret' | 'cyber' | 'halo'
 export type MaskId = 'none' | 'balaclava' | 'gas' | 'visor'
 export type VisorColorId = 'cyan' | 'magenta' | 'amber' | 'lime'
 export type BackpackId = 'none' | 'tactical' | 'radio' | 'tank'
-export type PatchId = 'none' | 'skull' | 'bolt' | 'star'
+export type PatchId = 'none' | 'skull' | 'bolt' | 'star' | 'prestige'
 export type GloveColorId = 'black' | 'tan' | 'olive' | 'red'
-export type CamoId = 'standard' | 'urban' | 'digital' | 'tiger' | 'carbon' | 'neon' | 'gold'
+export type CamoId = 'standard' | 'urban' | 'digital' | 'tiger' | 'carbon' | 'neon' | 'gold' | 'prestige-violet' | 'prestige-crimson' | 'diamond' | 'mastery-bronze' | 'mastery-silver' | 'mastery-platinum'
 
 export const SUIT_COLORS: readonly ColorOption<SuitColorId>[] = [
   { id: 'graphite', name: 'GRAFITE', color: 0x2a3138, unlockLevel: 1 },
@@ -26,6 +30,8 @@ export const SUIT_COLORS: readonly ColorOption<SuitColorId>[] = [
   { id: 'arctic', name: 'ARTICO', color: 0xc4ced6, unlockLevel: 10 },
   { id: 'neon', name: 'NEON', color: 0x16a89a, unlockLevel: 16 },
   { id: 'gold', name: 'ORO', color: 0xb8902f, unlockLevel: 25 },
+  { id: 'aurora', name: 'AURORA', color: 0x7a4dff, unlockLevel: 1, prestige: 1 },
+  { id: 'obsidian', name: 'OSSIDIANA', color: 0x0d0d14, unlockLevel: 1, prestige: 4 },
 ]
 
 export const HEADGEAR: readonly CosmeticOption<HeadgearId>[] = [
@@ -34,6 +40,7 @@ export const HEADGEAR: readonly CosmeticOption<HeadgearId>[] = [
   { id: 'hood', name: 'CAPPUCCIO', unlockLevel: 3 },
   { id: 'beret', name: 'BASCO', unlockLevel: 8 },
   { id: 'cyber', name: 'CASCO CYBER', unlockLevel: 17 },
+  { id: 'halo', name: 'ALONE DEL PRESTIGIO', unlockLevel: 1, prestige: 5 },
 ]
 
 export const MASKS: readonly CosmeticOption<MaskId>[] = [
@@ -62,6 +69,7 @@ export const PATCHES: readonly CosmeticOption<PatchId>[] = [
   { id: 'bolt', name: 'FULMINE', unlockLevel: 2 },
   { id: 'star', name: 'STELLA', unlockLevel: 5 },
   { id: 'skull', name: 'TESCHIO', unlockLevel: 13 },
+  { id: 'prestige', name: 'STELLA DEL PRESTIGIO', unlockLevel: 1, prestige: 1 },
 ]
 
 export const GLOVE_COLORS: readonly ColorOption<GloveColorId>[] = [
@@ -79,9 +87,17 @@ export const CAMOS: readonly CosmeticOption<CamoId>[] = [
   { id: 'carbon', name: 'CARBONIO', unlockLevel: 15 },
   { id: 'neon', name: 'NEON', unlockLevel: 20 },
   { id: 'gold', name: 'ORO', unlockLevel: 28 },
+  { id: 'prestige-violet', name: 'PRESTIGIO VIOLA', unlockLevel: 1, prestige: 1 },
+  { id: 'prestige-crimson', name: 'PRESTIGIO CREMISI', unlockLevel: 1, prestige: 3 },
+  { id: 'diamond', name: 'DIAMANTE', unlockLevel: 1, prestige: 6 },
+  { id: 'mastery-bronze', name: 'MAESTRIA BRONZO', unlockLevel: 1, weaponPrestige: 1 },
+  { id: 'mastery-silver', name: 'MAESTRIA ARGENTO', unlockLevel: 1, weaponPrestige: 2 },
+  { id: 'mastery-platinum', name: 'MAESTRIA PLATINO', unlockLevel: 1, weaponPrestige: 3 },
 ]
 
 export interface Cosmetics {
+  /** Prestigio del giocatore (0–10): stella accanto al nome, visibile anche agli altri. */
+  prestige: number
   suit: SuitColorId
   accent: SuitColorId
   headgear: HeadgearId
@@ -93,6 +109,7 @@ export interface Cosmetics {
 }
 
 export const DEFAULT_COSMETICS: Cosmetics = {
+  prestige: 0,
   suit: 'graphite',
   accent: 'olive',
   headgear: 'helmet',
@@ -112,9 +129,11 @@ export const COSMETIC_CATALOG = {
   backpack: BACKPACKS,
   patch: PATCHES,
   gloves: GLOVE_COLORS,
-} as const satisfies Record<keyof Cosmetics, readonly CosmeticOption<string>[]>
+} as const satisfies Record<CosmeticSlot, readonly CosmeticOption<string>[]>
 
-export const COSMETIC_LABELS: Record<keyof Cosmetics, string> = {
+export type CosmeticSlot = Exclude<keyof Cosmetics, 'prestige'>
+
+export const COSMETIC_LABELS: Record<CosmeticSlot, string> = {
   suit: 'TUTA',
   accent: 'DETTAGLI',
   headgear: 'COPRICAPO',
@@ -130,13 +149,26 @@ export function colorOf<T extends string>(options: readonly ColorOption<T>[], id
 }
 
 /** Cosmetici validi e sbloccati; tutto il resto ricade sui valori predefiniti. */
-export function normalizeCosmetics(value: unknown, level = Number.POSITIVE_INFINITY): Cosmetics {
+export function normalizeCosmetics(value: unknown, level = Number.POSITIVE_INFINITY, prestige = MAX_PRESTIGE_BADGE): Cosmetics {
   const source = typeof value === 'object' && value !== null ? value as Record<string, unknown> : {}
   const result = { ...DEFAULT_COSMETICS }
-  for (const key of Object.keys(COSMETIC_CATALOG) as (keyof Cosmetics)[]) {
+  for (const key of Object.keys(COSMETIC_CATALOG) as CosmeticSlot[]) {
     const options = COSMETIC_CATALOG[key] as readonly CosmeticOption<string>[]
     const option = options.find((candidate) => candidate.id === source[key])
-    if (option && option.unlockLevel <= level) (result as Record<string, string>)[key] = option.id
+    if (option && isCosmeticUnlocked(option, level, prestige)) (result as unknown as Record<string, string>)[key] = option.id
   }
+  const badge = typeof source.prestige === 'number' && Number.isFinite(source.prestige) ? Math.floor(source.prestige) : 0
+  result.prestige = Math.min(prestige, MAX_PRESTIGE_BADGE, Math.max(0, badge))
   return result
+}
+
+export const MAX_PRESTIGE_BADGE = 10
+
+export function isCosmeticUnlocked(option: CosmeticOption<string>, level: number, prestige: number, weaponPrestige = 0): boolean {
+  return option.unlockLevel <= level && (option.prestige ?? 0) <= prestige && (option.weaponPrestige ?? 0) <= weaponPrestige
+}
+
+/** Stella del prestigio da mostrare accanto al nome ("" senza prestigio). */
+export function prestigeBadge(prestige: number): string {
+  return prestige > 0 ? `✦${prestige}` : ''
 }

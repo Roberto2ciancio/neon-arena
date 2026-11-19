@@ -341,6 +341,11 @@ export class WeaponHandler {
     return { shots, recovery, sounds }
   }
 
+  /** Arma assegnata a uno slot (anche se non è quella impugnata). */
+  currentOf(slot: 'primary' | 'secondary'): ResolvedWeapon | null {
+    return this.slots?.[slot].weapon ?? null
+  }
+
   /** Ricetta audio dello sparo dell'arma impugnata. */
   soundProfile(): GunSoundProfile | null {
     const weapon = this.current

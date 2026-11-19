@@ -1,5 +1,6 @@
+import { prestigeBadge } from './game/cosmetics'
 import type { ArmoryState } from './game/armory'
-import { MAX_LEVEL, xpForLevel } from './game/armory'
+import { canPrestige, MAX_LEVEL, xpForLevel } from './game/armory'
 import { MAX_WEAPON_LEVEL } from './game/attachments'
 import type { MetaProgress } from './game/progression'
 import { formatPlayTime, formatRunDate, getTctStats, getZombieStats } from './game/profileStats'
@@ -39,11 +40,13 @@ function statGrid(title: string, stats: ProfileStat[]): HTMLElement {
  * Sezione Profilo del menu: identità, livello, statistiche Zombie e TCT, armi potenziate
  * e ultime run. Si ridisegna da zero a ogni apertura con i dati correnti.
  */
-export function renderProfilePanel(root: HTMLElement, view: ProfileView, onAccount: () => void): void {
+export function renderProfilePanel(root: HTMLElement, view: ProfileView, onAccount: () => void, onPrestige?: () => void): void {
   const header = element('header', 'profile-header')
   header.append(element('span', 'profile-avatar profile-avatar-large', view.name.charAt(0) || 'P'))
   const who = element('div')
-  who.append(element('strong', 'profile-title', view.name))
+  const title = element('strong', 'profile-title', view.name)
+  if (view.armory.prestige > 0) title.append(' ', element('span', 'prestige-star', prestigeBadge(view.armory.prestige)))
+  who.append(title)
   who.append(element('small', view.signedIn ? 'signed' : undefined, view.signedIn ? `ACCOUNT // ${view.email}` : 'OSPITE // PROGRESSI SU QUESTO DISPOSITIVO'))
   const level = view.armory.level
   const needed = xpForLevel(level)
@@ -51,14 +54,35 @@ export function renderProfilePanel(root: HTMLElement, view: ProfileView, onAccou
   const fill = element('i')
   fill.style.width = level >= MAX_LEVEL ? '100%' : `${Math.round((view.armory.xp / needed) * 100)}%`
   bar.append(fill)
-  who.append(element('span', 'profile-level-line', level >= MAX_LEVEL ? `LIVELLO ${level} // MASSIMO` : `LIVELLO ${level} // ${view.armory.xp} / ${needed} XP`), bar)
+  who.append(element('span', 'profile-level-line', level >= MAX_LEVEL ? `LIVELLO ${level} // MASSIMO${view.armory.prestige < 10 ? ' // PRESTIGIO DISPONIBILE' : ''}` : `LIVELLO ${level} // ${view.armory.xp} / ${needed} XP`), bar)
   header.append(who)
   const accountButton = element('button', 'secondary-button profile-account-button', view.signedIn ? 'GESTISCI ACCOUNT' : 'CREA UN ACCOUNT')
   accountButton.type = 'button'
   accountButton.addEventListener('click', onAccount)
   header.append(accountButton)
 
-  const sections: HTMLElement[] = [header, statGrid('ZOMBIE', getZombieStats(view.progress)), statGrid('TCT ONLINE', getTctStats(view.progress))]
+  const sections: HTMLElement[] = [header]
+  if (canPrestige(view.armory) && onPrestige) {
+    const box = element('section', 'profile-prestige')
+    box.append(element('strong', undefined, `PRESTIGIO ${view.armory.prestige + 1} DISPONIBILE`))
+    box.append(element('small', undefined, 'Torni al livello 1 con una stella in più accanto al nome, visibile anche agli altri giocatori. Armi e oggetti già sbloccati restano; sblocchi tute, copricapi, toppe e mimetiche esclusive.'))
+    const button = element('button', 'primary-button', 'FAI PRESTIGIO')
+    button.type = 'button'
+    button.id = 'prestige-button'
+    let armed = false
+    button.addEventListener('click', () => {
+      // Doppio clic di conferma: il prestigio azzera il livello.
+      if (!armed) {
+        armed = true
+        button.textContent = 'CONFERMA: TORNA AL LIVELLO 1'
+        return
+      }
+      onPrestige()
+    })
+    box.append(button)
+    sections.push(box)
+  }
+  sections.push(statGrid('ZOMBIE', getZombieStats(view.progress)), statGrid('TCT ONLINE', getTctStats(view.progress)))
 
   const upgraded = Object.entries(view.armory.weaponLevels)
     .filter(([id, value]) => (value ?? 0) > 0 && id in WEAPONS)

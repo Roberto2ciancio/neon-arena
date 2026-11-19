@@ -48,7 +48,7 @@
           <span id="map-name" class="map-name">STAZIONE 13</span>
         </div>
         <div class="hud-right">
-          <div><span class="hud-label">FRAMMENTI</span><strong id="shards-text">0</strong></div>
+          <div><span class="hud-label">CREDITI ⬢</span><strong id="shards-text">0</strong></div>
           <div><span class="hud-label">ELIMINAZIONI</span><strong id="kills-text">0</strong></div>
         </div>
       </section>
@@ -132,7 +132,7 @@
           <div class="mode-selector mode-cards" aria-label="Seleziona modalità">
             <button type="button" class="mode-card selected" data-mode="zombies" aria-pressed="true">
               <strong>ZOMBIE // ONDATE</strong>
-              <span>Da solo contro 15 ondate e il Bruto. Raccogli frammenti, potenziati, sopravvivi.</span>
+              <span>Da solo o in squadra contro 15 ondate. Guadagna crediti, compra armi, sopravvivi.</span>
             </button>
             <button type="button" class="mode-card" data-mode="tct" aria-pressed="false">
               <strong>TCT // ONLINE 4V4</strong>
@@ -325,6 +325,7 @@
           <p class="eyebrow">SIMULAZIONE SOSPESA</p>
           <h2 id="pause-title">PAUSA</h2>
           <p id="pause-summary" class="pause-summary"></p>
+          <div id="pause-loadout" class="pause-loadout" aria-label="Loadout e potenziamenti"></div>
           <button id="resume-button" class="primary-button" type="button">RIPRENDI</button>
           <button id="pause-settings-button" class="secondary-button" type="button">IMPOSTAZIONI</button>
           <button id="abandon-button" class="secondary-button" type="button">TERMINA RUN</button>
@@ -340,7 +341,7 @@
             <div><span id="result-score-label">PUNTEGGIO</span><strong id="result-score">0</strong></div>
             <div><span id="result-wave-label">ONDATA</span><strong id="result-wave">1</strong></div>
             <div><span id="result-kills-label">ELIMINAZIONI</span><strong id="result-kills">0</strong></div>
-            <div><span>FRAMMENTI</span><strong id="result-shards">+0</strong></div>
+            <div><span>FRAMMENTI ◆</span><strong id="result-shards">+0</strong></div>
           </div>
           <button id="restart-button" class="primary-button" type="button">NUOVA RUN</button>
           <button id="menu-button" class="secondary-button" type="button">TORNA ALL’OFFICINA</button>
@@ -356,6 +357,7 @@
             </div>
             <button id="armory-close" class="secondary-button" type="button">CHIUDI</button>
           </header>
+          <div id="armory-classes" class="armory-classes" role="group" aria-label="Classi salvate"></div>
           <nav class="armory-tabs" role="tablist" aria-label="Sezioni dell'armeria">
             <button type="button" role="tab" data-armory-tab="primary">PRIMARIA</button>
             <button type="button" role="tab" data-armory-tab="secondary">SECONDARIA</button>

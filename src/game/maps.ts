@@ -95,7 +95,7 @@ export const FIELD_ATTACHMENTS: Record<PurchasableWeapon, AttachmentSelection> =
   'dmr-3': { optic: 'scope-4x', muzzle: 'compensator', underbarrel: 'vertical-grip' },
   'sr-50': { muzzle: 'compensator', barrel: 'long-barrel', magazine: 'fast-mag' },
   'lmg-75': { optic: 'holo', underbarrel: 'vertical-grip', magazine: 'fast-mag' },
-  'ak-74r': { optic: 'holo', muzzle: 'compensator', underbarrel: 'vertical-grip', magazine: 'extended-mag' },
+  'ak-74r': { optic: 'holo', muzzle: 'compensator', underbarrel: 'vertical-grip' },
   'br-3': { optic: 'red-dot', muzzle: 'flash-hider', magazine: 'extended-mag' },
   'r-44': { optic: 'red-dot', barrel: 'long-barrel' },
   'ap-18': { optic: 'red-dot', magazine: 'extended-mag' },

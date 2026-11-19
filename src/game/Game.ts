@@ -1,3 +1,7 @@
+import { ATTACHMENTS } from './attachments'
+import { UPGRADE_DEFINITIONS } from './upgrades'
+import { CREDIT_SYMBOL, getKillCredits, getRunShards, getWeaponKillXp } from './economy'
+import { WEAPON_XP } from './armory'
 import { GRAVITY } from './world'
 import { getAimSensitivityScale } from './accessibility'
 import { EXTRA_PROJECTILE_DAMAGE } from './upgrades'
@@ -300,6 +304,10 @@ export class Game {
   private heartbeatTimer = 0
   /** Colpi alla testa o ai punti deboli nella run (statistiche del profilo). */
   private precisionHits = 0
+  /** Esperienza accumulata da ogni arma in questa run. */
+  private readonly weaponXp = new Map<string, number>()
+  /** Potenziamenti scelti in questa run, con il numero di volte. */
+  private readonly chosenUpgrades = new Map<string, number>()
   private groanTimer = 2
   private reducedMotion = false
   private adsSensitivity = 1
@@ -531,7 +539,7 @@ export class Game {
       if (!weaponId) continue
       station.weapon = weaponId
       station.cost = getFieldWeaponCost(STATION_COSTS[weaponId], tier)
-      setStationLabel(station.model, 'weapon', `${WEAPONS[weaponId].shortName} ${FIELD_TIERS[tier].name}`, `◆ ${station.cost}`)
+      setStationLabel(station.model, 'weapon', `${WEAPONS[weaponId].shortName} ${FIELD_TIERS[tier].name}`, `${CREDIT_SYMBOL} ${station.cost}`)
     }
   }
 
@@ -560,6 +568,8 @@ export class Game {
     this.shardsCollected = 0
     this.kills = 0
     this.precisionHits = 0
+    this.weaponXp.clear()
+    this.chosenUpgrades.clear()
     this.elapsed = 0
     this.weapons.configure(this.loadout)
     this.equipment.clear()
@@ -618,6 +628,27 @@ export class Game {
     }
   }
 
+  /** Riepilogo per la scheda della pausa: armi in uso con accessori e potenziamenti della run. */
+  getRunSummary(): RunSummary {
+    const describe = (weapon: ResolvedWeapon | null) => weapon ? {
+      name: weapon.shortName,
+      attachments: Object.values(weapon.attachments).map((id) => ATTACHMENTS[id!].name),
+      level: weapon.weaponLevel,
+    } : null
+    const slots = this.weapons.hudSlots
+    return {
+      weapons: [describe(this.weapons.currentOf('primary')), describe(this.weapons.currentOf('secondary'))].filter((entry): entry is NonNullable<typeof entry> => entry !== null),
+      melee: this.loadout.melee.name,
+      equipment: (['lethal', 'tactical', 'gadget'] as const).map((slot) => EQUIPMENT[this.loadout[slot]].name),
+      upgrades: [...this.chosenUpgrades].map(([id, count]) => {
+        const upgrade = UPGRADE_DEFINITIONS.find((candidate) => candidate.id === id)
+        return { name: upgrade?.name ?? id, description: upgrade?.description ?? '', icon: upgrade?.icon ?? '•', count }
+      }),
+      stats: { damage: Math.round((this.stats.damage / 20 - 1) * 100), fireRate: Math.round((this.stats.fireRate / 8.5 - 1) * 100), crit: Math.round(this.stats.critChance * 100), armor: this.stats.armor, regen: this.stats.regen },
+      slots: slots.length,
+    }
+  }
+
   get isCoop(): boolean {
     return this.coop !== null
   }
@@ -671,6 +702,7 @@ export class Game {
     if (!this.isRunActive() || !this.currentUpgradeIds.includes(upgradeId)) return
     const previousMaxHealth = this.stats.maxHealth
     this.stats = applyUpgrade(this.stats, upgradeId)
+    this.chosenUpgrades.set(upgradeId, (this.chosenUpgrades.get(upgradeId) ?? 0) + 1)
     this.health = Math.min(this.stats.maxHealth, this.health + this.stats.maxHealth - previousMaxHealth)
     this.currentUpgradeIds = []
     this.pendingUpgrades = Math.max(0, this.pendingUpgrades - 1)
@@ -742,11 +774,12 @@ export class Game {
       score: Math.floor(this.score),
       wave: this.wave,
       kills: this.kills,
-      shards: Math.floor(this.shardsCollected * 0.6) + Math.floor(this.score / 900) + (won ? 8 : 0),
+      shards: getRunShards(this.wave, this.kills, won),
       time: Math.floor(this.elapsed),
       won,
       map: this.map.name,
       precisionHits: this.precisionHits,
+      weaponXp: Object.fromEntries(this.weaponXp),
     }
   }
 
@@ -1858,7 +1891,7 @@ export class Game {
       this.coop?.broadcast({ t: 'kill', enemy: enemy.netId, by: killer ?? COOP_HOST_ID, kind: enemy.kind, pos: toVec3(position), score, xp: enemy.xp, shards, precision: false })
       if (killer) this.teammateKills.set(killer, (this.teammateKills.get(killer) ?? 0) + 1)
     }
-    if (killer === null) this.rewardKill(enemy.kind, position, score, enemy.xp, shards)
+    if (killer === null) this.rewardKill(enemy.kind, position, score, enemy.xp, shards, enemy.elite)
     this.enemies.splice(index, 1)
     enemy.model.group.rotation.x = 0
     this.dyingEnemies.push({ model: enemy.model, kind: enemy.kind, life: 0.65, direction: Math.random() < 0.5 ? -1 : 1, baseY: position.y })
@@ -1866,9 +1899,13 @@ export class Game {
   }
 
   /** Ricompense dell'uccisione per il giocatore locale: punti, esperienza, frammenti e kit. */
-  private rewardKill(kind: EnemyKind, position: THREE.Vector3, score: number, xp: number, shards: number): void {
+  private rewardKill(kind: EnemyKind, position: THREE.Vector3, score: number, xp: number, shards: number, elite = false): void {
     this.score += score
     this.kills += 1
+    // Crediti per comprare in partita e esperienza per l'arma impugnata.
+    this.shards += getKillCredits(kind, elite) * this.lootMultiplier
+    const weaponId = this.weapons.current?.id
+    if (weaponId && this.weapons.slot !== 'melee') this.weaponXp.set(weaponId, (this.weaponXp.get(weaponId) ?? 0) + getWeaponKillXp(kind, elite, WEAPON_XP.zombieKill))
     if (Math.random() < getMedkitDropChance(kind, this.health / this.stats.maxHealth)) this.spawnMedkit(position)
     for (let drop = 0; drop < shards; drop += 1) {
       const offset = shards > 1 ? new THREE.Vector3((Math.random() - 0.5) * 3, 0, (Math.random() - 0.5) * 3) : new THREE.Vector3()
@@ -2833,3 +2870,12 @@ interface Victim {
 const TURRET_AGGRO_RANGE = 9
 /** Secondi di caricamento visibile prima dello sputo acido. */
 const SPITTER_WINDUP = 0.6
+
+export interface RunSummary {
+  weapons: { name: string; attachments: string[]; level: number }[]
+  melee: string
+  equipment: string[]
+  upgrades: { name: string; description: string; icon: string; count: number }[]
+  stats: { damage: number; fireRate: number; crit: number; armor: number; regen: number }
+  slots: number
+}

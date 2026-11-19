@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { addXp, ARMORY_STORAGE_KEY, createDefaultArmory, DEFAULT_LOADOUT, loadArmory, MAX_LEVEL, normalizeArmory, resolveLoadout, saveArmory, xpForLevel } from './armory'
+import { addWeaponXp, addXp, ARMORY_STORAGE_KEY, canPrestige, canPrestigeWeapon, createDefaultArmory, DEFAULT_LOADOUT, getMastery, isAttachmentUnlocked, loadArmory, MAX_LEVEL, MAX_WEAPON_MASTERY, normalizeArmory, prestigeUp, prestigeWeapon, renameClass, resolveLoadout, saveArmory, selectClass, xpForLevel } from './armory'
 import { DEFAULT_COSMETICS, normalizeCosmetics } from './cosmetics'
 import { getFlashIntensity } from './equipment'
 
@@ -34,6 +34,7 @@ describe('progressione del giocatore', () => {
   it('rimpiazza gli oggetti bloccati e gli accessori non validi', () => {
     const locked = normalizeArmory({
       level: 3,
+      mastery: { 'ar-07': { level: 3, xp: 0, prestige: 0 } },
       loadout: { primary: 'sr-50', secondary: 'ar-07', gadget: 'radar', attachments: { 'ar-07': { muzzle: 'compensator', optic: 'scope-4x', magazine: 'compensator' } }, camos: { 'ar-07': 'gold' } },
       cosmetics: { headgear: 'cyber', suit: 'desert' },
     })
@@ -48,7 +49,7 @@ describe('progressione del giocatore', () => {
 
   it('salva e ricarica lo stato e risolve le statistiche del loadout', () => {
     const storage = memoryStorage()
-    const state = normalizeArmory({ level: 20, loadout: { primary: 'ak-74r', secondary: 'r-44', melee: 'machete', attachments: { 'ak-74r': { magazine: 'extended-mag' } } } })
+    const state = normalizeArmory({ level: 20, mastery: { 'ak-74r': { level: 6, xp: 0, prestige: 0 } }, loadout: { primary: 'ak-74r', secondary: 'r-44', melee: 'machete', attachments: { 'ak-74r': { magazine: 'extended-mag' } } } })
     saveArmory(storage, state)
     expect(loadArmory(storage)).toEqual(state)
     const resolved = resolveLoadout(state.loadout, state.cosmetics)
@@ -74,5 +75,70 @@ describe('flashbang', () => {
     expect(far).toBeLessThan(close)
     expect(side).toBeLessThan(close)
     expect(side).toBeGreaterThan(0)
+  })
+})
+
+describe('livello delle armi e accessori', () => {
+  it('l’arma sale di livello con la sua esperienza, indipendentemente dal livello del giocatore', () => {
+    const start = createDefaultArmory()
+    expect(getMastery(start, 'ak-74r').level).toBe(1)
+    const leveled = addWeaponXp(start, 'ak-74r', 5000).state
+    expect(getMastery(leveled, 'ak-74r').level).toBeGreaterThan(5)
+    expect(leveled.level).toBe(1)
+    expect(getMastery(leveled, 'ar-07').level).toBe(1)
+    // Arrivare al livello 20 richiede molta esperienza (oltre 1.500 uccisioni normali).
+    let total = 0
+    for (let level = 1; level < MAX_WEAPON_MASTERY; level += 1) total += 100 + (level - 1) * 60 + (level - 1) ** 2 * 4
+    expect(total / 12).toBeGreaterThan(1500)
+  })
+
+  it('gli accessori si sbloccano con il livello dell’arma e sono al massimo 3', () => {
+    const state = addWeaponXp(createDefaultArmory(), 'ar-07', 100_000).state
+    expect(isAttachmentUnlocked(createDefaultArmory(), 'ar-07', 'scope-4x')).toBe(false)
+    expect(isAttachmentUnlocked(state, 'ar-07', 'scope-4x')).toBe(true)
+    expect(isAttachmentUnlocked(state, 'ak-74r', 'scope-4x')).toBe(false)
+    const loaded = normalizeArmory({ ...state, loadout: { ...state.loadout, attachments: { 'ar-07': { optic: 'red-dot', muzzle: 'compensator', underbarrel: 'laser', magazine: 'fast-mag', barrel: 'long-barrel' } } } })
+    expect(Object.keys(loaded.loadout.attachments['ar-07'] ?? {})).toHaveLength(3)
+  })
+
+  it('al livello 20 l’arma può fare prestigio e tiene gli accessori', () => {
+    let state = addWeaponXp(createDefaultArmory(), 'smg-9', 1_000_000).state
+    expect(canPrestigeWeapon(state, 'smg-9')).toBe(true)
+    state = prestigeWeapon(state, 'smg-9')
+    expect(getMastery(state, 'smg-9')).toEqual({ level: 1, xp: 0, prestige: 1 })
+    expect(isAttachmentUnlocked(state, 'smg-9', 'fast-mag')).toBe(true)
+  })
+})
+
+describe('prestigio e classi', () => {
+  it('al livello 50 si fa prestigio: livello 1, stella e oggetti già sbloccati restano', () => {
+    const max = addXp(createDefaultArmory(), 100_000_000).state
+    expect(max.level).toBe(50)
+    expect(canPrestige(max)).toBe(true)
+    const prestiged = prestigeUp(max)
+    expect(prestiged.level).toBe(1)
+    expect(prestiged.prestige).toBe(1)
+    expect(prestiged.cosmetics.prestige).toBe(1)
+    const reloaded = normalizeArmory({ ...prestiged, loadout: { ...prestiged.loadout, primary: 'sr-50' }, cosmetics: { ...prestiged.cosmetics, suit: 'aurora' } })
+    expect(reloaded.loadout.primary).toBe('sr-50')
+    expect(reloaded.cosmetics.suit).toBe('aurora')
+    expect(normalizeArmory({ level: 50, cosmetics: { suit: 'aurora' } }).cosmetics.suit).toBe('graphite')
+  })
+
+  it('le classi salvano loadout diversi e si rinominano', () => {
+    let state = normalizeArmory({ level: 20 })
+    expect(state.classes).toHaveLength(5)
+    state = { ...state, loadout: { ...state.loadout, primary: 'ak-74r' } }
+    state = selectClass(state, 2)
+    expect(state.loadout.primary).toBe('ar-07')
+    state = { ...state, loadout: { ...state.loadout, primary: 'smg-9' } }
+    state = selectClass(state, 0)
+    expect(state.loadout.primary).toBe('ak-74r')
+    expect(state.classes[2]!.loadout.primary).toBe('smg-9')
+    state = renameClass(state, 0, 'assalto!!')
+    expect(state.classes[0]!.name).toBe('ASSALTO')
+    const storage = memoryStorage()
+    saveArmory(storage, state)
+    expect(loadArmory(storage).classes.map((entry) => entry.loadout.primary)).toEqual(['ak-74r', 'ar-07', 'smg-9', 'ar-07', 'ar-07'])
   })
 })

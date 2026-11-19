@@ -1,3 +1,4 @@
+import { prestigeBadge } from '../cosmetics'
 import * as THREE from 'three'
 import { createSoldierModel } from '../characterModels'
 import { DEFAULT_COSMETICS } from '../cosmetics'
@@ -76,14 +77,15 @@ export class CoopTeammates {
       model.rightArm.rotation.x = -1.05
       const start = new THREE.Vector3(spawn.x + (index - 1.5) * 1.6, 0, spawn.z + 1.5)
       model.group.position.copy(start)
-      const tag = new THREE.Sprite(new THREE.SpriteMaterial({ map: createTagTexture(player.name, 'alive'), depthTest: false, transparent: true }))
+      const label = player.cosmetics?.prestige ? `${player.name} ${prestigeBadge(player.cosmetics.prestige)}` : player.name
+      const tag = new THREE.Sprite(new THREE.SpriteMaterial({ map: createTagTexture(label, 'alive'), depthTest: false, transparent: true }))
       tag.scale.set(1.6, 0.4, 1)
       tag.position.y = model.height + 0.55
       tag.renderOrder = 998
       model.group.add(tag)
       this.scene.add(model.group)
       this.teammates.set(player.id, {
-        id: player.id, name: player.name, model, tag, feet: model.group.position, target: start.clone(), yaw: 0, targetYaw: 0,
+        id: player.id, name: label, model, tag, feet: model.group.position, target: start.clone(), yaw: 0, targetYaw: 0,
         crouch: false, health: 100, status: 'alive', kills: 0, phase: Math.random() * Math.PI * 2, hazardCooldown: 0,
       })
     })

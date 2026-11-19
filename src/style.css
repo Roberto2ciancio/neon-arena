@@ -511,3 +511,29 @@ kbd { display: inline-block; color: #aab4cb; font-family: 'Chakra Petch', sans-s
 .acid-overlay { position: absolute; inset: 0; z-index: 3; opacity: 0; pointer-events: none; background: radial-gradient(ellipse at center, transparent 50%, rgba(120, 255, 60, 0.35) 85%, rgba(80, 200, 20, 0.6) 100%); transition: opacity 150ms; }
 .acid-overlay.active { opacity: 1; }
 .settings-hint { display: block; margin-top: 4px; color: #7f88a2; font-size: 10px; line-height: 1.4; }
+
+/* Armeria: classi salvate, livello dell'arma e limite degli accessori. */
+.armory-classes { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: -4px 0 12px; }
+.armory-class { padding: 8px 12px; color: #aab1c8; border: 1px solid var(--line); background: rgba(10, 12, 24, 0.8); font-family: 'Chakra Petch', sans-serif; font-size: 11px; letter-spacing: 0.08em; cursor: pointer; }
+.armory-class.selected { color: var(--cyan); border-color: var(--cyan); background: var(--cyan-soft); }
+.armory-class-name { width: 150px; padding: 8px 10px; color: #eef1fb; border: 1px solid var(--line); background: #0c1020; font-family: 'Chakra Petch', sans-serif; font-size: 11px; letter-spacing: 0.06em; }
+.armory-mastery { display: grid; gap: 6px; margin: 6px 0 8px; padding: 10px 12px; border: 1px solid rgba(88, 245, 229, 0.35); background: rgba(88, 245, 229, 0.05); }
+.armory-mastery strong { color: var(--cyan); font-family: 'Chakra Petch', sans-serif; font-size: 12px; letter-spacing: 0.1em; }
+.armory-mastery small { color: #8790a8; font-size: 10px; line-height: 1.5; }
+.armory-mastery .primary-button { min-width: 0; min-height: 36px; margin: 0; padding: 0 14px; font-size: 10px; }
+.armory-attachment-count { margin-top: 10px; }
+.armory-hint.error { color: #ff6b7a; }
+
+/* Scheda della pausa: loadout e potenziamenti. */
+.pause-loadout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; max-height: 42vh; margin: 0 0 16px; overflow-y: auto; text-align: left; }
+.pause-loadout section { display: grid; align-content: start; gap: 4px; }
+.pause-loadout h3 { margin: 0 0 4px; color: var(--cyan); font-family: 'Chakra Petch', sans-serif; font-size: 11px; letter-spacing: 0.12em; }
+.pause-row { padding: 6px 9px; border: 1px solid var(--line); background: rgba(12, 15, 30, 0.8); }
+.pause-row strong { display: block; font-family: 'Chakra Petch', sans-serif; font-size: 11px; letter-spacing: 0.05em; }
+.pause-row small { display: block; color: #8790a8; font-size: 10px; line-height: 1.4; }
+#pause-screen .compact-card { width: min(720px, calc(100vw - 32px)); max-width: none; }
+@media (max-width: 640px) { .pause-loadout { grid-template-columns: 1fr; } }
+.prestige-star { color: #ffd166; text-shadow: 0 0 10px rgba(255, 209, 102, 0.6); }
+.profile-prestige { display: grid; gap: 6px; padding: 12px; border: 1px solid rgba(255, 209, 102, 0.5); background: rgba(255, 209, 102, 0.07); }
+.profile-prestige strong { color: #ffd166; font-family: 'Chakra Petch', sans-serif; font-size: 13px; letter-spacing: 0.1em; }
+.profile-prestige small { color: #b9a77a; font-size: 11px; line-height: 1.5; }
