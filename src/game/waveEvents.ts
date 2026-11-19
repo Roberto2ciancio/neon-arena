@@ -184,14 +184,19 @@ export const GOLDEN_HEALTH_MULTIPLIER = 6
 export const GOLDEN_SPEED_MULTIPLIER = 1.35
 export const GOLDEN_CREDITS = 150
 export const GOLDEN_POWER_UPS = 2
+/** In squadra ogni compagno di chi abbatte lo zombie dorato riceve questa quota. */
+export const GOLDEN_TEAM_CREDITS = 75
 
 // --- Taglia ---
 export const BOUNTY_TIME = 45
 export const BOUNTY_CREDITS = 120
 
-/** Eliminazioni richieste dalla taglia: cresce con l'ondata ma resta raggiungibile. */
-export function getBountyTarget(wave: number): number {
-  return Math.round(10 + wave * 1.2)
+/**
+ * Eliminazioni richieste dalla taglia: cresce con l'ondata ma resta raggiungibile. In squadra
+ * il contatore è unico e l'obiettivo sale come il numero di zombie (+50% per giocatore in più).
+ */
+export function getBountyTarget(wave: number, players = 1): number {
+  return Math.round((10 + wave * 1.2) * (1 + 0.5 * (Math.max(1, players) - 1)))
 }
 
 // --- Rifornimenti ---

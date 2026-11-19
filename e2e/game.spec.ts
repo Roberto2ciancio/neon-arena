@@ -367,6 +367,41 @@ test('la modalità Zombie si gioca in squadra ed è più difficile in due', asyn
   await guest.bringToFront()
   await expect(guest.locator('#downed-banner')).toBeHidden()
   expect(await guest.evaluate(() => (window as any).__neonArena.game.coopStatus)).toBe('alive')
+
+  // Taglia di squadra: contatore unico dell'host, obiettivo più alto in due, ricompensa a tutti.
+  await host.bringToFront()
+  const bountyTarget = await host.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    game.wave += 1
+    game.startWaveEvent('bounty')
+    game.coop.broadcast({ t: 'wave', wave: game.wave, event: 'bounty' })
+    return { target: game.bounty.target, wave: game.wave }
+  })
+  expect(bountyTarget.target).toBe(Math.round((10 + bountyTarget.wave * 1.2) * 1.5))
+  await guest.bringToFront()
+  await expect.poll(() => guest.evaluate(() => (window as any).__neonArena.game.bounty?.target ?? 0)).toBe(bountyTarget.target)
+  await expect(guest.locator('#event-pill')).toContainText('TAGLIA')
+  const killOne = () => host.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    const victim = game.enemies.find((enemy: any) => enemy.health > 0 && enemy.spawnTimer <= 0)
+    if (!victim) return false
+    victim.health = 0
+    return true
+  })
+  await host.bringToFront()
+  await expect.poll(killOne, { timeout: 15000 }).toBe(true)
+  await guest.bringToFront()
+  await expect.poll(() => guest.evaluate(() => (window as any).__neonArena.game.bounty?.kills ?? 0)).toBeGreaterThanOrEqual(1)
+  const guestCredits = await guest.evaluate(() => (window as any).__neonArena.game.shards)
+  await host.bringToFront()
+  await host.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    game.bounty.kills = game.bounty.target - 1
+  })
+  await expect.poll(killOne, { timeout: 15000 }).toBe(true)
+  await guest.bringToFront()
+  await expect.poll(() => guest.evaluate(() => (window as any).__neonArena.game.bounty)).toBeNull()
+  expect(await guest.evaluate(() => (window as any).__neonArena.game.shards)).toBeGreaterThanOrEqual(guestCredits + 120)
   expect(errors).toEqual([])
   await context.close()
 })

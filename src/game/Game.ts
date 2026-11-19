@@ -1,5 +1,5 @@
 import { DEFAULT_THEME } from './maps'
-import { BOUNTY_CREDITS, BOUNTY_TIME, CHAIN_BLAST_COOLDOWN, CHAIN_BLAST_RADIUS, filterSpawnPool, getBountyTarget, getChainBlastDamage, getWaveEventModifiers, getZoneDamageMultiplier, GOLDEN_CREDITS, GOLDEN_HEALTH_MULTIPLIER, GOLDEN_LIFETIME, GOLDEN_POWER_UPS, GOLDEN_SPAWN_DELAY, GOLDEN_SPEED_MULTIPLIER, rollWaveEvent, SUPPLY_DROP_COUNT, WAVE_EVENTS } from './waveEvents'
+import { BOUNTY_CREDITS, BOUNTY_TIME, CHAIN_BLAST_COOLDOWN, CHAIN_BLAST_RADIUS, filterSpawnPool, getBountyTarget, getChainBlastDamage, getWaveEventModifiers, getZoneDamageMultiplier, GOLDEN_CREDITS, GOLDEN_HEALTH_MULTIPLIER, GOLDEN_LIFETIME, GOLDEN_POWER_UPS, GOLDEN_SPAWN_DELAY, GOLDEN_SPEED_MULTIPLIER, GOLDEN_TEAM_CREDITS, rollWaveEvent, SUPPLY_DROP_COUNT, WAVE_EVENTS } from './waveEvents'
 import type { WaveEventId, WaveEventModifiers } from './waveEvents'
 import { shouldSprint, TOUCH_ACTION_KEYS, TOUCH_LOOK_SCALE } from './touchInput'
 import type { TouchAction, TouchTarget } from './touchInput'
@@ -2010,6 +2010,8 @@ export class Game implements TouchTarget {
       if (killer) this.teammateKills.set(killer, (this.teammateKills.get(killer) ?? 0) + 1)
     }
     if (killer === null) this.rewardKill(enemy.kind, position, score, enemy.xp, shards, enemy.elite, enemy.golden ? GOLDEN_CREDITS : 0)
+    else if (enemy.golden) this.shareGoldenCredits()
+    this.advanceBounty()
     this.enemies.splice(index, 1)
     enemy.model.group.rotation.x = 0
     this.dyingEnemies.push({ model: enemy.model, kind: enemy.kind, life: 0.65, direction: Math.random() < 0.5 ? -1 : 1, baseY: position.y })
@@ -2026,7 +2028,6 @@ export class Game implements TouchTarget {
       this.shards += bonusCredits
       this.events.onNotice?.('ZOMBIE DORATO ABBATTUTO', `+${bonusCredits} crediti e bonus a terra.`, WAVE_EVENTS['golden-zombie'].color)
     }
-    this.advanceBounty()
     const weaponId = this.weapons.current?.id
     if (weaponId && this.weapons.slot !== 'melee') this.weaponXp.set(weaponId, (this.weaponXp.get(weaponId) ?? 0) + getWeaponKillXp(kind, elite, WEAPON_XP.zombieKill))
     if (Math.random() < getMedkitDropChance(kind, this.health / this.stats.maxHealth) * this.stats.luck) this.spawnMedkit(position)
@@ -2667,6 +2668,7 @@ export class Game implements TouchTarget {
         this.spawnBurst(position.clone().setY(position.y + 1), getZombieColor(message.kind), message.kind === 'brute' ? 28 : 12)
         this.audio.playAt('kill', position, this.player, this.yaw)
         if (message.by === localId) this.rewardKill(message.kind, position, message.score, message.xp, message.shards, false, message.credits ?? 0)
+        else if ((message.credits ?? 0) > 0) this.shareGoldenCredits()
         return
       }
       case 'damage':
@@ -2695,6 +2697,9 @@ export class Game implements TouchTarget {
         if (door) this.openDoor(door)
         return
       }
+      case 'bounty':
+        this.applyRemoteBounty(message)
+        return
       case 'revived':
         this.applyRevive(message.target, message.by)
         return
@@ -3062,7 +3067,7 @@ export class Game implements TouchTarget {
     this.waveMods = getWaveEventModifiers(id)
     this.usedWaveEvents.push(id)
     this.lastEventWave = this.wave
-    if (id === 'bounty') this.bounty = { kills: 0, target: getBountyTarget(this.wave), time: BOUNTY_TIME }
+    if (id === 'bounty') this.bounty = { kills: 0, target: getBountyTarget(this.wave, this.coopPlayers), time: BOUNTY_TIME }
     if (this.coopRole === 'client') return
     if (id === 'golden-zombie') this.goldenPending = GOLDEN_SPAWN_DELAY
     if (id === 'supply-drop') this.dropSupplies()
@@ -3097,10 +3102,13 @@ export class Game implements TouchTarget {
     this.chainCooldown = Math.max(0, this.chainCooldown - delta)
     this.updateEventLighting(delta)
     if (this.bounty) {
-      this.bounty.time -= delta
-      if (this.bounty.time <= 0) {
+      this.bounty.time = Math.max(0, this.bounty.time - delta)
+      // In squadra la scadenza la decide l'host, che avvisa tutti.
+      if (this.bounty.time <= 0 && this.coopRole !== 'client') {
+        const { kills, target } = this.bounty
         this.bounty = null
-        this.events.onNotice?.('TAGLIA SCADUTA', 'Tempo finito: nessuna ricompensa questa volta.', WAVE_EVENTS.bounty.color)
+        if (this.coopRole === 'host') this.coop?.broadcast({ t: 'bounty', s: 'failed', kills, target, time: 0 })
+        this.notifyBountyFailed()
       }
     }
     if (this.coopRole === 'client') return
@@ -3117,15 +3125,49 @@ export class Game implements TouchTarget {
     }
   }
 
+  /** Host o partita in solitaria: ogni uccisione della squadra avanza il contatore unico. */
   private advanceBounty(): void {
-    if (!this.bounty) return
+    if (!this.bounty || this.coopRole === 'client') return
     this.bounty.kills += 1
-    if (this.bounty.kills < this.bounty.target) return
+    const { kills, target, time } = this.bounty
+    const done = kills >= target
+    if (this.coopRole === 'host') this.coop?.broadcast({ t: 'bounty', s: done ? 'done' : 'progress', kills, target, time: round2(time) })
+    if (done) this.completeBounty()
+  }
+
+  private completeBounty(): void {
     this.bounty = null
     this.shards += BOUNTY_CREDITS
     this.weapons.refill()
     this.audio.play('powerUp')
-    this.events.onNotice?.('TAGLIA RISCOSSA', `+${BOUNTY_CREDITS} crediti e munizioni piene.`, WAVE_EVENTS.bounty.color)
+    this.events.onNotice?.(this.coop ? 'TAGLIA DI SQUADRA RISCOSSA' : 'TAGLIA RISCOSSA', `+${BOUNTY_CREDITS} crediti e munizioni piene${this.coop ? ' per tutta la squadra' : ''}.`, WAVE_EVENTS.bounty.color)
+  }
+
+  private notifyBountyFailed(): void {
+    this.events.onNotice?.('TAGLIA SCADUTA', 'Tempo finito: nessuna ricompensa questa volta.', WAVE_EVENTS.bounty.color)
+  }
+
+  /** Client: stato della taglia di squadra ricevuto dall'host. */
+  private applyRemoteBounty(message: Extract<CoopHostMessage, { t: 'bounty' }>): void {
+    if (this.waveEvent !== 'bounty') return
+    if (message.s === 'done') {
+      if (this.bounty) this.completeBounty()
+      return
+    }
+    if (message.s === 'failed') {
+      if (this.bounty) {
+        this.bounty = null
+        this.notifyBountyFailed()
+      }
+      return
+    }
+    this.bounty = { kills: message.kills, target: message.target, time: message.time }
+  }
+
+  /** Zombie dorato abbattuto da un compagno: una quota dei crediti va anche agli altri. */
+  private shareGoldenCredits(): void {
+    this.shards += GOLDEN_TEAM_CREDITS
+    this.events.onNotice?.('ZOMBIE DORATO ABBATTUTO', `Un compagno l’ha preso: +${GOLDEN_TEAM_CREDITS} crediti anche a te.`, WAVE_EVENTS['golden-zombie'].color)
   }
 
   /** Tre bonus sparsi attorno al giocatore, lontani abbastanza da doverli cercare. */

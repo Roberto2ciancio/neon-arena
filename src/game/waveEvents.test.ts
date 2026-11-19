@@ -98,6 +98,13 @@ describe('eventi casuali delle ondate', () => {
     expect(getBountyTarget(3)).toBeLessThan(getBountyTarget(14))
   })
 
+  it('in squadra la taglia è unica e cresce con i giocatori come gli zombie', () => {
+    expect(getBountyTarget(6, 1)).toBe(getBountyTarget(6))
+    expect(getBountyTarget(6, 2)).toBe(Math.round(getBountyTarget(6) * 1.5))
+    expect(getBountyTarget(6, 4)).toBe(Math.round(getBountyTarget(6) * 2.5))
+    expect(getBountyTarget(6, 0)).toBe(getBountyTarget(6))
+  })
+
   it('riconosce gli identificativi validi (messaggi co-op)', () => {
     expect(isWaveEventId('blackout')).toBe(true)
     expect(isWaveEventId('toString')).toBe(false)

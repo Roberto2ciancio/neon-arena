@@ -72,6 +72,8 @@ export type CoopHostMessage =
   | { t: 'power-take'; id: number; power: PowerUpId; by: string }
   | { t: 'door'; id: string }
   | { t: 'revived'; target: string; by: string }
+  /** Taglia di squadra: contatore unico tenuto dall'host. */
+  | { t: 'bounty'; s: 'progress' | 'done' | 'failed'; kills: number; target: number; time: number }
   | { t: 'end'; wave: number; won: boolean }
   | { t: 'error'; code: CoopErrorCode }
 
@@ -134,7 +136,7 @@ export function parseCoopClientMessage(raw: unknown): CoopClientMessage | null {
   }
 }
 
-const HOST_TYPES = ['welcome', 'lobby', 'start', 'world', 'shot', 'wave', 'kill', 'damage', 'acid', 'power-spawn', 'power-take', 'door', 'revived', 'end', 'error']
+const HOST_TYPES = ['welcome', 'lobby', 'start', 'world', 'shot', 'wave', 'kill', 'damage', 'acid', 'power-spawn', 'power-take', 'door', 'revived', 'bounty', 'end', 'error']
 
 /** I messaggi dell'host sono affidabili: si controlla la forma minima e i valori usati come indici. */
 export function parseCoopHostMessage(raw: unknown): CoopHostMessage | null {
@@ -143,6 +145,7 @@ export function parseCoopHostMessage(raw: unknown): CoopHostMessage | null {
   if (data.t === 'kill' && !ENEMY_KINDS.includes(data.kind as EnemyKind)) return null
   if ((data.t === 'power-spawn' || data.t === 'power-take') && !(typeof data.power === 'string' && data.power in POWER_UPS)) return null
   if (data.t === 'world' && (!Array.isArray(data.enemies) || !Array.isArray(data.players))) return null
+  if (data.t === 'bounty' && !(['progress', 'done', 'failed'].includes(data.s as string) && isFiniteNumber(data.kills) && isFiniteNumber(data.target) && data.target > 0 && isFiniteNumber(data.time))) return null
   if (data.t === 'wave' && data.event !== undefined && data.event !== null && !isWaveEventId(data.event)) data.event = null
   if (data.t === 'kill' && data.credits !== undefined && !(isFiniteNumber(data.credits) && data.credits >= 0 && data.credits <= 1000)) data.credits = 0
   return data as unknown as CoopHostMessage

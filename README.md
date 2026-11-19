@@ -30,7 +30,7 @@ Per i test end-to-end è necessario un browser supportato da Playwright. Il serv
 
 ## Eventi delle ondate
 
-Dalla terza ondata (escluse quelle del boss e l'ultima) può partire un evento casuale, al massimo due ondate normali di fila e senza ripetizioni nella stessa run: Blackout, Frenesia, Sciame, Giganti, Febbre dell'oro, Zombie dorato, Lancio di rifornimenti, Notte delle élite, Cacciatore di teste, Taglia, Senza respiro, Reazione a catena. Regole in `src/game/waveEvents.ts`; in co-op li sceglie l'host.
+Dalla terza ondata (escluse quelle del boss e l'ultima) può partire un evento casuale, al massimo due ondate normali di fila e senza ripetizioni nella stessa run: Blackout, Frenesia, Sciame, Giganti, Febbre dell'oro, Zombie dorato, Lancio di rifornimenti, Notte delle élite, Cacciatore di teste, Taglia, Senza respiro, Reazione a catena. Regole in `src/game/waveEvents.ts`; in co-op li sceglie l'host. In squadra la Taglia ha un contatore unico (obiettivo +50% per giocatore in più) e la ricompensa va a tutti; lo Zombie dorato dà 150 crediti a chi lo abbatte e 75 a ogni compagno.
 
 ## Armeria e progressione
 
