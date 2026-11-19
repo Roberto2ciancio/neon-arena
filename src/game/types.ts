@@ -92,6 +92,8 @@ export interface HudData {
   powerUps: { id: string; name: string; icon: string; remaining: number; duration: number; color: number }[]
   /** Il giocatore è in una pozza acida. */
   inAcid?: boolean
+  /** Evento casuale dell'ondata in corso, con l'avanzamento (taglia, zombie dorato). */
+  waveEvent?: { name: string; icon: string; color: number; detail: string }
   /** Solo partite Zombie cooperative. */
   coop?: {
     status: 'alive' | 'down' | 'dead'
@@ -133,7 +135,8 @@ export interface GameEvents {
   onHud: (hud: HudData) => void
   onUpgrade: (choices: string[], pending: number) => void
   onRunEnd: (result: RunResult) => void
-  onWave: (wave: number) => void
+  /** Nuova ondata, con l'eventuale evento casuale. */
+  onWave: (wave: number, event?: { name: string; description: string; icon: string; color: number } | null) => void
   onDamage: () => void
   onHit: (headshot: boolean) => void
   /** Accecamento da flashbang (0–1). */

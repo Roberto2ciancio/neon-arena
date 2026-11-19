@@ -1,3 +1,5 @@
+import { isWaveEventId } from '../waveEvents'
+import type { WaveEventId } from '../waveEvents'
 import { DEFAULT_COSMETICS, normalizeCosmetics } from '../cosmetics'
 import type { Cosmetics } from '../cosmetics'
 import type { EnemyKind } from '../types'
@@ -45,6 +47,8 @@ export type PackedEnemy = [number, number, number, number, number, number, numbe
 export const ENEMY_FLAG_ELITE = 1
 export const ENEMY_FLAG_RISING = 2
 export const ENEMY_FLAG_ATTACK = 4
+/** Zombie dorato dell'evento omonimo. */
+export const ENEMY_FLAG_GOLDEN = 8
 
 export type CoopClientMessage =
   | { t: 'hello'; v: number; name: string; cosmetics: Cosmetics }
@@ -60,8 +64,8 @@ export type CoopHostMessage =
   | { t: 'start'; mapId: string; players: CoopLobbyPlayer[] }
   | { t: 'world'; wave: number; waveBreak: number; remaining: number; enemies: PackedEnemy[]; players: CoopPlayerState[] }
   | { t: 'shot'; by: string; from: Vec3; to: Vec3 }
-  | { t: 'wave'; wave: number }
-  | { t: 'kill'; enemy: number; by: string; kind: EnemyKind; pos: Vec3; score: number; xp: number; shards: number; precision: boolean }
+  | { t: 'wave'; wave: number; event?: WaveEventId | null }
+  | { t: 'kill'; enemy: number; by: string; kind: EnemyKind; pos: Vec3; score: number; xp: number; shards: number; precision: boolean; credits?: number }
   | { t: 'damage'; target: string; amount: number }
   | { t: 'acid'; pos: Vec3; vel: Vec3 }
   | { t: 'power-spawn'; id: number; power: PowerUpId; pos: Vec3 }
@@ -139,6 +143,8 @@ export function parseCoopHostMessage(raw: unknown): CoopHostMessage | null {
   if (data.t === 'kill' && !ENEMY_KINDS.includes(data.kind as EnemyKind)) return null
   if ((data.t === 'power-spawn' || data.t === 'power-take') && !(typeof data.power === 'string' && data.power in POWER_UPS)) return null
   if (data.t === 'world' && (!Array.isArray(data.enemies) || !Array.isArray(data.players))) return null
+  if (data.t === 'wave' && data.event !== undefined && data.event !== null && !isWaveEventId(data.event)) data.event = null
+  if (data.t === 'kill' && data.credits !== undefined && !(isFiniteNumber(data.credits) && data.credits >= 0 && data.credits <= 1000)) data.credits = 0
   return data as unknown as CoopHostMessage
 }
 

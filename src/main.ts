@@ -1,4 +1,6 @@
 import { prestigeBadge } from './game/cosmetics'
+import { enterImmersive, loadTouchPreference, resolveTouchEnabled, saveTouchPreference, TouchControls } from './touchControls'
+import { normalizeTouchPreference } from './game/touchInput'
 import * as THREE from 'three'
 import './style.css'
 import { GameAudio } from './game/audio'
@@ -46,7 +48,10 @@ const GRAPHICS_STORAGE_KEY = 'neon-arena:graphics:v1'
 
 function loadGraphicsQuality(): GraphicsQuality {
   try {
-    return normalizeGraphicsQuality(window.localStorage.getItem(GRAPHICS_STORAGE_KEY))
+    const stored = window.localStorage.getItem(GRAPHICS_STORAGE_KEY)
+    // Primo avvio su telefono o tablet: qualità bassa, poi l'utente può alzarla.
+    if (stored === null && resolveTouchEnabled('auto')) return 'low'
+    return normalizeGraphicsQuality(stored)
   } catch {
     return 'medium'
   }
@@ -114,6 +119,24 @@ const tctGame = new TctGame(byId('scene'), {
   onFlash: showFlash,
 })
 tctGame.setActive(false)
+
+let touchPreference = loadTouchPreference()
+const touchControls = new TouchControls(app, () => (selectedMode === 'tct' ? tctGame : game))
+
+function applyTouchMode(): void {
+  const enabled = resolveTouchEnabled(touchPreference)
+  touchControls.setEnabled(enabled)
+  game.setTouchMode(enabled)
+  tctGame.setTouchMode(enabled)
+  touchControls.setVisible(currentState === 'playing')
+}
+applyTouchMode()
+byId<HTMLSelectElement>('touch-preference').value = touchPreference
+byId<HTMLSelectElement>('touch-preference').addEventListener('change', (event) => {
+  touchPreference = normalizeTouchPreference((event.target as HTMLSelectElement).value)
+  saveTouchPreference(touchPreference)
+  applyTouchMode()
+})
 game.setGraphicsQuality(graphicsQuality)
 tctGame.setGraphicsQuality(graphicsQuality)
 byId<HTMLSelectElement>('graphics-quality').value = graphicsQuality
@@ -164,6 +187,8 @@ function updateState(state: GameState): void {
   byId('door-prompt').classList.toggle('hidden', state !== 'playing')
   if (state !== 'playing') hitmarker.classList.remove('active')
   pauseScreen.classList.toggle('hidden', state !== 'paused')
+  touchControls.setVisible(state === 'playing')
+  if (state === 'playing' && touchControls.isEnabled) enterImmersive()
   if (state === 'paused') renderPauseSummary()
   if (state !== 'playing' && state !== 'paused') upgradePanel.classList.add('hidden')
   gameoverScreen.classList.toggle('hidden', state !== 'gameover' && state !== 'victory')
@@ -357,6 +382,18 @@ function updateHud(data: HudData): void {
   renderCoopHud(data.coop)
   hudEl('acid-overlay').classList.toggle('active', data.inAcid === true && currentState === 'playing')
   if (data.tct) updateTctOverlay(data.tct)
+  renderWaveEvent(data.waveEvent)
+  touchControls.update(data)
+}
+
+/** Evento casuale dell'ondata sotto il contatore, con l'avanzamento (taglia, zombie dorato). */
+function renderWaveEvent(event: HudData['waveEvent']): void {
+  const pill = hudEl('event-pill')
+  pill.classList.toggle('hidden', !event)
+  if (!event) return
+  setText(pill, `${event.icon} ${event.name}${event.detail ? ` // ${event.detail}` : ''}`)
+  const color = `#${event.color.toString(16).padStart(6, '0')}`
+  if (pill.style.color !== color) pill.style.color = color
 }
 
 let weaponSlotsKey = ''
@@ -735,16 +772,25 @@ function renderMenu(): void {
   byId('meta-upgrades').replaceChildren(...cards)
 }
 
-function showWaveBanner(wave: number): void {
+function showWaveBanner(wave: number, event?: { name: string; description: string; icon: string; color: number } | null): void {
   window.clearTimeout(waveBannerTimer)
   byId('wave-banner-title').textContent = wave % 5 === 0 ? `BOSS // ONDATA ${wave}` : `ONDATA ${wave}`
   byId('wave-banner-subtitle').textContent = wave % 5 === 0 ? 'IL BRUTO STA ARRIVANDO' : wave === 15 ? 'ULTIMA ONDATA' : `MINACCE IN ARRIVO // ${wave}/15`
+  const eventLine = byId('wave-banner-event')
+  eventLine.classList.toggle('hidden', !event)
+  if (event) {
+    eventLine.style.color = `#${event.color.toString(16).padStart(6, '0')}`
+    byId('wave-banner-event-name').textContent = `${event.icon} EVENTO // ${event.name}`
+    byId('wave-banner-event-text').textContent = event.description
+  }
   waveBanner.classList.add('hidden')
   waveBanner.style.animation = 'none'
   void waveBanner.offsetWidth
   waveBanner.style.animation = ''
+  // Con un evento il banner resta più a lungo, per leggere la descrizione.
+  waveBanner.style.animationDuration = event ? '4.2s' : ''
   waveBanner.classList.remove('hidden')
-  waveBannerTimer = window.setTimeout(() => waveBanner.classList.add('hidden'), 2400)
+  waveBannerTimer = window.setTimeout(() => waveBanner.classList.add('hidden'), event ? 4200 : 2400)
 }
 
 let flashTimer = 0

@@ -44,6 +44,7 @@
           <span id="score-label" class="hud-label">PUNTEGGIO</span>
           <strong id="score-text">000000</strong>
           <span id="wave-text" class="wave-pill">ONDATA 01</span>
+          <span id="event-pill" class="event-pill hidden" aria-live="polite"></span>
           <div id="power-ups" class="power-ups" aria-live="polite"></div>
           <span id="map-name" class="map-name">STAZIONE 13</span>
         </div>
@@ -95,6 +96,7 @@
       <div id="wave-banner" class="wave-banner hidden" aria-live="polite">
         <span id="wave-banner-subtitle">MINACCE IN ARRIVO</span>
         <strong id="wave-banner-title">ONDATA 1</strong>
+        <span id="wave-banner-event" class="wave-banner-event hidden"><b id="wave-banner-event-name"></b><small id="wave-banner-event-text"></small></span>
       </div>
 
       <section id="menu-screen" class="overlay menu-screen">
@@ -253,6 +255,14 @@
                 <option value="high">ALTA // AO + BLOOM</option>
               </select>
             </div>
+            <div class="settings-card">
+              <label for="touch-preference" class="hud-label">CONTROLLI TOUCH</label>
+              <select id="touch-preference">
+                <option value="auto">AUTOMATICI // TELEFONO E TABLET</option>
+                <option value="on">SEMPRE ATTIVI</option>
+                <option value="off">DISATTIVATI</option>
+              </select>
+            </div>
             <div class="accessibility-card">
               <label><input id="reduced-motion" type="checkbox" /> RIDUCI MOVIMENTO</label>
               <label><input id="high-contrast" type="checkbox" /> CONTRASTO ELEVATO</label>
@@ -375,7 +385,8 @@
         </div>
       </section>
 
-      <p class="desktop-note">Neon Arena richiede tastiera e mouse.</p>
+      <p class="desktop-note">Su telefono gioca in orizzontale: levetta a sinistra, visuale e pulsanti a destra.</p>
+      <div id="rotate-hint" class="rotate-hint" role="status">RUOTA IL TELEFONO IN ORIZZONTALE</div>
     </main>
     <script type="module" src="/src/main.ts"></script>
   </body>

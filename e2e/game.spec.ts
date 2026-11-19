@@ -547,3 +547,126 @@ test('un’ondata piena non provoca cali improvvisi di frame', async ({ page }) 
   expect(spikes.length, `mediana ${Math.round(median)} ms, picchi ${spikes.map(Math.round).join(', ')}`).toBeLessThanOrEqual(Math.max(1, Math.floor(frames.length * 0.02)))
   expect(errors).toEqual([])
 })
+
+test('i controlli touch permettono di muoversi, guardare, sparare e mettere in pausa', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  await page.setViewportSize({ width: 844, height: 390 })
+  await page.addInitScript(() => window.localStorage.setItem('neon-arena:graphics:v1', 'low'))
+  await page.goto('/?touch=on')
+  await page.getByRole('button', { name: 'INIZIA RUN' }).click()
+  await expect(page.locator('#app')).toHaveAttribute('data-state', 'playing')
+  await expect(page.locator('#touch-controls')).toBeVisible()
+  await expect(page.locator('#equipment-hud')).toBeHidden()
+  // Niente blocco del puntatore: si gioca con le dita.
+  expect(await page.evaluate(() => document.pointerLockElement)).toBeNull()
+
+  const read = () => page.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    return { x: game.controller.position.x as number, z: game.controller.position.z as number, yaw: game.yaw as number }
+  })
+  const start = await read()
+
+  // Levetta: il pollice parte dove tocca e spinge in avanti.
+  await page.mouse.move(170, 270)
+  await page.mouse.down()
+  await page.mouse.move(170, 190, { steps: 4 })
+  await expect.poll(async () => {
+    const now = await read()
+    return Math.hypot(now.x - start.x, now.z - start.z)
+  }).toBeGreaterThan(0.5)
+  await page.mouse.up()
+
+  // Visuale: trascinamento nella metà destra.
+  const before = (await read()).yaw
+  await page.mouse.move(520, 120)
+  await page.mouse.down()
+  await page.mouse.move(600, 120, { steps: 5 })
+  await page.mouse.up()
+  expect(Math.abs((await read()).yaw - before)).toBeGreaterThan(0.05)
+
+  // Fuoco: tenendo premuto parte la raffica.
+  const fire = await page.locator('.touch-fire').boundingBox()
+  expect(fire).not.toBeNull()
+  await page.mouse.move(fire!.x + fire!.width / 2, fire!.y + fire!.height / 2)
+  await page.mouse.down()
+  await page.waitForTimeout(450)
+  await page.mouse.up()
+  await expect(page.locator('#ammo-text')).not.toHaveText('30')
+
+  // Mira con un tocco (si attiva e si disattiva).
+  await page.locator('.touch-aim').click()
+  await expect(page.locator('#crosshair')).toHaveClass(/aiming/)
+  await page.locator('.touch-aim').click()
+  await expect(page.locator('#crosshair')).not.toHaveClass(/aiming/)
+
+  await page.locator('.touch-pause').click()
+  await expect(page.locator('#app')).toHaveAttribute('data-state', 'paused')
+  await expect(page.locator('#touch-controls')).toBeHidden()
+  expect(errors).toEqual([])
+})
+
+test('gli eventi delle ondate cambiano la partita senza cali di frame', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  await page.addInitScript(() => window.localStorage.setItem('neon-arena:graphics:v1', 'low'))
+  await page.goto('/')
+  await page.locator('[data-map="district-zero"]').click()
+  await page.getByRole('button', { name: 'INIZIA RUN' }).click()
+  await expect(page.locator('#app')).toHaveAttribute('data-state', 'playing')
+  await page.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    game.clearEntities()
+    game.activePowerUps.set('barrier', 999)
+    game.wave = 7
+    game.nextWave()
+    game.debugPlace(0, 0, 12, 0, 0)
+    game.startWaveEvent('blackout')
+  })
+  await expect(page.locator('#event-pill')).toContainText('BLACKOUT')
+  await expect.poll(() => page.evaluate(() => (window as any).__neonArena.game.lightScale)).toBeLessThan(0.5)
+
+  // Rifornimenti: tre bonus sulla mappa; finito il blackout le luci tornano normali.
+  await page.evaluate(() => (window as any).__neonArena.game.startWaveEvent('supply-drop'))
+  await expect(page.locator('#event-pill')).toContainText('RIFORNIMENTI')
+  expect(await page.evaluate(() => (window as any).__neonArena.game.powerPickups.length)).toBeGreaterThanOrEqual(3)
+  await expect.poll(() => page.evaluate(() => (window as any).__neonArena.game.lightScale)).toBeGreaterThan(0.95)
+
+  // Zombie dorato e reazione a catena insieme, con l'ondata piena: il caso più pesante.
+  await page.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    game.startWaveEvent('golden-zombie')
+    game.goldenPending = 0.01
+  })
+  await expect.poll(() => page.evaluate(() => (window as any).__neonArena.game.enemies.some((enemy: any) => enemy.golden))).toBe(true)
+  await page.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    game.waveEvent = 'chain-reaction'
+  })
+  await page.waitForFunction(() => (window as any).__neonArena.game.enemies.length >= 14)
+  // Durante la misura muore uno zombie ogni 4 frame: esplosioni a catena, bonus e kit medici.
+  const frames = await page.evaluate(async () => new Promise<number[]>((resolve) => {
+    const game = (window as any).__neonArena.game
+    const deltas: number[] = []
+    let previous = 0
+    const frame = (now: number) => {
+      if (previous > 0) deltas.push(now - previous)
+      previous = now
+      if (deltas.length % 4 === 0) {
+        const victim = game.enemies.find((enemy: any) => enemy.health > 0 && enemy.spawnTimer <= 0)
+        if (victim) victim.health = 0
+      }
+      if (deltas.length >= 60) resolve(deltas)
+      else requestAnimationFrame(frame)
+    }
+    requestAnimationFrame(frame)
+  }))
+  expect(frames.length).toBe(60)
+  // Stesso criterio del test dell'ondata piena: picchi rispetto alla mediana della macchina.
+  const sorted = [...frames].sort((first, second) => first - second)
+  const median = sorted[Math.floor(sorted.length / 2)]!
+  const spikes = frames.filter((duration) => duration > Math.max(100, median * 3))
+  expect(spikes.length, `mediana ${Math.round(median)} ms, picchi ${spikes.map(Math.round).join(', ')}`).toBeLessThanOrEqual(Math.max(1, Math.floor(frames.length * 0.02)))
+  expect(await page.evaluate(() => (window as any).__neonArena.game.kills)).toBeGreaterThan(5)
+  expect(errors).toEqual([])
+})

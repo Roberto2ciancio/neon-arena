@@ -26,6 +26,11 @@ Per i test end-to-end è necessario un browser supportato da Playwright. Il serv
 - `1`: primaria; `2`: secondaria; `3`: arma bianca; `F`: attacco rapido corpo a corpo.
 - `G`: equipaggiamento letale; `Q`: equipaggiamento tattico; `T`: gadget.
 - Zombie: `E` interagisci (porte e postazioni d'acquisto), `Z`/`X`/`V` scelta del potenziamento al level-up (il gioco non si ferma).
+- Telefono e tablet (in orizzontale): levetta che compare dove tocchi nella metà sinistra (spinta fino al bordo = scatto), trascinamento nella metà destra o su FUOCO per la visuale, MIRA a tocco, pulsanti per salto, accovacciati, ricarica, cambio arma, corpo a corpo, USA ed equipaggiamenti, `II` per la pausa. Attivi in automatico sui dispositivi touch; si forzano in Impostazioni → Controlli touch o con `?touch=on`.
+
+## Eventi delle ondate
+
+Dalla terza ondata (escluse quelle del boss e l'ultima) può partire un evento casuale, al massimo due ondate normali di fila e senza ripetizioni nella stessa run: Blackout, Frenesia, Sciame, Giganti, Febbre dell'oro, Zombie dorato, Lancio di rifornimenti, Notte delle élite, Cacciatore di teste, Taglia, Senza respiro, Reazione a catena. Regole in `src/game/waveEvents.ts`; in co-op li sceglie l'host.
 
 ## Armeria e progressione
 

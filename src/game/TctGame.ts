@@ -1,3 +1,5 @@
+import { shouldSprint, TOUCH_ACTION_KEYS, TOUCH_LOOK_SCALE } from './touchInput'
+import type { TouchAction, TouchTarget } from './touchInput'
 import { WEAPON_XP } from './armory'
 import { DEFAULT_THEME } from './maps'
 import { animateWeather } from './weather'
@@ -88,7 +90,10 @@ interface TctEvents {
   onFlash?: (intensity: number) => void
 }
 
-export class TctGame {
+export class TctGame implements TouchTarget {
+  private touchMode = false
+  private touchMoveX = 0
+  private touchMoveY = 0
   /** Secondi al prossimo aggiornamento della mappa d'ombra. */
   private shadowTimer = 0
   /** Esperienza delle armi accumulata nella partita. */
@@ -281,6 +286,8 @@ export class TctGame {
 
   pause(): void {
     if (this.state !== 'playing') return
+    this.touchMoveX = 0
+    this.touchMoveY = 0
     this.firing = false
     this.aiming = false
     this.weapons.setTrigger(false)
@@ -378,7 +385,7 @@ export class TctGame {
   }
 
   private requestMouse(): void {
-    if (document.pointerLockElement === this.renderer.domElement) return
+    if (this.touchMode || document.pointerLockElement === this.renderer.domElement) return
     try {
       const request = this.renderer.domElement.requestPointerLock() as Promise<void> | undefined
       void request?.catch(() => undefined)
@@ -678,6 +685,11 @@ export class TctGame {
     }
     const controllable = this.state === 'playing'
     const input = readMovementInput(controllable ? this.keys : new Set<string>(), this.aiming || this.firing || this.weapons.reloading)
+    if (controllable && (this.touchMoveX !== 0 || this.touchMoveY !== 0)) {
+      input.forward = THREE.MathUtils.clamp(input.forward + this.touchMoveY, -1, 1)
+      input.right = THREE.MathUtils.clamp(input.right + this.touchMoveX, -1, 1)
+      if (shouldSprint(this.touchMoveX, this.touchMoveY)) input.sprint = true
+    }
     const weapon = this.weapons.current
     this.controller.update(delta, input, this.yaw, {
       speed: 7 * (weapon?.moveMultiplier ?? 1.1) * (this.stunTimer > 0 ? 0.45 : 1),
@@ -1107,7 +1119,7 @@ export class TctGame {
   }
 
   private readonly onPointerLockChange = (): void => {
-    if (this.active && this.state === 'playing' && document.pointerLockElement !== this.renderer.domElement) this.pause()
+    if (!this.touchMode && this.active && this.state === 'playing' && document.pointerLockElement !== this.renderer.domElement) this.pause()
   }
 
   private readonly onContextMenu = (event: MouseEvent): void => event.preventDefault()
@@ -1118,6 +1130,64 @@ export class TctGame {
     this.weapons.setTrigger(false)
     this.keys.clear()
     if (this.active && this.state === 'playing') this.pause()
+  }
+
+  setTouchMode(enabled: boolean): void {
+    this.touchMode = enabled
+    if (!enabled) this.setTouchMove(0, 0)
+  }
+
+  setTouchMove(x: number, y: number): void {
+    this.touchMoveX = x
+    this.touchMoveY = y
+  }
+
+  touchLook(dx: number, dy: number): void {
+    if (!this.active || this.state !== 'playing' || !this.alive) return
+    const sensitivity = this.mouseSensitivity * TOUCH_LOOK_SCALE * (this.stunTimer > 0 ? 0.45 : 1) * (this.aiming ? getAimSensitivityScale(this.camera.fov, 75, this.adsSensitivity) : 1)
+    this.yaw -= dx * sensitivity
+    this.pitch = THREE.MathUtils.clamp(this.pitch - dy * sensitivity, -1.45, 1.45)
+    this.weapons.animator.addLook(dx, dy)
+  }
+
+  touchAction(action: TouchAction, down: boolean): void {
+    if (!this.active) return
+    if (action === 'pause') {
+      if (down) this.pause()
+      return
+    }
+    if (this.state !== 'playing' || !this.alive) {
+      if (!down && action === 'fire') {
+        this.firing = false
+        this.weapons.setTrigger(false)
+      }
+      return
+    }
+    this.audio.resume()
+    if (action === 'fire') {
+      this.firing = down
+      if (down && this.weapons.slot === 'melee') this.performMelee(false)
+      else this.weapons.setTrigger(down)
+      return
+    }
+    if (action === 'aim') {
+      if (down) this.aiming = !this.aiming
+      return
+    }
+    if (action === 'swap') {
+      if (down) this.switchSlot(this.weapons.nextSlot(1))
+      return
+    }
+    const code = TOUCH_ACTION_KEYS[action]
+    if (!code) return
+    if (action === 'crouch') {
+      if (!down) return
+      if (this.keys.has(code)) this.keys.delete(code)
+      else this.onKeyDown(new KeyboardEvent('keydown', { code }))
+      return
+    }
+    if (down) this.onKeyDown(new KeyboardEvent('keydown', { code }))
+    else this.keys.delete(code)
   }
 
   private bindEvents(): void {

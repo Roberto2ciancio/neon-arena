@@ -1,4 +1,8 @@
 import { DEFAULT_THEME } from './maps'
+import { BOUNTY_CREDITS, BOUNTY_TIME, CHAIN_BLAST_COOLDOWN, CHAIN_BLAST_RADIUS, filterSpawnPool, getBountyTarget, getChainBlastDamage, getWaveEventModifiers, getZoneDamageMultiplier, GOLDEN_CREDITS, GOLDEN_HEALTH_MULTIPLIER, GOLDEN_LIFETIME, GOLDEN_POWER_UPS, GOLDEN_SPAWN_DELAY, GOLDEN_SPEED_MULTIPLIER, rollWaveEvent, SUPPLY_DROP_COUNT, WAVE_EVENTS } from './waveEvents'
+import type { WaveEventId, WaveEventModifiers } from './waveEvents'
+import { shouldSprint, TOUCH_ACTION_KEYS, TOUCH_LOOK_SCALE } from './touchInput'
+import type { TouchAction, TouchTarget } from './touchInput'
 import { animateWeather } from './weather'
 import { RARITIES, rollMysteryBox } from './mysteryBox'
 import type { FieldTier } from './fieldWeapons'
@@ -16,7 +20,7 @@ import type { CoopSession } from './coop/CoopSession'
 import { COOP_HOST_ID } from './coop/CoopSession'
 import { BLEED_OUT_SECONDS, getCoopScaling, isTeamWiped, MAX_COOP_HIT_DAMAGE, respawnAtWave, REVIVE_HEALTH_SHARE, REVIVE_RANGE, REVIVE_SECONDS, scaleMaxActive } from './coop/coopRules'
 import type { CoopPlayerStatus } from './coop/coopRules'
-import { ENEMY_FLAG_ATTACK, ENEMY_FLAG_ELITE, ENEMY_FLAG_RISING, packEnemy, unpackEnemy } from './coop/coopProtocol'
+import { ENEMY_FLAG_ATTACK, ENEMY_FLAG_ELITE, ENEMY_FLAG_GOLDEN, ENEMY_FLAG_RISING, packEnemy, unpackEnemy } from './coop/coopProtocol'
 import type { CoopClientMessage, CoopHostMessage, CoopLobbyPlayer, CoopPlayerState, Vec3 } from './coop/coopProtocol'
 import { gunshotProfileForRemote } from './coop/coopAudio'
 import { getLowHealthWarning, getMedkitDropChance, getPassiveRegen, MEDKIT_PICKUP_HEAL, MEDKIT_PICKUP_LIFETIME } from './healing'
@@ -64,7 +68,7 @@ import { BURN_DURATION, CHAIN_LIGHTNING_RADIUS, getBurnDamagePerSecond, getChain
 import { BLOATER_BLAST, ENEMY_FIRST_WAVE, ENEMY_INTEL, FINAL_WAVE, getEliteChance, getMaxActiveZombies, getMeleeDamage, getPrewarmCount, getSpawnPool, PATH_BUDGET_PER_FRAME, getWaveSpawnCount, getZombieColor, getZombieStats, SHIELD_FRONT_REDUCTION, WAVE_BREAK_SECONDS } from './zombies'
 import { INSTA_KILL_BOSS_MULTIPLIER, POWER_UP_LIFETIME, POWER_UPS, rollPowerUp, SHOCKWAVE_RADIUS } from './powerups'
 import type { PowerUpId } from './powerups'
-import type { EnemyKind, GameEvents, GameState, HitZone, MetaBonuses, RunResult } from './types'
+import type { EnemyKind, GameEvents, GameState, HitZone, HudData, MetaBonuses, RunResult } from './types'
 
 interface PowerUpPickup {
   /** Identificativo condiviso in co-op. */
@@ -79,6 +83,10 @@ interface PowerUpPickup {
 interface Enemy {
   model: EnemyModel
   elite: boolean
+  /** Zombie dorato dell'evento: scappa dopo un po' e lascia un grosso bottino. */
+  golden: boolean
+  /** Secondi prima che lo zombie dorato scappi (solo host). */
+  goldenLife: number
   /** Identificativo condiviso fra host e compagni in co-op. */
   netId: number
   /** Attesa prima di potersi arrampicare di nuovo. */
@@ -214,7 +222,7 @@ function getWeakPointZone(kind: EnemyKind): HitZone {
   }
 }
 
-export class Game {
+export class Game implements TouchTarget {
   /** Secondi al prossimo aggiornamento della mappa d'ombra. */
   private shadowTimer = 0
   private readonly scene = new THREE.Scene()
@@ -294,6 +302,24 @@ export class Game {
   private shield = 0
   private shieldDelay = 0
   private secondWindUsed = false
+  // --- Eventi casuali delle ondate ---------------------------------------------------------
+  private waveEvent: WaveEventId | null = null
+  private waveMods: WaveEventModifiers = getWaveEventModifiers(null)
+  private usedWaveEvents: WaveEventId[] = []
+  private lastEventWave = 0
+  private bounty: { kills: number; target: number; time: number } | null = null
+  private goldenPending = 0
+  private chainCooldown = 0
+  /** Luci della mappa con l'intensità originale, per il Blackout (nessuna luce aggiunta o tolta). */
+  private mapLights: { light: THREE.Light; base: number }[] = []
+  private mapLightsGroup: THREE.Object3D | null = null
+  private baseFogDensity = 0
+  private lightScale = 1
+  private fogScale = 1
+  // --- Controlli touch ---------------------------------------------------------------------
+  private touchMode = false
+  private touchMoveX = 0
+  private touchMoveY = 0
   // --- Co-op -------------------------------------------------------------------------------
   private coop: CoopSession | null = null
   private coopUnsubscribe: (() => void)[] = []
@@ -591,6 +617,13 @@ export class Game {
     this.shield = 0
     this.shieldDelay = 0
     this.secondWindUsed = false
+    this.usedWaveEvents = []
+    this.lastEventWave = 0
+    this.endWaveEvent()
+    this.collectMapLights()
+    this.applyEventLighting(1, 1)
+    this.touchMoveX = 0
+    this.touchMoveY = 0
     this.precisionHits = 0
     this.weaponXp.clear()
     this.chosenUpgrades.clear()
@@ -692,6 +725,8 @@ export class Game {
 
   pause(): void {
     if (this.state !== 'playing') return
+    this.touchMoveX = 0
+    this.touchMoveY = 0
     this.firing = false
     this.aiming = false
     this.keys.clear()
@@ -715,6 +750,8 @@ export class Game {
   returnToMenu(): void {
     this.detachCoop()
     this.clearEntities()
+    this.endWaveEvent()
+    this.applyEventLighting(1, 1)
     this.firing = false
     this.aiming = false
     this.keys.clear()
@@ -781,7 +818,7 @@ export class Game {
   }
 
   private requestMouse(): void {
-    if (document.pointerLockElement === this.renderer.domElement) return
+    if (this.touchMode || document.pointerLockElement === this.renderer.domElement) return
     try {
       const request = this.renderer.domElement.requestPointerLock() as Promise<void> | undefined
       void request?.catch(() => undefined)
@@ -823,16 +860,18 @@ export class Game {
     const previousTier = getFieldTier(Math.max(1, this.wave - 1))
     this.rotateStations(this.wave)
     const tier = getFieldTier(this.wave)
-    if (this.wave > 1) {
+    this.startWaveEvent(rollWaveEvent(this.wave, this.usedWaveEvents, this.lastEventWave))
+    // Con un evento in corso il banner dell'ondata lo descrive: l'avviso generico sulle postazioni si salta.
+    if (this.wave > 1 && (tier > previousTier || !this.waveEvent)) {
       this.events.onNotice?.(tier > previousTier ? `ARMI ${FIELD_TIERS[tier].name} DISPONIBILI` : 'POSTAZIONI AGGIORNATE', tier > previousTier ? 'Le postazioni ora vendono armi più potenti, a un prezzo più alto.' : 'Le armi in vendita sulla mappa sono cambiate: controlla le postazioni.', 0x8f6bff)
     }
-    this.spawnQueue = Math.round(getWaveSpawnCount(this.wave) * getCoopScaling(this.coopPlayers).spawnCount)
+    this.spawnQueue = Math.max(1, Math.round(getWaveSpawnCount(this.wave) * getCoopScaling(this.coopPlayers).spawnCount * this.waveMods.spawnCount))
     this.spawnTimer = 0.65
     this.onCoopWave()
-    if (this.coopRole === 'host') this.coop?.broadcast({ t: 'wave', wave: this.wave })
+    if (this.coopRole === 'host') this.coop?.broadcast({ t: 'wave', wave: this.wave, event: this.waveEvent })
     this.waveBreak = 0
     this.waveActive = true
-    this.events.onWave(this.wave)
+    this.events.onWave(this.wave, this.waveEventInfo())
   }
 
   /**
@@ -873,6 +912,10 @@ export class Game {
   }
 
   private updateSpawning(delta: number): void {
+    if (this.goldenPending > 0) {
+      this.goldenPending -= delta
+      if (this.goldenPending <= 0) this.spawnEnemy('runner', undefined, true)
+    }
     if (this.spawnQueue > 0) {
       // Il resto dell'ondata aspetta finché ci sono troppi zombie vivi.
       if (this.enemies.length >= scaleMaxActive(getMaxActiveZombies(this.graphicsQuality), this.coopPlayers)) return
@@ -887,9 +930,10 @@ export class Game {
       }
       return
     }
-    if (this.enemies.length > 0) return
+    if (this.enemies.length > 0 || this.goldenPending > 0) return
     if (this.waveActive) {
       this.waveActive = false
+      this.endWaveEvent()
       if (this.wave >= FINAL_WAVE) {
         if (this.coopRole === 'host') this.coop?.broadcast({ t: 'end', wave: this.wave, won: true })
         this.finishRun(true)
@@ -905,7 +949,7 @@ export class Game {
   }
 
   private randomEnemyKind(): EnemyKind {
-    const pool = getSpawnPool(this.wave)
+    const pool = filterSpawnPool(getSpawnPool(this.wave), this.waveMods.kinds)
     return pool[Math.floor(Math.random() * pool.length)] ?? 'walker'
   }
 
@@ -929,11 +973,22 @@ export class Game {
     return (pool[Math.floor(Math.random() * pool.length)] ?? candidates[0] ?? new THREE.Vector3(0, 0, -this.map.enemySpawnRadius)).clone()
   }
 
-  private spawnEnemy(kind: EnemyKind, replica?: { id: number; elite: boolean; position: THREE.Vector3; rising: boolean }): void {
+  private spawnEnemy(kind: EnemyKind, replica?: { id: number; elite: boolean; position: THREE.Vector3; rising: boolean; golden?: boolean }, golden = false): void {
     const scaling = getCoopScaling(this.coopPlayers)
-    const elite = replica ? replica.elite : kind !== 'brute' && Math.random() < getEliteChance(this.wave) + scaling.eliteBonus
+    const mods = this.waveMods
+    const isGolden = replica ? replica.golden === true : golden
+    const elite = !isGolden && (replica ? replica.elite : kind !== 'brute' && Math.random() < getEliteChance(this.wave) + scaling.eliteBonus + mods.eliteBonus)
     const baseStats = getZombieStats(kind, this.wave, elite)
-    const stats = { ...baseStats, health: baseStats.health * scaling.health, damage: baseStats.damage * scaling.damage }
+    // Il Bruto non cambia taglia con i Giganti: è già il boss.
+    const eventScale = kind === 'brute' ? 1 : mods.scale
+    const stats = {
+      ...baseStats,
+      health: baseStats.health * scaling.health * mods.health * (isGolden ? GOLDEN_HEALTH_MULTIPLIER : 1),
+      damage: baseStats.damage * scaling.damage * mods.damage * (isGolden ? 0.5 : 1),
+      speed: baseStats.speed * mods.speed * (isGolden ? GOLDEN_SPEED_MULTIPLIER : 1),
+      radius: baseStats.radius * eventScale,
+      score: baseStats.score * (isGolden ? 10 : 1),
+    }
     if (!this.introducedKinds.has(kind)) {
       this.introducedKinds.add(kind)
       const color = getZombieColor(kind)
@@ -943,7 +998,7 @@ export class Game {
     const model = pooled ?? createEnemyModel(kind, getZombieColor(kind))
     model.group.visible = true
     model.group.rotation.set(0, 0, 0)
-    model.group.scale.setScalar(elite ? 1.12 : 1)
+    model.group.scale.setScalar((elite ? 1.12 : isGolden ? 1.08 : 1) * eventScale)
     model.body.material.emissive.setHex(0x000000)
     model.body.material.emissiveIntensity = 0
     model.leftLeg.rotation.x = 0
@@ -968,6 +1023,8 @@ export class Game {
     const enemy: Enemy = {
       model,
       elite,
+      golden: isGolden,
+      goldenLife: isGolden ? GOLDEN_LIFETIME : 0,
       netId: replica ? replica.id : this.nextEnemyId++,
       lastHitBy: null,
       climbCooldown: 0,
@@ -1019,7 +1076,7 @@ export class Game {
     this.adrenalineTimer = Math.max(0, this.adrenalineTimer - delta)
     this.shieldDelay = Math.max(0, this.shieldDelay - delta)
     if (this.shieldDelay <= 0 && this.shield < this.stats.energyShield) this.shield = Math.min(this.stats.energyShield, this.shield + 15 * delta)
-    this.health += getPassiveRegen(this.health, this.stats.maxHealth, this.sinceDamage, delta)
+    if (this.waveMods.passiveRegen) this.health += getPassiveRegen(this.health, this.stats.maxHealth, this.sinceDamage, delta)
     const warning = getLowHealthWarning(this.health, this.stats.maxHealth)
     if (warning.intensity > 0) {
       this.heartbeatTimer -= delta
@@ -1032,6 +1089,11 @@ export class Game {
     }
 
     const input = readMovementInput(this.keys, this.aiming || this.firing || this.weapons.reloading)
+    if (this.touchMoveX !== 0 || this.touchMoveY !== 0) {
+      input.forward = THREE.MathUtils.clamp(input.forward + this.touchMoveY, -1, 1)
+      input.right = THREE.MathUtils.clamp(input.right + this.touchMoveX, -1, 1)
+      if (shouldSprint(this.touchMoveX, this.touchMoveY)) input.sprint = true
+    }
     const result = this.controller.update(delta, input, this.yaw, {
       speed: (this.stats.speed * (this.adrenalineTimer > 0 ? 1.25 : 1)) * this.weaponDefinition.moveMultiplier,
       solids: this.obstacles,
@@ -1282,8 +1344,8 @@ export class Game {
       enemy.specialCooldown = Math.max(enemy.specialCooldown, 3)
     }
 
-    const damage = this.scaleDamage(enemy, baseDamage * multiplier * (critical ? this.stats.critMultiplier : 1) * this.executionBonus(enemy))
     const precisionZone = hit.zone === 'head' || hit.zone === 'generator' || hit.zone === 'core' || hit.zone === 'spine' || hit.zone === 'throat' || hit.zone === 'back' || hit.zone === 'belly'
+    const damage = this.scaleDamage(enemy, baseDamage * multiplier * (critical ? this.stats.critMultiplier : 1) * this.executionBonus(enemy) * getZoneDamageMultiplier(this.waveMods, precisionZone))
     this.dealDamage(enemy, damage, precisionZone)
     enemy.hitFlash = 0.08
     // Reazione al colpo: sobbalzo e piccola spinta all'indietro.
@@ -1550,8 +1612,8 @@ export class Game {
       }
       if (enemy.health <= 0) continue
       // Le élite hanno un alone dorato pulsante, riconoscibile a distanza.
-      const eliteGlow = enemy.elite ? 0.55 + Math.sin(this.elapsed * 5 + enemy.phase) * 0.25 : 0
-      enemy.model.body.material.emissive.setHex(enemy.hitFlash > 0 ? 0x882233 : enemy.burnTimer > 0 ? 0x8a2f09 : enemy.elite ? 0x7a5200 : 0x000000)
+      const eliteGlow = enemy.golden ? 1.3 + Math.sin(this.elapsed * 8) * 0.4 : enemy.elite ? 0.55 + Math.sin(this.elapsed * 5 + enemy.phase) * 0.25 : 0
+      enemy.model.body.material.emissive.setHex(enemy.hitFlash > 0 ? 0x882233 : enemy.burnTimer > 0 ? 0x8a2f09 : enemy.golden ? 0xb88a00 : enemy.elite ? 0x7a5200 : 0x000000)
       enemy.model.body.material.emissiveIntensity = enemy.hitFlash > 0 ? 1.8 : enemy.burnTimer > 0 ? 1.2 : eliteGlow
       if (enemy.kind === 'brute') {
         enemy.model.weakPoint.material.emissiveIntensity = enemy.coreExposedTimer > 0 ? 3 : 0.12
@@ -1934,18 +1996,20 @@ export class Game {
     const position = enemy.model.group.position.clone()
     if (enemy.kind === 'bloater') this.explodeBloater(position)
     const color = getZombieColor(enemy.kind)
-    const score = enemy.score * this.wave * this.lootMultiplier
+    const score = enemy.score * this.wave * this.lootMultiplier * this.waveMods.score
     const shards = enemy.kind === 'brute' ? 8 : Math.random() < 0.26 ? 1 : 0
     const killer = enemy.lastHitBy
     const active = new Set<PowerUpId>([...this.activePowerUps.keys(), ...this.powerPickups.map((pickup) => pickup.id)])
     const dropped = rollPowerUp(enemy.kind, Math.random, active, this.stats.luck)
     if (dropped) this.spawnPowerPickup(position, dropped)
+    if (enemy.golden) this.dropGoldenLoot(position, active)
+    if (this.waveEvent === 'chain-reaction') this.chainBlast(enemy, position)
     this.spawnBurst(position.clone().setY(position.y + enemy.model.height * 0.5), color, enemy.kind === 'brute' ? 28 : 12)
     if (this.coopRole === 'host') {
-      this.coop?.broadcast({ t: 'kill', enemy: enemy.netId, by: killer ?? COOP_HOST_ID, kind: enemy.kind, pos: toVec3(position), score, xp: enemy.xp, shards, precision: false })
+      this.coop?.broadcast({ t: 'kill', enemy: enemy.netId, by: killer ?? COOP_HOST_ID, kind: enemy.kind, pos: toVec3(position), score, xp: enemy.xp, shards, precision: false, credits: enemy.golden ? GOLDEN_CREDITS : 0 })
       if (killer) this.teammateKills.set(killer, (this.teammateKills.get(killer) ?? 0) + 1)
     }
-    if (killer === null) this.rewardKill(enemy.kind, position, score, enemy.xp, shards, enemy.elite)
+    if (killer === null) this.rewardKill(enemy.kind, position, score, enemy.xp, shards, enemy.elite, enemy.golden ? GOLDEN_CREDITS : 0)
     this.enemies.splice(index, 1)
     enemy.model.group.rotation.x = 0
     this.dyingEnemies.push({ model: enemy.model, kind: enemy.kind, life: 0.65, direction: Math.random() < 0.5 ? -1 : 1, baseY: position.y })
@@ -1953,11 +2017,16 @@ export class Game {
   }
 
   /** Ricompense dell'uccisione per il giocatore locale: punti, esperienza, frammenti e kit. */
-  private rewardKill(kind: EnemyKind, position: THREE.Vector3, score: number, xp: number, shards: number, elite = false): void {
+  private rewardKill(kind: EnemyKind, position: THREE.Vector3, score: number, xp: number, shards: number, elite = false, bonusCredits = 0): void {
     this.score += score
     this.kills += 1
     // Crediti per comprare in partita e esperienza per l'arma impugnata.
-    this.shards += getKillCredits(kind, elite) * this.lootMultiplier
+    this.shards += Math.round(getKillCredits(kind, elite) * this.lootMultiplier * this.waveMods.credits)
+    if (bonusCredits > 0) {
+      this.shards += bonusCredits
+      this.events.onNotice?.('ZOMBIE DORATO ABBATTUTO', `+${bonusCredits} crediti e bonus a terra.`, WAVE_EVENTS['golden-zombie'].color)
+    }
+    this.advanceBounty()
     const weaponId = this.weapons.current?.id
     if (weaponId && this.weapons.slot !== 'melee') this.weaponXp.set(weaponId, (this.weaponXp.get(weaponId) ?? 0) + getWeaponKillXp(kind, elite, WEAPON_XP.zombieKill))
     if (Math.random() < getMedkitDropChance(kind, this.health / this.stats.maxHealth) * this.stats.luck) this.spawnMedkit(position)
@@ -2480,7 +2549,7 @@ export class Game {
     const enemies = this.enemies.filter((enemy) => enemy.health > 0).map((enemy) => packEnemy(
       enemy.netId, enemy.kind, enemy.body.position.x, enemy.body.position.y, enemy.body.position.z, enemy.model.group.rotation.y,
       enemy.health / enemy.maxHealth,
-      (enemy.elite ? ENEMY_FLAG_ELITE : 0) | (enemy.spawnTimer > 0 ? ENEMY_FLAG_RISING : 0) | (enemy.attackAnim > 0 ? ENEMY_FLAG_ATTACK : 0),
+      (enemy.elite ? ENEMY_FLAG_ELITE : 0) | (enemy.spawnTimer > 0 ? ENEMY_FLAG_RISING : 0) | (enemy.attackAnim > 0 ? ENEMY_FLAG_ATTACK : 0) | (enemy.golden ? ENEMY_FLAG_GOLDEN : 0),
     ))
     const players: CoopPlayerState[] = [
       this.localPlayerState(COOP_HOST_ID),
@@ -2551,6 +2620,7 @@ export class Game {
     switch (message.t) {
       case 'world': {
         this.waveBreak = message.waveBreak
+        if (message.waveBreak > 0 && this.waveEvent) this.endWaveEvent()
         this.coopRemaining = message.remaining
         if (message.wave !== this.wave && message.wave > 0) this.applyRemoteWave(message.wave)
         const seen = new Set<number>()
@@ -2559,7 +2629,7 @@ export class Game {
           seen.add(data.id)
           const enemy = this.enemies.find((candidate) => candidate.netId === data.id)
           if (!enemy) {
-            this.spawnEnemy(data.kind, { id: data.id, elite: (data.flags & ENEMY_FLAG_ELITE) !== 0, position: new THREE.Vector3(data.x, data.y, data.z), rising: (data.flags & ENEMY_FLAG_RISING) !== 0 })
+            this.spawnEnemy(data.kind, { id: data.id, elite: (data.flags & ENEMY_FLAG_ELITE) !== 0, position: new THREE.Vector3(data.x, data.y, data.z), rising: (data.flags & ENEMY_FLAG_RISING) !== 0, golden: (data.flags & ENEMY_FLAG_GOLDEN) !== 0 })
             continue
           }
           enemy.netTarget?.set(data.x, data.y, data.z)
@@ -2578,7 +2648,7 @@ export class Game {
         return
       }
       case 'wave':
-        this.applyRemoteWave(message.wave)
+        this.applyRemoteWave(message.wave, message.event ?? null)
         return
       case 'kill': {
         const index = this.enemies.findIndex((candidate) => candidate.netId === message.enemy)
@@ -2590,9 +2660,13 @@ export class Game {
           this.dyingEnemies.push({ model: enemy.model, kind: enemy.kind, life: 0.65, direction: Math.random() < 0.5 ? -1 : 1, baseY: position.y })
         }
         if (message.kind === 'bloater') this.effects.explosion(position.clone().setY(position.y + 1), BLOATER_BLAST.radius, getZombieColor('bloater'), position.y)
+        else if (this.waveEvent === 'chain-reaction' && this.chainCooldown <= 0) {
+          this.chainCooldown = CHAIN_BLAST_COOLDOWN
+          this.effects.explosion(position.clone().setY(position.y + 0.8), CHAIN_BLAST_RADIUS, WAVE_EVENTS['chain-reaction'].color, position.y)
+        }
         this.spawnBurst(position.clone().setY(position.y + 1), getZombieColor(message.kind), message.kind === 'brute' ? 28 : 12)
         this.audio.playAt('kill', position, this.player, this.yaw)
-        if (message.by === localId) this.rewardKill(message.kind, position, message.score, message.xp, message.shards)
+        if (message.by === localId) this.rewardKill(message.kind, position, message.score, message.xp, message.shards, false, message.credits ?? 0)
         return
       }
       case 'damage':
@@ -2635,15 +2709,16 @@ export class Game {
     }
   }
 
-  private applyRemoteWave(wave: number): void {
+  private applyRemoteWave(wave: number, event: WaveEventId | null = null): void {
     if (wave === this.wave) return
     this.wave = wave
+    this.startWaveEvent(event)
     const previousTier = getFieldTier(Math.max(1, wave - 1))
     this.rotateStations(wave)
     const tier = getFieldTier(wave)
-    if (wave > 1) this.events.onNotice?.(tier > previousTier ? `ARMI ${FIELD_TIERS[tier].name} DISPONIBILI` : 'POSTAZIONI AGGIORNATE', 'Le armi in vendita sulla mappa sono cambiate: controlla le postazioni.', 0x8f6bff)
+    if (wave > 1 && (tier > previousTier || !this.waveEvent)) this.events.onNotice?.(tier > previousTier ? `ARMI ${FIELD_TIERS[tier].name} DISPONIBILI` : 'POSTAZIONI AGGIORNATE', 'Le armi in vendita sulla mappa sono cambiate: controlla le postazioni.', 0x8f6bff)
     this.onCoopWave()
-    this.events.onWave(wave)
+    this.events.onWave(wave, this.waveEventInfo())
   }
 
   private showRemoteShot(from: Vec3, to: Vec3): void {
@@ -2667,8 +2742,8 @@ export class Game {
       enemy.model.group.rotation.y += yawDelta * blend
       enemy.hitFlash = Math.max(0, enemy.hitFlash - delta)
       enemy.attackAnim = Math.max(0, enemy.attackAnim - delta * 3)
-      const eliteGlow = enemy.elite ? 0.55 + Math.sin(this.elapsed * 5 + enemy.phase) * 0.25 : 0
-      enemy.model.body.material.emissive.setHex(enemy.hitFlash > 0 ? 0x882233 : enemy.elite ? 0x7a5200 : 0x000000)
+      const eliteGlow = enemy.golden ? 1.3 + Math.sin(this.elapsed * 8) * 0.4 : enemy.elite ? 0.55 + Math.sin(this.elapsed * 5 + enemy.phase) * 0.25 : 0
+      enemy.model.body.material.emissive.setHex(enemy.hitFlash > 0 ? 0x882233 : enemy.golden ? 0xb88a00 : enemy.elite ? 0x7a5200 : 0x000000)
       enemy.model.body.material.emissiveIntensity = enemy.hitFlash > 0 ? 1.8 : eliteGlow
       const speed = before.distanceTo(enemy.model.group.position) / Math.max(delta, 0.001)
       const walk = Math.sin(this.elapsed * 7 + enemy.phase) * Math.min(1, speed / 2) * 0.6
@@ -2740,6 +2815,7 @@ export class Game {
       })(),
       weaponSlots: this.weapons.hudSlots,
       stance: this.controller.sliding ? 'slide' : this.controller.crouched ? 'crouch' : 'stand',
+      waveEvent: this.hudWaveEvent(),
       performance: { fps: this.fps, drawCalls: this.renderer.info.render.calls },
     })
   }
@@ -2760,6 +2836,7 @@ export class Game {
     if (this.coop) this.updateCoop(delta)
     if (!this.isRunActive()) return
     if (!this.isRunActive()) return
+    this.updateWaveEvent(delta)
     this.updateDoors(delta)
     this.updateStations(delta)
     this.updateEquipment(delta)
@@ -2902,7 +2979,7 @@ export class Game {
   }
 
   private readonly onPointerLockChange = (): void => {
-    if (this.state === 'playing' && document.pointerLockElement !== this.renderer.domElement) this.pause()
+    if (!this.touchMode && this.state === 'playing' && document.pointerLockElement !== this.renderer.domElement) this.pause()
   }
 
   private readonly onContextMenu = (event: MouseEvent): void => event.preventDefault()
@@ -2912,6 +2989,217 @@ export class Game {
     this.aiming = false
     this.keys.clear()
     if (this.state === 'playing') this.pause()
+  }
+
+  // --- Controlli touch ---------------------------------------------------------------------
+
+  setTouchMode(enabled: boolean): void {
+    this.touchMode = enabled
+    if (!enabled) this.setTouchMove(0, 0)
+  }
+
+  /** Levetta virtuale: x verso destra, y in avanti, entrambe in −1…1. */
+  setTouchMove(x: number, y: number): void {
+    this.touchMoveX = x
+    this.touchMoveY = y
+  }
+
+  /** Trascinamento del pollice: spostamento in pixel come quello del mouse. */
+  touchLook(dx: number, dy: number): void {
+    if (this.state !== 'playing') return
+    const sensitivity = this.mouseSensitivity * TOUCH_LOOK_SCALE * (this.aiming ? getAimSensitivityScale(this.camera.fov, 75, this.adsSensitivity) : 1)
+    this.yaw -= dx * sensitivity
+    this.pitch = THREE.MathUtils.clamp(this.pitch - dy * sensitivity, -1.45, 1.45)
+    this.weapons.animator.addLook(dx, dy)
+  }
+
+  touchAction(action: TouchAction, down: boolean): void {
+    if (action === 'pause') {
+      if (down) this.pause()
+      return
+    }
+    if (this.state !== 'playing') {
+      if (!down && action === 'fire') {
+        this.firing = false
+        this.weapons.setTrigger(false)
+      }
+      return
+    }
+    this.audio.resume()
+    if (action === 'fire') {
+      this.firing = down
+      if (down && this.weapons.slot === 'melee') this.performMelee(false)
+      else this.weapons.setTrigger(down)
+      return
+    }
+    if (action === 'aim') {
+      // Sul telefono la mira si attiva e disattiva con un tocco.
+      if (down) this.aiming = !this.aiming
+      return
+    }
+    if (action === 'swap') {
+      if (down) this.switchSlot(this.weapons.nextSlot(1))
+      return
+    }
+    const code = TOUCH_ACTION_KEYS[action]
+    if (!code) return
+    if (action === 'crouch') {
+      if (!down) return
+      if (this.keys.has(code)) this.keys.delete(code)
+      else this.onKeyDown(new KeyboardEvent('keydown', { code }))
+      return
+    }
+    if (down) this.onKeyDown(new KeyboardEvent('keydown', { code }))
+    else this.keys.delete(code)
+  }
+
+  // --- Eventi casuali delle ondate -------------------------------------------------------
+
+  private startWaveEvent(id: WaveEventId | null): void {
+    this.endWaveEvent()
+    if (!id) return
+    this.waveEvent = id
+    this.waveMods = getWaveEventModifiers(id)
+    this.usedWaveEvents.push(id)
+    this.lastEventWave = this.wave
+    if (id === 'bounty') this.bounty = { kills: 0, target: getBountyTarget(this.wave), time: BOUNTY_TIME }
+    if (this.coopRole === 'client') return
+    if (id === 'golden-zombie') this.goldenPending = GOLDEN_SPAWN_DELAY
+    if (id === 'supply-drop') this.dropSupplies()
+  }
+
+  private endWaveEvent(): void {
+    this.waveEvent = null
+    this.waveMods = getWaveEventModifiers(null)
+    this.bounty = null
+    this.goldenPending = 0
+  }
+
+  private waveEventInfo(): { name: string; description: string; icon: string; color: number } | null {
+    if (!this.waveEvent) return null
+    const { name, description, icon, color } = WAVE_EVENTS[this.waveEvent]
+    return { name, description, icon, color }
+  }
+
+  private hudWaveEvent(): HudData['waveEvent'] {
+    if (!this.waveEvent) return undefined
+    const { name, icon, color } = WAVE_EVENTS[this.waveEvent]
+    let detail = ''
+    if (this.bounty) detail = `${this.bounty.kills}/${this.bounty.target} · ${Math.ceil(this.bounty.time)}s`
+    else if (this.waveEvent === 'golden-zombie') {
+      const golden = this.enemies.find((enemy) => enemy.golden)
+      detail = golden ? (this.coopRole === 'client' ? 'IN GIRO' : `SCAPPA TRA ${Math.ceil(golden.goldenLife)}s`) : this.goldenPending > 0 ? 'IN ARRIVO' : ''
+    }
+    return { name, icon, color, detail }
+  }
+
+  private updateWaveEvent(delta: number): void {
+    this.chainCooldown = Math.max(0, this.chainCooldown - delta)
+    this.updateEventLighting(delta)
+    if (this.bounty) {
+      this.bounty.time -= delta
+      if (this.bounty.time <= 0) {
+        this.bounty = null
+        this.events.onNotice?.('TAGLIA SCADUTA', 'Tempo finito: nessuna ricompensa questa volta.', WAVE_EVENTS.bounty.color)
+      }
+    }
+    if (this.coopRole === 'client') return
+    for (let index = this.enemies.length - 1; index >= 0; index -= 1) {
+      const enemy = this.enemies[index]!
+      if (!enemy.golden || enemy.health <= 0) continue
+      enemy.goldenLife -= delta
+      if (enemy.goldenLife > 0) continue
+      // Scappa: sparisce senza ricompensa.
+      this.effects.pulse(enemy.model.group.position, WAVE_EVENTS['golden-zombie'].color, 2)
+      this.enemies.splice(index, 1)
+      this.releaseEnemyModel(enemy.kind, enemy.model)
+      this.events.onNotice?.('LO ZOMBIE DORATO È SCAPPATO', 'Sarà per la prossima volta.', WAVE_EVENTS['golden-zombie'].color)
+    }
+  }
+
+  private advanceBounty(): void {
+    if (!this.bounty) return
+    this.bounty.kills += 1
+    if (this.bounty.kills < this.bounty.target) return
+    this.bounty = null
+    this.shards += BOUNTY_CREDITS
+    this.weapons.refill()
+    this.audio.play('powerUp')
+    this.events.onNotice?.('TAGLIA RISCOSSA', `+${BOUNTY_CREDITS} crediti e munizioni piene.`, WAVE_EVENTS.bounty.color)
+  }
+
+  /** Tre bonus sparsi attorno al giocatore, lontani abbastanza da doverli cercare. */
+  private dropSupplies(): void {
+    const ids = (Object.keys(POWER_UPS) as PowerUpId[]).sort(() => Math.random() - 0.5).slice(0, SUPPLY_DROP_COUNT)
+    const limit = this.map.arenaLimit - 2
+    ids.forEach((id, index) => {
+      const angle = (index / ids.length) * Math.PI * 2 + Math.random() * 1.2
+      const distance = 6 + Math.random() * Math.min(12, this.map.arenaLimit * 0.4)
+      const point = new THREE.Vector3(
+        THREE.MathUtils.clamp(this.player.x + Math.cos(angle) * distance, -limit, limit),
+        0,
+        THREE.MathUtils.clamp(this.player.z + Math.sin(angle) * distance, -limit, limit),
+      )
+      resolveBodyCollisions(point, 0.4, 1.8, this.obstacles)
+      this.spawnPowerPickup(point, id)
+    })
+  }
+
+  private dropGoldenLoot(position: THREE.Vector3, active: Set<PowerUpId>): void {
+    for (let drop = 0; drop < GOLDEN_POWER_UPS; drop += 1) {
+      const id = rollPowerUp('brute', Math.random, active, this.stats.luck)
+      if (!id) return
+      active.add(id)
+      const offset = new THREE.Vector3((Math.random() - 0.5) * 2.5, 0, (Math.random() - 0.5) * 2.5)
+      this.spawnPowerPickup(position.clone().add(offset), id)
+    }
+  }
+
+  /** Reazione a catena: piccola esplosione che ferisce solo gli zombie vicini. */
+  private chainBlast(source: Enemy, position: THREE.Vector3): void {
+    if (this.chainCooldown > 0 || source.kind === 'bloater') return
+    this.chainCooldown = CHAIN_BLAST_COOLDOWN
+    this.effects.explosion(position.clone().setY(position.y + 0.8), CHAIN_BLAST_RADIUS, WAVE_EVENTS['chain-reaction'].color, position.y)
+    this.audio.playAt('explosion', position, this.player, this.yaw)
+    const damage = getChainBlastDamage(this.wave)
+    for (const other of this.enemies) {
+      if (other === source || other.health <= 0) continue
+      if (other.body.position.distanceTo(position) > CHAIN_BLAST_RADIUS) continue
+      other.health -= damage
+      other.hitFlash = 0.12
+      other.lastHitBy = source.lastHitBy
+    }
+  }
+
+  /** Raccoglie le luci della mappa corrente con la loro intensità di partenza. */
+  private collectMapLights(): void {
+    if (this.mapLightsGroup === this.mapContent.group) return
+    this.mapLightsGroup = this.mapContent.group
+    this.mapLights = []
+    this.mapContent.group.traverse((object) => {
+      if (object instanceof THREE.Light) this.mapLights.push({ light: object, base: object.intensity })
+    })
+    this.baseFogDensity = (this.map.theme ?? DEFAULT_THEME).fogDensity
+    this.lightScale = 1
+    this.fogScale = 1
+  }
+
+  /** Blackout: luci e nebbia cambiano gradualmente; solo intensità e densità, mai il numero di luci. */
+  private updateEventLighting(delta: number): void {
+    const light = this.waveMods.lightScale
+    const fog = this.waveMods.fogScale
+    if (Math.abs(this.lightScale - light) < 0.002 && Math.abs(this.fogScale - fog) < 0.002) return
+    const blend = 1 - Math.exp(-delta * 1.6)
+    const nextLight = Math.abs(this.lightScale - light) < 0.002 ? light : this.lightScale + (light - this.lightScale) * blend
+    const nextFog = Math.abs(this.fogScale - fog) < 0.002 ? fog : this.fogScale + (fog - this.fogScale) * blend
+    this.applyEventLighting(nextLight, nextFog)
+  }
+
+  private applyEventLighting(lightScale: number, fogScale: number): void {
+    this.lightScale = lightScale
+    this.fogScale = fogScale
+    for (const entry of this.mapLights) entry.light.intensity = entry.base * lightScale
+    if (this.scene.fog instanceof THREE.FogExp2 && this.baseFogDensity > 0) this.scene.fog.density = this.baseFogDensity * fogScale
   }
 
   private bindEvents(): void {

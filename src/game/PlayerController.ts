@@ -118,7 +118,8 @@ export class PlayerController {
       0,
       -input.right * Math.sin(yaw) - input.forward * Math.cos(yaw),
     )
-    if (wish.lengthSq() > 0) wish.normalize()
+    // Tastiera: diagonali normalizzate. Levetta touch: la spinta parziale cammina più piano.
+    if (wish.lengthSq() > 1) wish.normalize()
     this.moving = wish.lengthSq() > 0
 
     if (this.sliding) {
