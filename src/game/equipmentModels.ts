@@ -189,7 +189,13 @@ function createLabelTexture(title: string, subtitle: string, color: string): THR
     context.lineWidth = 6
     context.strokeRect(8, 8, 496, 240)
     context.fillStyle = '#e8f6f5'
-    context.font = 'bold 60px sans-serif'
+    // Il titolo si rimpicciolisce finché non entra nella cornice (es. "CASSA MISTERIOSA").
+    let size = 60
+    context.font = `bold ${size}px sans-serif`
+    while (size > 28 && context.measureText(title).width > 460) {
+      size -= 2
+      context.font = `bold ${size}px sans-serif`
+    }
     context.textAlign = 'center'
     context.fillText(title, 256, 110)
     context.fillStyle = color
@@ -201,11 +207,11 @@ function createLabelTexture(title: string, subtitle: string, color: string): THR
   return texture
 }
 
-export const STATION_COLORS = { weapon: 0xffb657, ammo: 0x58f5e5, medkit: 0x72ff8b } as const
+export const STATION_COLORS = { weapon: 0xffb657, ammo: 0x58f5e5, medkit: 0x72ff8b, box: 0xb66bff } as const
 
 /** Terminale d'acquisto con ologramma rotante e cartellino del prezzo. */
 /** Aggiorna titolo e prezzo sullo schermo della postazione (le armi cambiano a ogni ondata). */
-export function setStationLabel(model: StationModel, kind: 'weapon' | 'ammo' | 'medkit', title: string, subtitle: string): void {
+export function setStationLabel(model: StationModel, kind: keyof typeof STATION_COLORS, title: string, subtitle: string): void {
   const css = `#${STATION_COLORS[kind].toString(16).padStart(6, '0')}`
   const previous = model.screen.material.map
   model.screen.material.map = createLabelTexture(title, subtitle, css)
@@ -213,7 +219,7 @@ export function setStationLabel(model: StationModel, kind: 'weapon' | 'ammo' | '
   previous?.dispose()
 }
 
-export function createStationModel(kind: 'weapon' | 'ammo' | 'medkit', title: string, cost: number): StationModel {
+export function createStationModel(kind: keyof typeof STATION_COLORS, title: string, cost: number): StationModel {
   const color = STATION_COLORS[kind]
   const css = `#${color.toString(16).padStart(6, '0')}`
   const group = new THREE.Group()
@@ -250,6 +256,15 @@ export function createStationModel(kind: 'weapon' | 'ammo' | 'medkit', title: st
     const magazine = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.2, 0.12), holoMaterial)
     magazine.position.set(0, -0.15, -0.15)
     hologram.add(magazine)
+  } else if (kind === 'box') {
+    // Cassa misteriosa: un cubo con un punto interrogativo che ruota.
+    hologram.add(new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.42, 0.42), holoMaterial))
+    const mark = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.03, 6, 16, Math.PI * 1.4), holoMaterial)
+    mark.position.y = 0.38
+    hologram.add(mark)
+    const dot = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 6), holoMaterial)
+    dot.position.y = 0.22
+    hologram.add(dot)
   } else if (kind === 'ammo') {
     for (const x of [-0.12, 0, 0.12]) {
       const bullet = new THREE.Mesh(new THREE.CapsuleGeometry(0.035, 0.22, 4, 8), holoMaterial)

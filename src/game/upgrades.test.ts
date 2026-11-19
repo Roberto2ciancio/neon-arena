@@ -74,3 +74,28 @@ describe('curva di livello', () => {
     expect(getNextLevelXp(second)).toBeGreaterThan(second * 1.4)
   })
 })
+
+describe('potenziamenti aggiuntivi', () => {
+  it('sono nel catalogo con effetti e limiti', () => {
+    let stats = createBaseStats()
+    for (const id of ['quick-reload', 'lifesteal', 'adrenaline', 'demolition', 'executioner', 'luck', 'second-wind', 'energy-shield']) {
+      expect(UPGRADE_BY_ID.get(id)?.isAvailable(stats), id).toBe(true)
+    }
+    stats = applyUpgrade(stats, 'quick-reload')
+    expect(stats.reloadTime).toBeCloseTo(0.88)
+    stats = applyUpgrade(applyUpgrade(stats, 'quick-reload'), 'quick-reload')
+    expect(UPGRADE_BY_ID.get('quick-reload')?.isAvailable(stats)).toBe(false)
+    stats = applyUpgrade(stats, 'second-wind')
+    expect(UPGRADE_BY_ID.get('second-wind')?.isAvailable(stats)).toBe(false)
+    stats = applyUpgrade(applyUpgrade(stats, 'energy-shield'), 'energy-shield')
+    expect(stats.energyShield).toBe(50)
+    expect(UPGRADE_BY_ID.get('energy-shield')?.isAvailable(stats)).toBe(false)
+  })
+
+  it('Fortuna aumenta la probabilità dei bonus', async () => {
+    const { rollPowerUp, POWER_UP_DROP_CHANCE } = await import('./powerups')
+    const justAbove = () => POWER_UP_DROP_CHANCE * 1.2
+    expect(rollPowerUp('walker', justAbove)).toBeNull()
+    expect(rollPowerUp('walker', justAbove, new Set(), 1.5)).not.toBeNull()
+  })
+})

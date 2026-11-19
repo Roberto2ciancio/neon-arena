@@ -33,9 +33,9 @@ export const INSTA_KILL_BOSS_MULTIPLIER = 4
  * Estrae il bonus lasciato da uno zombie ucciso, o null. Il Bruto ne lascia sempre uno;
  * `active` esclude i bonus già a terra o in corso per evitare doppioni.
  */
-export function rollPowerUp(kind: EnemyKind, random: () => number, active: ReadonlySet<PowerUpId> = new Set()): PowerUpId | null {
+export function rollPowerUp(kind: EnemyKind, random: () => number, active: ReadonlySet<PowerUpId> = new Set(), luck = 1): PowerUpId | null {
   const guaranteed = kind === 'brute'
-  if (!guaranteed && random() >= POWER_UP_DROP_CHANCE) return null
+  if (!guaranteed && random() >= POWER_UP_DROP_CHANCE * luck) return null
   const pool = POWER_UP_ORDER.filter((id) => !active.has(id))
   if (pool.length === 0) return null
   const total = pool.reduce((sum, id) => sum + POWER_UPS[id].weight, 0)

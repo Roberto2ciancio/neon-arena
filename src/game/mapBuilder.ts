@@ -1,3 +1,5 @@
+import { DEFAULT_THEME } from './maps'
+import type { MapTheme } from './maps'
 import * as THREE from 'three'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
@@ -19,7 +21,41 @@ export interface BuiltMap {
   obstacles: CollisionObstacle[]
   doors: BuiltDoor[]
   ambient: THREE.Points
+  /** Pioggia, polvere o spore che cadono o fluttuano (null senza meteo). */
+  weather: THREE.Points | null
+  theme: MapTheme
 }
+
+/**
+ * Meteo: una nuvola di particelle in un unico draw call. Il gioco la sposta in blocco
+ * (verso il basso per la pioggia, lentamente per polvere e spore) e la riporta su a ciclo.
+ */
+function createWeather(theme: MapTheme, extent: number): THREE.Points | null {
+  if (theme.weather === 'none') return null
+  const falling = theme.weather === 'rain' || theme.weather === 'drizzle'
+  const count = theme.weather === 'rain' ? 2200 : theme.weather === 'drizzle' ? 1200 : 700
+  const positions = new Float32Array(count * 3)
+  for (let index = 0; index < count; index += 1) {
+    positions[index * 3] = (Math.random() - 0.5) * extent * 2
+    positions[index * 3 + 1] = Math.random() * WEATHER_HEIGHT
+    positions[index * 3 + 2] = (Math.random() - 0.5) * extent * 2
+  }
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+  const material = new THREE.PointsMaterial({
+    color: theme.particles,
+    size: falling ? 0.06 : theme.weather === 'spores' ? 0.12 : 0.08,
+    transparent: true,
+    opacity: falling ? 0.55 : 0.45,
+    depthWrite: false,
+  })
+  const points = new THREE.Points(geometry, material)
+  points.userData.weather = theme.weather
+  points.frustumCulled = false
+  return points
+}
+
+export const WEATHER_HEIGHT = 24
 
 const CONTAINER_COLORS = [0x8c2f2a, 0x2d5f7a, 0x3f6e3a, 0xa3742a, 0x5a3d7a]
 
@@ -97,9 +133,10 @@ export function buildMap(map: MapDefinition): BuiltMap {
   const doors: BuiltDoor[] = []
   const extent = map.arenaLimit + 6
 
-  group.add(createSky())
-  group.add(new THREE.HemisphereLight(0x9fb3d9, 0x161410, 2.1))
-  const keyLight = new THREE.DirectionalLight(0xffe2c0, 3.2)
+  const theme = map.theme ?? DEFAULT_THEME
+  group.add(createSky({ top: theme.skyTop, horizon: theme.skyHorizon, glow: theme.skyGlow }))
+  group.add(new THREE.HemisphereLight(theme.hemisphereSky, theme.hemisphereGround, 2.1))
+  const keyLight = new THREE.DirectionalLight(theme.keyLight, theme.keyIntensity)
   keyLight.position.set(-extent * 0.45, extent * 0.9, extent * 0.55)
   keyLight.castShadow = true
   keyLight.shadow.mapSize.set(1024, 1024)
@@ -112,12 +149,12 @@ export function buildMap(map: MapDefinition): BuiltMap {
   keyLight.shadow.bias = -0.0005
   keyLight.shadow.normalBias = 0.02
   group.add(keyLight)
-  const rimLight = new THREE.DirectionalLight(0x6c7dff, 0.9)
+  const rimLight = new THREE.DirectionalLight(theme.rimLight, theme.rimIntensity)
   rimLight.position.set(extent * 0.6, extent * 0.4, -extent)
   group.add(rimLight)
   group.add(createSkyline(map))
 
-  const groundMaps = createIndustrialMaterialMaps('#252e3b', '#374554', map.arenaLimit / 1.6)
+  const groundMaps = createIndustrialMaterialMaps(theme.ground[0], theme.ground[1], map.arenaLimit / 1.6)
   const coverMaps = createIndustrialMaterialMaps('#68737b', '#87949c', 2)
   const wallMaps = createIndustrialMaterialMaps('#48535f', '#65717c', 2)
   const groundSize = map.arenaLimit * 2 + 9
@@ -326,8 +363,10 @@ export function buildMap(map: MapDefinition): BuiltMap {
   }
   const dustGeometry = new THREE.BufferGeometry()
   dustGeometry.setAttribute('position', new THREE.BufferAttribute(dustPositions, 3))
-  const ambient = new THREE.Points(dustGeometry, new THREE.PointsMaterial({ color: 0x8fb5bd, size: 0.05, transparent: true, opacity: 0.3, depthWrite: false }))
+  const ambient = new THREE.Points(dustGeometry, new THREE.PointsMaterial({ color: theme.particles, size: 0.05, transparent: true, opacity: 0.3, depthWrite: false }))
   group.add(ambient)
+  const weather = createWeather(theme, extent)
+  if (weather) group.add(weather)
 
-  return { group, obstacles, doors, ambient }
+  return { group, obstacles, doors, ambient, weather, theme }
 }

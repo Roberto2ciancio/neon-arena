@@ -18,6 +18,22 @@ export interface PlayerStats {
   incendiary: number
   headshotExplosion: number
   chainLightning: number
+  /** Moltiplicatore del tempo di ricarica (1 = normale). */
+  reloadTime: number
+  /** Integrità recuperata a ogni uccisione. */
+  lifesteal: number
+  /** Secondi di scatto bonus dopo un'uccisione (0 = assente). */
+  adrenaline: number
+  /** Moltiplicatore della ricarica degli equipaggiamenti e del danno esplosivo. */
+  demolition: number
+  /** Danno bonus contro nemici sotto il 30% della vita. */
+  executioner: number
+  /** Moltiplicatore della probabilità di bonus e kit medici. */
+  luck: number
+  /** Sopravvivere una volta a un colpo letale. */
+  secondWind: number
+  /** Danno assorbito dallo scudo energetico prima di ricaricarsi. */
+  energyShield: number
 }
 
 export interface MetaBonuses {

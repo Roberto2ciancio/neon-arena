@@ -1,3 +1,7 @@
+import { DEFAULT_THEME } from './maps'
+import { animateWeather } from './weather'
+import { RARITIES, rollMysteryBox } from './mysteryBox'
+import type { FieldTier } from './fieldWeapons'
 import { ATTACHMENTS } from './attachments'
 import { UPGRADE_DEFINITIONS } from './upgrades'
 import { CREDIT_SYMBOL, getKillCredits, getRunShards, getWeaponKillXp } from './economy'
@@ -284,6 +288,10 @@ export class Game {
   private firePunch = 0
   private punchRoll = 1
   private precisionHitThisShot = false
+  private adrenalineTimer = 0
+  private shield = 0
+  private shieldDelay = 0
+  private secondWindUsed = false
   // --- Co-op -------------------------------------------------------------------------------
   private coop: CoopSession | null = null
   private coopUnsubscribe: (() => void)[] = []
@@ -356,8 +364,9 @@ export class Game {
     this.renderer.domElement.setAttribute('role', 'img')
     this.container.appendChild(this.renderer.domElement)
 
-    this.scene.background = new THREE.Color(0x070810)
-    this.scene.fog = new THREE.FogExp2(0x0b0d1a, 0.0115)
+    const initialTheme = this.map.theme ?? DEFAULT_THEME
+    this.scene.background = new THREE.Color(initialTheme.background)
+    this.scene.fog = new THREE.FogExp2(initialTheme.fog, initialTheme.fogDensity)
     this.camera.rotation.order = 'YXZ'
     this.camera.position.set(0, 5, 16)
     this.weapons.configure(this.loadout)
@@ -434,7 +443,8 @@ export class Game {
       damage: (target, amount, source) => {
         const enemy = this.targetOwners.get(target)
         if (!enemy || enemy.health <= 0) return
-        this.dealDamage(enemy, this.scaleDamage(enemy, amount * (this.stats.damage / 20)))
+        const explosive = source === 'grenade' || source === 'claymore' || source === 'molotov' ? 1 + (1 - this.stats.demolition) * 1.25 : 1
+        this.dealDamage(enemy, this.scaleDamage(enemy, amount * (this.stats.damage / 20) * explosive * this.executionBonus(enemy)))
         enemy.hitFlash = 0.1
         enemy.flinch = Math.min(1, enemy.flinch + (source === 'molotov' ? 0.15 : 0.6))
         if (source === 'molotov') enemy.burnTimer = Math.max(enemy.burnTimer, 0.6)
@@ -503,6 +513,9 @@ export class Game {
       }
     })
     this.map = map
+    const theme = map.theme ?? DEFAULT_THEME
+    this.scene.background = new THREE.Color(theme.background)
+    this.scene.fog = new THREE.FogExp2(theme.fog, theme.fogDensity)
     this.mapContent = buildMap(map)
     this.obstacles = this.mapContent.obstacles
     this.doors = this.mapContent.doors.map((door) => ({ ...door, open: false, progress: 0 }))
@@ -520,7 +533,7 @@ export class Game {
     this.stations = this.map.stations.map((definition) => {
       const title = definition.kind === 'weapon' && definition.weapon
         ? WEAPONS[definition.weapon].name.split(' //')[0]!
-        : definition.kind === 'ammo' ? 'MUNIZIONI' : 'KIT MEDICO'
+        : definition.kind === 'ammo' ? 'MUNIZIONI' : definition.kind === 'box' ? 'CASSA MISTERIOSA' : 'KIT MEDICO'
       const model = createStationModel(definition.kind, title, definition.cost)
       model.group.position.set(definition.x, definition.y, definition.z)
       model.group.rotation.y = Math.atan2(this.map.playerSpawn.x - definition.x, this.map.playerSpawn.z - definition.z)
@@ -532,7 +545,8 @@ export class Game {
   /** Cambia le armi delle postazioni per l'ondata: stesse armi per tutti, grado e prezzo crescenti. */
   private rotateStations(wave: number): void {
     const weaponStations = this.stations.filter((station) => station.definition.kind === 'weapon')
-    const rolled = rollStationWeapons(this.map.id, weaponStations.map((station) => station.definition.id), Math.max(1, wave))
+    const premium = new Set(weaponStations.filter((station) => station.definition.premium).map((station) => station.definition.id))
+    const rolled = rollStationWeapons(this.map.id, weaponStations.map((station) => station.definition.id), Math.max(1, wave), premium)
     const tier = getFieldTier(Math.max(1, wave))
     for (const station of weaponStations) {
       const weaponId = rolled[station.definition.id] as PurchasableWeapon | undefined
@@ -567,6 +581,10 @@ export class Game {
     this.shards = 0
     this.shardsCollected = 0
     this.kills = 0
+    this.adrenalineTimer = 0
+    this.shield = 0
+    this.shieldDelay = 0
+    this.secondWindUsed = false
     this.precisionHits = 0
     this.weaponXp.clear()
     this.chosenUpgrades.clear()
@@ -644,7 +662,7 @@ export class Game {
         const upgrade = UPGRADE_DEFINITIONS.find((candidate) => candidate.id === id)
         return { name: upgrade?.name ?? id, description: upgrade?.description ?? '', icon: upgrade?.icon ?? '•', count }
       }),
-      stats: { damage: Math.round((this.stats.damage / 20 - 1) * 100), fireRate: Math.round((this.stats.fireRate / 8.5 - 1) * 100), crit: Math.round(this.stats.critChance * 100), armor: this.stats.armor, regen: this.stats.regen },
+      stats: { damage: Math.round((this.stats.damage / 20 - 1) * 100), fireRate: Math.round((this.stats.fireRate / 8.5 - 1) * 100), crit: Math.round(this.stats.critChance * 100), armor: this.stats.armor, regen: this.stats.regen, shield: this.stats.energyShield, reload: Math.round((1 - this.stats.reloadTime) * 100) },
       slots: slots.length,
     }
   }
@@ -702,6 +720,8 @@ export class Game {
     if (!this.isRunActive() || !this.currentUpgradeIds.includes(upgradeId)) return
     const previousMaxHealth = this.stats.maxHealth
     this.stats = applyUpgrade(this.stats, upgradeId)
+    this.weapons.reloadMultiplier = this.stats.reloadTime
+    this.shield = this.stats.energyShield
     this.chosenUpgrades.set(upgradeId, (this.chosenUpgrades.get(upgradeId) ?? 0) + 1)
     this.health = Math.min(this.stats.maxHealth, this.health + this.stats.maxHealth - previousMaxHealth)
     this.currentUpgradeIds = []
@@ -979,6 +999,9 @@ export class Game {
     this.doorDeniedTimer = Math.max(0, this.doorDeniedTimer - delta)
     this.health = Math.min(this.stats.maxHealth, this.health + this.stats.regen * delta)
     this.sinceDamage += delta
+    this.adrenalineTimer = Math.max(0, this.adrenalineTimer - delta)
+    this.shieldDelay = Math.max(0, this.shieldDelay - delta)
+    if (this.shieldDelay <= 0 && this.shield < this.stats.energyShield) this.shield = Math.min(this.stats.energyShield, this.shield + 15 * delta)
     this.health += getPassiveRegen(this.health, this.stats.maxHealth, this.sinceDamage, delta)
     const warning = getLowHealthWarning(this.health, this.stats.maxHealth)
     if (warning.intensity > 0) {
@@ -993,7 +1016,7 @@ export class Game {
 
     const input = readMovementInput(this.keys, this.aiming || this.firing || this.weapons.reloading)
     const result = this.controller.update(delta, input, this.yaw, {
-      speed: this.stats.speed * this.weaponDefinition.moveMultiplier,
+      speed: (this.stats.speed * (this.adrenalineTimer > 0 ? 1.25 : 1)) * this.weaponDefinition.moveMultiplier,
       solids: this.obstacles,
       arenaLimit: this.map.arenaLimit,
     })
@@ -1242,7 +1265,7 @@ export class Game {
       enemy.specialCooldown = Math.max(enemy.specialCooldown, 3)
     }
 
-    const damage = this.scaleDamage(enemy, baseDamage * multiplier * (critical ? this.stats.critMultiplier : 1))
+    const damage = this.scaleDamage(enemy, baseDamage * multiplier * (critical ? this.stats.critMultiplier : 1) * this.executionBonus(enemy))
     const precisionZone = hit.zone === 'head' || hit.zone === 'generator' || hit.zone === 'core' || hit.zone === 'spine' || hit.zone === 'throat' || hit.zone === 'back' || hit.zone === 'belly'
     this.dealDamage(enemy, damage, precisionZone)
     enemy.hitFlash = 0.08
@@ -1372,6 +1395,7 @@ export class Game {
     const { definition } = interaction.station
     if (definition.kind === 'medkit') return { label: 'KIT MEDICO // CURA COMPLETA', cost: definition.cost }
     if (definition.kind === 'ammo') return { label: 'RIFORNIMENTO MUNIZIONI', cost: definition.cost }
+    if (definition.kind === 'box') return { label: 'CASSA MISTERIOSA // ARMA A SORPRESA', cost: definition.cost }
     const station = interaction.station
     const weaponId = station.weapon!
     const name = `${WEAPONS[weaponId].shortName} ${FIELD_TIERS[getFieldTier(Math.max(1, this.wave))].name}`
@@ -1408,6 +1432,14 @@ export class Game {
         this.weapons.refill()
         this.cooldowns.lethal = 0
         this.cooldowns.tactical = 0
+      } else if (definition.kind === 'box') {
+        // Arma a caso: le comuni escono spesso, le leggendarie di rado e con un grado MK in più.
+        const owned = (['primary', 'secondary'] as const).map((slot) => this.weapons.currentOf(slot)?.id).filter((id): id is WeaponId => id !== undefined)
+        const { weapon, rarity } = rollMysteryBox(Math.random, owned)
+        const tier = Math.min(3, getFieldTier(Math.max(1, this.wave)) + RARITIES[rarity].tierBonus) as FieldTier
+        const purchasable = weapon as PurchasableWeapon
+        this.weapons.replace(resolveWeapon(WEAPONS[weapon], FIELD_ATTACHMENTS[purchasable], { fieldTier: tier, level: this.loadout.weaponLevels[weapon] }))
+        this.events.onNotice?.(`${RARITIES[rarity].name} // ${WEAPONS[weapon].shortName} ${FIELD_TIERS[tier].name}`, WEAPONS[weapon].description, RARITIES[rarity].color)
       } else if (interaction.station.weapon) {
         const weaponId = interaction.station.weapon as PurchasableWeapon
         // Un'arma nuova sostituisce quella dello stesso slot; una posseduta si ricarica.
@@ -1466,7 +1498,7 @@ export class Game {
       this.equipment.deploy(id as DeployableKind, position, this.yaw, { owned: true, hostile: false })
       this.audio.play('upgrade')
     }
-    this.cooldowns[slot] = definition.cooldown
+    this.cooldowns[slot] = definition.cooldown * this.stats.demolition
     this.emitHud()
   }
 
@@ -1826,6 +1858,11 @@ export class Game {
     }
   }
 
+  /** Esecutore: danno bonus contro i nemici quasi sconfitti. */
+  private executionBonus(enemy: Enemy): number {
+    return this.stats.executioner > 0 && enemy.health < enemy.maxHealth * 0.3 ? 1 + this.stats.executioner : 1
+  }
+
   /** Spinta della visuale per colpo, proporzionale alla potenza dell'arma impugnata. */
   private weaponPunch(): number {
     this.punchRoll = Math.random() < 0.5 ? -1 : 1
@@ -1884,7 +1921,7 @@ export class Game {
     const shards = enemy.kind === 'brute' ? 8 : Math.random() < 0.26 ? 1 : 0
     const killer = enemy.lastHitBy
     const active = new Set<PowerUpId>([...this.activePowerUps.keys(), ...this.powerPickups.map((pickup) => pickup.id)])
-    const dropped = rollPowerUp(enemy.kind, Math.random, active)
+    const dropped = rollPowerUp(enemy.kind, Math.random, active, this.stats.luck)
     if (dropped) this.spawnPowerPickup(position, dropped)
     this.spawnBurst(position.clone().setY(position.y + enemy.model.height * 0.5), color, enemy.kind === 'brute' ? 28 : 12)
     if (this.coopRole === 'host') {
@@ -1906,7 +1943,9 @@ export class Game {
     this.shards += getKillCredits(kind, elite) * this.lootMultiplier
     const weaponId = this.weapons.current?.id
     if (weaponId && this.weapons.slot !== 'melee') this.weaponXp.set(weaponId, (this.weaponXp.get(weaponId) ?? 0) + getWeaponKillXp(kind, elite, WEAPON_XP.zombieKill))
-    if (Math.random() < getMedkitDropChance(kind, this.health / this.stats.maxHealth)) this.spawnMedkit(position)
+    if (Math.random() < getMedkitDropChance(kind, this.health / this.stats.maxHealth) * this.stats.luck) this.spawnMedkit(position)
+    if (this.stats.lifesteal > 0 && this.coopStatus === 'alive') this.health = Math.min(this.stats.maxHealth, this.health + this.stats.lifesteal)
+    if (this.stats.adrenaline > 0) this.adrenalineTimer = this.stats.adrenaline
     for (let drop = 0; drop < shards; drop += 1) {
       const offset = shards > 1 ? new THREE.Vector3((Math.random() - 0.5) * 3, 0, (Math.random() - 0.5) * 3) : new THREE.Vector3()
       this.spawnPickup(position.clone().add(offset), 1)
@@ -2194,6 +2233,21 @@ export class Game {
   private damagePlayer(amount: number): void {
     if (this.state !== 'playing' && !(this.coop && this.state === 'paused')) return
     if (this.invulnerability > 0 || this.activePowerUps.has('barrier') || this.coopStatus !== 'alive') return
+    this.shieldDelay = 5
+    if (this.shield > 0) {
+      const absorbed = Math.min(this.shield, amount)
+      this.shield -= absorbed
+      amount -= absorbed
+      this.effects.pulse(this.player, 0x6ad8ff, 0.8)
+      if (amount <= 0) return
+    }
+    if (this.stats.secondWind > 0 && !this.secondWindUsed && this.health - Math.max(1, amount - this.stats.armor) <= 0) {
+      this.secondWindUsed = true
+      this.health = 1
+      this.invulnerability = 2
+      this.events.onNotice?.('SECONDO RESPIRO', 'Sopravvissuto a un colpo letale: hai 2 secondi per metterti al sicuro.', 0xffd166)
+      return
+    }
     this.health = Math.max(0, this.health - Math.max(1, amount - this.stats.armor))
     this.invulnerability = 0.32
     this.sinceDamage = 0
@@ -2676,6 +2730,7 @@ export class Game {
   private update(delta: number): void {
     this.elapsed += delta
     this.mapContent.ambient.rotation.y += delta * 0.015
+    animateWeather(this.mapContent.weather, delta)
     this.updatePlayer(delta)
     if (!this.isRunActive()) return
     if (this.coopRole === 'client') {
@@ -2876,6 +2931,6 @@ export interface RunSummary {
   melee: string
   equipment: string[]
   upgrades: { name: string; description: string; icon: string; count: number }[]
-  stats: { damage: number; fireRate: number; crit: number; armor: number; regen: number }
+  stats: { damage: number; fireRate: number; crit: number; armor: number; regen: number; shield: number; reload: number }
   slots: number
 }

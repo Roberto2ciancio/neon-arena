@@ -1,10 +1,10 @@
 export type WeaponId =
-  | 'ar-07' | 'ak-74r' | 'br-3'
-  | 'smg-9' | 'vx-45'
-  | 'sg-6' | 'as-12'
-  | 'dmr-3' | 'sr-50'
-  | 'lmg-75'
-  | 'p-12' | 'r-44' | 'ap-18'
+  | 'ar-07' | 'ak-74r' | 'br-3' | 'vk-12'
+  | 'smg-9' | 'vx-45' | 'kr-90'
+  | 'sg-6' | 'as-12' | 'ks-8'
+  | 'dmr-3' | 'sr-50' | 'xr-1'
+  | 'lmg-75' | 'mg-3x'
+  | 'p-12' | 'r-44' | 'ap-18' | 'hc-50'
 
 export type WeaponSlot = 'primary' | 'secondary'
 export type WeaponCategory = 'assault' | 'smg' | 'shotgun' | 'sniper' | 'lmg' | 'pistol' | 'machine-pistol'
@@ -85,6 +85,13 @@ export const WEAPONS: Record<WeaponId, WeaponDefinition> = {
     recoil: { vertical: 0.0052, horizontal: 0.0016, growth: 0.04, recovery: 8 },
     headshotMultiplier: 2.1, pellets: 1, moveMultiplier: 1, adsFov: 50, attachmentSlots: RIFLE_SLOTS, unlockLevel: 10,
   }),
+  'vk-12': define('vk-12', {
+    name: 'VK-12 // BATTAGLIA', shortName: 'VK-12', description: 'Fucile da battaglia semiautomatico: colpi pesanti a lunga distanza.',
+    slot: 'primary', category: 'assault', fireMode: 'semi', damage: 40, fireRate: 4.5, magazineSize: 20,
+    reserveAmmo: 120, reloadDuration: 1.7, range: 85, hipSpread: 0.012, adsSpread: 0.0012,
+    recoil: { vertical: 0.0095, horizontal: 0.003, growth: 0, recovery: 6 },
+    headshotMultiplier: 2.2, pellets: 1, moveMultiplier: 0.95, adsFov: 48, attachmentSlots: RIFLE_SLOTS, unlockLevel: 18,
+  }),
   'smg-9': define('smg-9', {
     name: 'SMG-9 // COMPATTA', shortName: 'SMG-9', description: 'Alta cadenza e mobilità, cala sulla distanza.',
     slot: 'primary', category: 'smg', fireMode: 'auto', damage: 14, fireRate: 12, magazineSize: 36,
@@ -98,6 +105,13 @@ export const WEAPONS: Record<WeaponId, WeaponDefinition> = {
     reserveAmmo: 240, reloadDuration: 1.25, range: 32, hipSpread: 0.016, adsSpread: 0.006,
     recoil: { vertical: 0.0032, horizontal: 0.0034, growth: 0.035, recovery: 10 },
     headshotMultiplier: 1.7, pellets: 1, moveMultiplier: 1.15, adsFov: 60, attachmentSlots: RIFLE_SLOTS, unlockLevel: 8,
+  }),
+  'kr-90': define('kr-90', {
+    name: 'KR-90 // CARICATORE ALTO', shortName: 'KR-90', description: 'Cinquanta colpi in un caricatore a scorrimento: tiene il fuoco a lungo.',
+    slot: 'primary', category: 'smg', fireMode: 'auto', damage: 12, fireRate: 14, magazineSize: 50,
+    reserveAmmo: 250, reloadDuration: 1.9, range: 36, hipSpread: 0.013, adsSpread: 0.0045,
+    recoil: { vertical: 0.0033, horizontal: 0.0026, growth: 0.035, recovery: 9 },
+    headshotMultiplier: 1.7, pellets: 1, moveMultiplier: 1.1, adsFov: 58, attachmentSlots: RIFLE_SLOTS, unlockLevel: 22,
   }),
   'sg-6': define('sg-6', {
     name: 'SG-6 // POMPA', shortName: 'SG-6', description: 'Devastante da vicino, ricarica lenta.',
@@ -113,6 +127,13 @@ export const WEAPONS: Record<WeaponId, WeaponDefinition> = {
     recoil: { vertical: 0.014, horizontal: 0.006, growth: 0.06, recovery: 5 },
     headshotMultiplier: 1.4, pellets: 7, moveMultiplier: 0.93, adsFov: 62, attachmentSlots: SHOTGUN_SLOTS, unlockLevel: 14,
   }),
+  'ks-8': define('ks-8', {
+    name: 'KS-8 // GROSSO CALIBRO', shortName: 'KS-8', description: 'Pompa pesante a pallettoni grossi: abbatte anche i corazzati da vicino.',
+    slot: 'primary', category: 'shotgun', fireMode: 'semi', damage: 18, fireRate: 0.9, magazineSize: 5,
+    reserveAmmo: 35, reloadDuration: 2.2, range: 26, hipSpread: 0.034, adsSpread: 0.018,
+    recoil: { vertical: 0.024, horizontal: 0.005, growth: 0, recovery: 4 },
+    headshotMultiplier: 1.5, pellets: 6, moveMultiplier: 0.92, adsFov: 62, attachmentSlots: SHOTGUN_SLOTS, unlockLevel: 26,
+  }),
   'dmr-3': define('dmr-3', {
     name: 'DMR-3 // PRECISIONE', shortName: 'DMR-3', description: 'Semiautomatico con bonus elevato sui punti deboli.',
     slot: 'primary', category: 'sniper', fireMode: 'semi', damage: 44, fireRate: 2.8, magazineSize: 12,
@@ -127,12 +148,26 @@ export const WEAPONS: Record<WeaponId, WeaponDefinition> = {
     recoil: { vertical: 0.035, horizontal: 0.006, growth: 0, recovery: 4 },
     headshotMultiplier: 2.6, pellets: 1, moveMultiplier: 0.88, adsFov: 20, attachmentSlots: ['muzzle', 'barrel', 'magazine'], unlockLevel: 12,
   }),
+  'xr-1': define('xr-1', {
+    name: 'XR-1 // PLASMA', shortName: 'XR-1', description: 'Fucile di precisione al plasma semiautomatico: potenza enorme, colpi limitati.',
+    slot: 'primary', category: 'sniper', fireMode: 'semi', damage: 85, fireRate: 1.6, magazineSize: 8,
+    reserveAmmo: 40, reloadDuration: 2.3, range: 160, hipSpread: 0.02, adsSpread: 0.0003,
+    recoil: { vertical: 0.026, horizontal: 0.005, growth: 0, recovery: 5 },
+    headshotMultiplier: 2.4, pellets: 1, moveMultiplier: 0.9, adsFov: 28, attachmentSlots: RIFLE_SLOTS, unlockLevel: 40,
+  }),
   'lmg-75': define('lmg-75', {
     name: 'LMG-75 // SUPPORTO', shortName: 'LMG-75', description: 'Caricatore enorme, ricarica lenta e rinculo pesante.',
     slot: 'primary', category: 'lmg', fireMode: 'auto', damage: 17, fireRate: 10, magazineSize: 75,
     reserveAmmo: 225, reloadDuration: 3.1, range: 70, hipSpread: 0.018, adsSpread: 0.005,
     recoil: { vertical: 0.006, horizontal: 0.0035, growth: 0.03, recovery: 5 },
     headshotMultiplier: 1.8, pellets: 1, moveMultiplier: 0.82, adsFov: 54, attachmentSlots: RIFLE_SLOTS, unlockLevel: 4,
+  }),
+  'mg-3x': define('mg-3x', {
+    name: 'MG-3X // TRITACARNE', shortName: 'MG-3X', description: 'Cento colpi a cadenza altissima: lenta da muovere e da ricaricare.',
+    slot: 'primary', category: 'lmg', fireMode: 'auto', damage: 15, fireRate: 14, magazineSize: 100,
+    reserveAmmo: 300, reloadDuration: 3.6, range: 70, hipSpread: 0.02, adsSpread: 0.006,
+    recoil: { vertical: 0.0055, horizontal: 0.004, growth: 0.025, recovery: 5 },
+    headshotMultiplier: 1.7, pellets: 1, moveMultiplier: 0.78, adsFov: 54, attachmentSlots: RIFLE_SLOTS, unlockLevel: 30,
   }),
   'p-12': define('p-12', {
     name: 'P-12 // SEMIAUTOMATICA', shortName: 'P-12', description: 'Pistola precisa e veloce da estrarre.',
@@ -147,6 +182,13 @@ export const WEAPONS: Record<WeaponId, WeaponDefinition> = {
     reserveAmmo: 42, reloadDuration: 1.9, range: 55, hipSpread: 0.007, adsSpread: 0.0012,
     recoil: { vertical: 0.022, horizontal: 0.005, growth: 0, recovery: 6 },
     headshotMultiplier: 2.3, pellets: 1, moveMultiplier: 1.05, adsFov: 58, attachmentSlots: ['optic', 'barrel'], unlockLevel: 5,
+  }),
+  'hc-50': define('hc-50', {
+    name: 'HC-50 // CANNONE A MANO', shortName: 'HC-50', description: 'Pistola di grosso calibro: sette colpi devastanti.',
+    slot: 'secondary', category: 'pistol', fireMode: 'semi', damage: 70, fireRate: 1.4, magazineSize: 7,
+    reserveAmmo: 35, reloadDuration: 1.8, range: 55, hipSpread: 0.008, adsSpread: 0.0012,
+    recoil: { vertical: 0.026, horizontal: 0.006, growth: 0, recovery: 5 },
+    headshotMultiplier: 2.2, pellets: 1, moveMultiplier: 1.02, adsFov: 56, attachmentSlots: PISTOL_SLOTS, unlockLevel: 34,
   }),
   'ap-18': define('ap-18', {
     name: 'AP-18 // RAFFICA CONTINUA', shortName: 'AP-18', description: 'Pistola automatica: una mitraglietta in tasca.',

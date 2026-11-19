@@ -275,7 +275,7 @@ function renderPauseLoadout(): void {
     ? summary.upgrades.map((upgrade) => row(`${upgrade.icon} ${upgrade.name}${upgrade.count > 1 ? ` ×${upgrade.count}` : ''}`, upgrade.description))
     : [row('Nessun potenziamento', 'Al level up scegli un potenziamento con Z / X / V.')]
   const { stats } = summary
-  const totals = row(`Danno ${stats.damage >= 0 ? '+' : ''}${stats.damage}% · Cadenza +${stats.fireRate}% · Critico ${stats.crit}%`, `Armatura ${stats.armor} · Rigenerazione ${stats.regen.toFixed(1).replace('.', ',')}/s`)
+  const totals = row(`Danno ${stats.damage >= 0 ? '+' : ''}${stats.damage}% · Cadenza +${stats.fireRate}% · Critico ${stats.crit}%`, `Armatura ${stats.armor} · Rigenerazione ${stats.regen.toFixed(1).replace('.', ',')}/s · Scudo ${stats.shield} · Ricarica −${stats.reload}%`)
   container.replaceChildren(section('LOADOUT', weapons), section('POTENZIAMENTI DELLA RUN', [...upgrades, totals]))
 }
 
@@ -671,7 +671,7 @@ function completeTctMatch(result: TctResult): void {
   byId('result-shards').parentElement?.classList.add('hidden')
   byId('gameover-title').textContent = result.outcome === 'draw' ? 'PAREGGIO' : result.outcome === 'win' ? 'VITTORIA' : 'SCONFITTA'
   const xp = result.kills * XP_REWARDS.tctKill + XP_REWARDS.tctMatch + (result.outcome === 'win' ? XP_REWARDS.tctWin : 0)
-  byId('gameover-message').textContent = `Match TCT online terminato.${grantXp(xp)}`
+  byId('gameover-message').textContent = `Match TCT online terminato.${grantXp(xp)}${grantWeaponXp(result.weaponXp ?? {})}`
   byId('restart-button').textContent = 'TORNA ALLA LOBBY'
   byId('menu-button').textContent = 'ESCI DALLA STANZA'
 }

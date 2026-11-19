@@ -308,15 +308,15 @@ export function addStructureMeshes(group: THREE.Group, map: MapDefinition, struc
 // Cielo e skyline
 // ---------------------------------------------------------------------------
 
-export function createSky(): THREE.Mesh {
+export function createSky(colors: { top: number; horizon: number; glow: number } = { top: 0x05060d, horizon: 0x1d2240, glow: 0x4a2c5e }): THREE.Mesh {
   const material = new THREE.ShaderMaterial({
     side: THREE.BackSide,
     depthWrite: false,
     fog: false,
     uniforms: {
-      top: { value: new THREE.Color(0x05060d) },
-      horizon: { value: new THREE.Color(0x1d2240) },
-      glow: { value: new THREE.Color(0x4a2c5e) },
+      top: { value: new THREE.Color(colors.top) },
+      horizon: { value: new THREE.Color(colors.horizon) },
+      glow: { value: new THREE.Color(colors.glow) },
     },
     vertexShader: 'varying vec3 vPosition; void main() { vPosition = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
     fragmentShader: `

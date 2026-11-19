@@ -50,4 +50,14 @@ describe('armi delle postazioni a rotazione', () => {
   it('ogni mappa ha almeno 8 postazioni d’arma', () => {
     for (const map of MAPS) expect(map.stations.filter((station) => station.kind === 'weapon').length, map.name).toBeGreaterThanOrEqual(8)
   })
+
+  it('le armi più forti si trovano solo dietro le porte chiuse', async () => {
+    const { WEAPON_RARITY, isPremiumRarity } = await import('./mysteryBox')
+    const premium = new Set(['h'])
+    for (let wave = 1; wave <= 15; wave += 1) {
+      const rolled = rollStationWeapons('station-13', stationIds, wave, premium)
+      for (const id of stationIds.slice(0, 7)) expect(isPremiumRarity(WEAPON_RARITY[rolled[id]!]), `ondata ${wave}`).toBe(false)
+      expect(isPremiumRarity(WEAPON_RARITY[rolled.h!]), `ondata ${wave}`).toBe(true)
+    }
+  })
 })

@@ -1,3 +1,4 @@
+import { MYSTERY_BOX_COST } from './mysteryBox'
 import { getDoorPoints, DOOR_OPENING } from './structures'
 import type { BuildingDefinition, Side } from './structures'
 import type { WeaponId } from './weapons'
@@ -25,7 +26,7 @@ export interface MapDoorDefinition {
   building?: { id: string; side: Side }
 }
 
-export type StationKind = 'weapon' | 'ammo' | 'medkit'
+export type StationKind = 'weapon' | 'ammo' | 'medkit' | 'box'
 
 /** Postazione acquistabile con i frammenti nella modalità zombie. */
 export interface StationDefinition {
@@ -39,11 +40,41 @@ export interface StationDefinition {
   cost: number
   /** Accessori già montati sulle armi delle postazioni (variante MK II). */
   attachments?: AttachmentSelection
+  /** Postazione dentro un edificio chiuso da una porta: vende solo armi rare, epiche o leggendarie. */
+  premium?: boolean
+}
+
+/** Atmosfera della mappa: cielo, nebbia, luci, terreno e meteo, per renderle diverse fra loro. */
+export interface MapTheme {
+  background: number
+  fog: number
+  fogDensity: number
+  skyTop: number
+  skyHorizon: number
+  skyGlow: number
+  hemisphereSky: number
+  hemisphereGround: number
+  keyLight: number
+  keyIntensity: number
+  rimLight: number
+  rimIntensity: number
+  /** Colori del terreno (base e chiaro) per la texture procedurale. */
+  ground: [string, string]
+  weather: 'none' | 'rain' | 'drizzle' | 'dust' | 'spores'
+  /** Colore delle particelle sospese nell'aria. */
+  particles: number
+}
+
+export const DEFAULT_THEME: MapTheme = {
+  background: 0x070810, fog: 0x0b0d1a, fogDensity: 0.0115, skyTop: 0x05060d, skyHorizon: 0x1d2240, skyGlow: 0x4a2c5e,
+  hemisphereSky: 0x9fb3d9, hemisphereGround: 0x161410, keyLight: 0xffe2c0, keyIntensity: 3.2, rimLight: 0x6c7dff, rimIntensity: 0.9,
+  ground: ['#252e3b', '#374554'], weather: 'none', particles: 0x8fb5bd,
 }
 
 export interface MapDefinition {
   id: string
   name: string
+  theme?: MapTheme
   arenaLimit: number
   playerSpawn: { x: number; z: number }
   enemySpawnRadius: number
@@ -55,7 +86,7 @@ export interface MapDefinition {
 
 export type PurchasableWeapon = Exclude<WeaponId, 'ar-07' | 'p-12'>
 
-export const STATION_COSTS: Record<PurchasableWeapon | 'ammo' | 'medkit', number> = {
+export const STATION_COSTS: Record<PurchasableWeapon | 'ammo' | 'medkit' | 'box', number> = {
   'smg-9': 8,
   'vx-45': 12,
   'sg-6': 10,
@@ -67,6 +98,13 @@ export const STATION_COSTS: Record<PurchasableWeapon | 'ammo' | 'medkit', number
   'br-3': 15,
   'r-44': 8,
   'ap-18': 9,
+  'vk-12': 18,
+  'kr-90': 16,
+  'ks-8': 20,
+  'xr-1': 28,
+  'mg-3x': 24,
+  'hc-50': 14,
+  box: MYSTERY_BOX_COST,
   ammo: 3,
   medkit: 4,
 }
@@ -99,6 +137,12 @@ export const FIELD_ATTACHMENTS: Record<PurchasableWeapon, AttachmentSelection> =
   'br-3': { optic: 'red-dot', muzzle: 'flash-hider', magazine: 'extended-mag' },
   'r-44': { optic: 'red-dot', barrel: 'long-barrel' },
   'ap-18': { optic: 'red-dot', magazine: 'extended-mag' },
+  'vk-12': { optic: 'scope-4x', muzzle: 'compensator', underbarrel: 'vertical-grip' },
+  'kr-90': { optic: 'red-dot', muzzle: 'flash-hider', underbarrel: 'laser' },
+  'ks-8': { optic: 'red-dot', barrel: 'long-barrel', magazine: 'fast-mag' },
+  'xr-1': { optic: 'scope-4x', muzzle: 'compensator', magazine: 'fast-mag' },
+  'mg-3x': { optic: 'holo', underbarrel: 'vertical-grip', magazine: 'fast-mag' },
+  'hc-50': { optic: 'red-dot', magazine: 'extended-mag' },
 }
 
 const weapon = (id: string, weaponId: PurchasableWeapon, x: number, y: number, z: number): StationDefinition => ({
@@ -194,6 +238,8 @@ export const STATION_13: MapDefinition = {
     weapon('station-sr', 'sr-50', -1, 3.2, -10),
     weapon('station-yard', 'vx-45', 20, 0, 6),
     weapon('station-platform', 'ap-18', -18, 0, 2),
+    { ...weapon('station-vault', 'ak-74r', 18, 0, 13), premium: true },
+    { id: 'station-box', kind: 'box', x: 8, y: 0, z: 6, cost: STATION_COSTS.box },
     { id: 'station-ammo', kind: 'ammo', x: 2, y: 3.2, z: -12, cost: STATION_COSTS.ammo },
     { id: 'station-medkit', kind: 'medkit', x: -13, y: 3.2, z: -6, cost: STATION_COSTS.medkit },
   ],
@@ -216,6 +262,12 @@ const DEPOT_BUILDINGS: BuildingDefinition[] = [
 export const DEPOT_06: MapDefinition = {
   id: 'depot-06',
   name: 'Deposito 06',
+  // Tramonto industriale: luce arancio radente e polvere sospesa.
+  theme: {
+    background: 0x140a07, fog: 0x3a2214, fogDensity: 0.0125, skyTop: 0x120707, skyHorizon: 0x6a2e14, skyGlow: 0xc4622a,
+    hemisphereSky: 0xe0a476, hemisphereGround: 0x2a1a10, keyLight: 0xffa860, keyIntensity: 3.5, rimLight: 0xff7a3a, rimIntensity: 0.7,
+    ground: ['#3b2f26', '#56463a'], weather: 'dust', particles: 0xe0b080,
+  },
   arenaLimit: 38,
   playerSpawn: { x: 0, z: 22 },
   enemySpawnRadius: 37,
@@ -261,6 +313,8 @@ export const DEPOT_06: MapDefinition = {
     weapon('station-sr', 'sr-50', 20.5, 3.2, -7.2),
     weapon('station-gate', 'vx-45', -8, 0, 26),
     weapon('station-crane', 'as-12', 6, 0, 16),
+    { ...weapon('station-vault', 'ak-74r', 21.5, 0, 18), premium: true },
+    { id: 'station-box', kind: 'box', x: -6, y: 0, z: 14, cost: STATION_COSTS.box },
     { id: 'station-ammo', kind: 'ammo', x: 3, y: 0, z: -3, cost: STATION_COSTS.ammo },
     { id: 'station-medkit', kind: 'medkit', x: 4, y: 3.2, z: -17, cost: STATION_COSTS.medkit },
   ],
@@ -272,7 +326,7 @@ export const DEPOT_06: MapDefinition = {
 
 const DISTRICT_BUILDINGS: BuildingDefinition[] = [
   { id: 'apartments', name: 'RESIDENZE', kind: 'building', x: -20, z: -20, width: 12, depth: 10, floors: 3, doors: ['south', 'east'], style: 'brick' },
-  { id: 'offices', name: 'UFFICI ZERO', kind: 'building', x: 20, z: -20, width: 11, depth: 10, floors: 2, doors: ['south', 'east'], style: 'glass' },
+  { id: 'offices', name: 'UFFICI ZERO', kind: 'building', x: 20, z: -20, width: 11, depth: 10, floors: 2, doors: ['south'], style: 'glass' },
   { id: 'market', name: 'MERCATO', kind: 'building', x: -20, z: 20, width: 12, depth: 9, floors: 1, doors: ['north', 'east'], style: 'concrete' },
   { id: 'garage', kind: 'tower', x: 20, z: 20, width: 12, depth: 10, floors: 2, doors: [], style: 'concrete' },
   { id: 'hotel', name: 'HOTEL NEON', kind: 'building', x: -34, z: -20, width: 10, depth: 14, floors: 3, doors: ['east'], style: 'glass' },
@@ -284,6 +338,12 @@ const DISTRICT_BUILDINGS: BuildingDefinition[] = [
 export const DISTRICT_ZERO: MapDefinition = {
   id: 'district-zero',
   name: 'Distretto Zero',
+  // Notte al neon magenta con pioggia.
+  theme: {
+    background: 0x08050f, fog: 0x1d0a24, fogDensity: 0.013, skyTop: 0x06030b, skyHorizon: 0x2a0d3a, skyGlow: 0xff3fa8,
+    hemisphereSky: 0xb8a0e0, hemisphereGround: 0x140a16, keyLight: 0xffc0e6, keyIntensity: 2.6, rimLight: 0xff3fa8, rimIntensity: 1.4,
+    ground: ['#221a2c', '#3a2c48'], weather: 'rain', particles: 0xc8b4ff,
+  },
   arenaLimit: 44,
   playerSpawn: { x: 0, z: 30 },
   enemySpawnRadius: 43,
@@ -329,6 +389,8 @@ export const DISTRICT_ZERO: MapDefinition = {
     weapon('station-revolver', 'r-44', -5.5, 0, -9),
     weapon('station-square', 'vx-45', 12, 0, 4),
     weapon('station-avenue', 'ap-18', -12, 0, -3),
+    { ...weapon('station-vault', 'ak-74r', 23, 0, -20), premium: true },
+    { id: 'station-box', kind: 'box', x: 4, y: 0, z: 20, cost: STATION_COSTS.box },
     { id: 'station-ammo', kind: 'ammo', x: 22, y: 3.2, z: -17, cost: STATION_COSTS.ammo },
     { id: 'station-medkit', kind: 'medkit', x: -5.5, y: 0, z: 9, cost: STATION_COSTS.medkit },
   ],
@@ -349,6 +411,12 @@ const PORT_BUILDINGS: BuildingDefinition[] = [
 export const PORT_09: MapDefinition = {
   id: 'port-09',
   name: 'Porto 09',
+  // Nebbia marina fitta e pioviggine: si vede poco lontano.
+  theme: {
+    background: 0x08141a, fog: 0x1a3640, fogDensity: 0.022, skyTop: 0x061015, skyHorizon: 0x1c3a44, skyGlow: 0x35d0c8,
+    hemisphereSky: 0xa8d8e0, hemisphereGround: 0x0e1a1c, keyLight: 0xbfe8ff, keyIntensity: 2.3, rimLight: 0x35d0c8, rimIntensity: 1.1,
+    ground: ['#1c2a2e', '#2c4044'], weather: 'drizzle', particles: 0xb8e8f0,
+  },
   arenaLimit: 40,
   playerSpawn: { x: 0, z: 26 },
   enemySpawnRadius: 39,
@@ -386,6 +454,8 @@ export const PORT_09: MapDefinition = {
     weapon('station-office', 'vx-45', 16, 0, 8),
     weapon('station-lighthouse', 'ak-74r', 6, 0, -30),
     weapon('station-north', 'br-3', -14, 0, -28),
+    { ...weapon('station-vault', 'ak-74r', 22, 0, -19), premium: true },
+    { id: 'station-box', kind: 'box', x: 4, y: 0, z: 18, cost: STATION_COSTS.box },
     { id: 'station-ammo', kind: 'ammo', x: 4, y: 0, z: 8, cost: STATION_COSTS.ammo },
     { id: 'station-medkit', kind: 'medkit', x: -26, y: 0, z: -4, cost: STATION_COSTS.medkit },
   ],
@@ -406,6 +476,12 @@ const LAB_BUILDINGS: BuildingDefinition[] = [
 export const LAB_21: MapDefinition = {
   id: 'lab-21',
   name: 'Laboratorio 21',
+  // Bagliore tossico verde e spore nell'aria.
+  theme: {
+    background: 0x050d07, fog: 0x12261a, fogDensity: 0.014, skyTop: 0x040a05, skyHorizon: 0x153a1e, skyGlow: 0x7dff6a,
+    hemisphereSky: 0xc4f0cc, hemisphereGround: 0x0c160e, keyLight: 0xd6ffe0, keyIntensity: 3, rimLight: 0x7dff6a, rimIntensity: 1.1,
+    ground: ['#1e2a22', '#33463a'], weather: 'spores', particles: 0x9dff7a,
+  },
   arenaLimit: 40,
   playerSpawn: { x: 0, z: 28 },
   enemySpawnRadius: 39,
@@ -441,6 +517,8 @@ export const LAB_21: MapDefinition = {
     weapon('station-lab', 'vx-45', 12, 0, -20),
     weapon('station-serra', 'ak-74r', -14, 0, -22),
     weapon('station-clinic', 'br-3', 16, 0, 14),
+    { ...weapon('station-vault', 'ak-74r', 25.5, 0, 22), premium: true },
+    { id: 'station-box', kind: 'box', x: -8, y: 0, z: 8, cost: STATION_COSTS.box },
     { id: 'station-ammo', kind: 'ammo', x: 8, y: 0, z: 12, cost: STATION_COSTS.ammo },
     { id: 'station-medkit', kind: 'medkit', x: -10, y: 0, z: -2, cost: STATION_COSTS.medkit },
   ],

@@ -1,3 +1,4 @@
+import { isPremiumRarity, WEAPON_RARITY } from './mysteryBox'
 import type { WeaponId } from './weapons'
 
 /** Armi che possono comparire nelle postazioni Zombie, con l'ondata da cui diventano disponibili. */
@@ -13,6 +14,12 @@ export const FIELD_WEAPON_POOL: readonly { weapon: Exclude<WeaponId, 'ar-07' | '
   { weapon: 'as-12', firstWave: 5 },
   { weapon: 'lmg-75', firstWave: 5 },
   { weapon: 'sr-50', firstWave: 6 },
+  { weapon: 'kr-90', firstWave: 3 },
+  { weapon: 'hc-50', firstWave: 4 },
+  { weapon: 'vk-12', firstWave: 4 },
+  { weapon: 'ks-8', firstWave: 5 },
+  { weapon: 'mg-3x', firstWave: 7 },
+  { weapon: 'xr-1', firstWave: 9 },
 ]
 
 export type FieldTier = 1 | 2 | 3
@@ -53,11 +60,17 @@ function seededRandom(seed: string): () => number {
  * Armi delle postazioni per un'ondata: diverse fra loro finché il catalogo lo permette e
  * diverse da quelle dell'ondata precedente nella stessa postazione, quando possibile.
  */
-export function rollStationWeapons(mapId: string, stationIds: readonly string[], wave: number): Record<string, WeaponId> {
+export function rollStationWeapons(mapId: string, stationIds: readonly string[], wave: number, premium: ReadonlySet<string> = new Set()): Record<string, WeaponId> {
   const available = FIELD_WEAPON_POOL.filter((entry) => wave >= entry.firstWave).map((entry) => entry.weapon)
-  const previous = wave > 1 ? rollStationWeapons(mapId, stationIds, wave - 1) : {}
+  const previous = wave > 1 ? rollStationWeapons(mapId, stationIds, wave - 1, premium) : {}
+  // Dietro le porte chiuse solo armi epiche e leggendarie, disponibili con 4 ondate di anticipo:
+  // pagare la porta conviene già dall'inizio. Se non ce ne sono ancora, le rare.
+  const early = FIELD_WEAPON_POOL.filter((entry) => wave + PREMIUM_HEAD_START >= entry.firstWave).map((entry) => entry.weapon)
+  const premiumPool = early.filter((weapon) => isPremiumRarity(WEAPON_RARITY[weapon]))
+  const fallback = early.filter((weapon) => WEAPON_RARITY[weapon] === 'rare')
+  const premiumDeck = premiumPool.length > 0 ? premiumPool : fallback.length > 0 ? fallback : available
   const random = seededRandom(`${mapId}:${wave}`)
-  const deck = [...available]
+  const deck = [...new Set([...available, ...premiumPool])]
   for (let index = deck.length - 1; index > 0; index -= 1) {
     const swap = Math.floor(random() * (index + 1))
     ;[deck[index], deck[swap]] = [deck[swap]!, deck[index]!]
@@ -67,12 +80,18 @@ export function rollStationWeapons(mapId: string, stationIds: readonly string[],
   for (const id of stationIds) {
     // L'arma meno presente finora in questa ondata (doppioni distribuiti in modo uniforme),
     // diversa da quella che la postazione vendeva nell'ondata precedente.
-    const least = Math.min(...deck.map((weapon) => uses.get(weapon) ?? 0))
-    const pick = deck.find((weapon) => (uses.get(weapon) ?? 0) === least && weapon !== previous[id])
-      ?? deck.find((weapon) => weapon !== previous[id])
-      ?? deck[0]!
+    // Le postazioni normali non vendono epiche e leggendarie: si trovano dietro le porte o nella cassa.
+    const source = premium.has(id) ? deck.filter((weapon) => premiumDeck.includes(weapon)) : deck.filter((weapon) => !isPremiumRarity(WEAPON_RARITY[weapon]))
+    const options = source.length > 0 ? source : deck
+    const least = Math.min(...options.map((weapon) => uses.get(weapon) ?? 0))
+    const pick = options.find((weapon) => (uses.get(weapon) ?? 0) === least && weapon !== previous[id])
+      ?? options.find((weapon) => weapon !== previous[id])
+      ?? options[0]!
     result[id] = pick
     uses.set(pick, (uses.get(pick) ?? 0) + 1)
   }
   return result
 }
+
+/** Ondate di anticipo con cui le postazioni dietro le porte ricevono le armi più forti. */
+export const PREMIUM_HEAD_START = 4

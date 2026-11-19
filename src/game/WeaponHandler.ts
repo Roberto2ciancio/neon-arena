@@ -75,6 +75,9 @@ export class WeaponHandler {
   private visible = false
   private scoped = false
   visualRecoil = 0
+  /** Moltiplicatore del tempo di ricarica dai potenziamenti della run. */
+  reloadMultiplier = 1
+  private reloadTotal = 1
   private pendingSounds: MechanicalSound[] = []
   private reloadCueIndex = 0
 
@@ -262,7 +265,8 @@ export class WeaponHandler {
   startReload(): boolean {
     const current = this.slots && this.activeSlot !== 'melee' ? this.slots[this.activeSlot] : null
     if (!current || this.reloadTimer > 0 || current.magazine.ammo >= current.weapon.magazineSize || current.magazine.reserveAmmo === 0) return false
-    this.reloadTimer = current.weapon.reloadDuration
+    this.reloadTimer = current.weapon.reloadDuration * this.reloadMultiplier
+    this.reloadTotal = this.reloadTimer
     this.burstRemaining = 0
     this.reloadCueIndex = 0
     return true
@@ -296,7 +300,7 @@ export class WeaponHandler {
     if (current && this.reloadTimer > 0) {
       this.reloadTimer -= delta
       // Rumori meccanici sincronizzati con le fasi dell'animazione.
-      const progress = Math.min(1, 1 - this.reloadTimer / current.weapon.reloadDuration)
+      const progress = Math.min(1, 1 - this.reloadTimer / this.reloadTotal)
       const cues = getReloadCues(current.model.reloadStyle ?? 'magazine')
       while (this.reloadCueIndex < cues.length && progress >= cues[this.reloadCueIndex]!.at) {
         this.pendingSounds.push(cues[this.reloadCueIndex]!.sound)
@@ -366,7 +370,7 @@ export class WeaponHandler {
 
   applyPose(delta: number, pose: Omit<WeaponPoseInput, 'recoil' | 'reloadProgress'>): void {
     const current = this.slots && this.activeSlot !== 'melee' ? this.slots[this.activeSlot] : null
-    const reloadProgress = current && this.reloadTimer > 0 ? 1 - this.reloadTimer / current.weapon.reloadDuration : -1
+    const reloadProgress = current && this.reloadTimer > 0 ? 1 - this.reloadTimer / this.reloadTotal : -1
     const swing = this.meleeTimer > 0 ? 1 - this.meleeTimer / MELEE_SWING : -1
     const group = this.meleeTimer > 0 || this.activeSlot === 'melee' ? this.meleeModel : current?.model.group
     if (!group) return

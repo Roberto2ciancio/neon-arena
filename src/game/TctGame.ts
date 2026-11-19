@@ -1,3 +1,6 @@
+import { WEAPON_XP } from './armory'
+import { DEFAULT_THEME } from './maps'
+import { animateWeather } from './weather'
 import { getAimSensitivityScale } from './accessibility'
 import { getSoldierHitboxes, intersectRayCapsule, LEG_DAMAGE_MULTIPLIER } from './hitboxes'
 import { getRangeMultiplier } from './weapons'
@@ -72,6 +75,8 @@ export interface TctResult {
   kills: number
   deaths: number
   outcome: 'win' | 'loss' | 'draw'
+  /** Esperienza guadagnata da ogni arma (eliminazioni fatte con quell'arma). */
+  weaponXp?: Partial<Record<string, number>>
 }
 
 interface TctEvents {
@@ -84,6 +89,8 @@ interface TctEvents {
 }
 
 export class TctGame {
+  /** Esperienza delle armi accumulata nella partita. */
+  private readonly weaponXp = new Map<string, number>()
   private readonly scene = new THREE.Scene()
   private readonly decals = new DecalEffects(this.scene)
   private readonly effects = new CombatEffects(this.scene)
@@ -150,8 +157,9 @@ export class TctGame {
     this.renderer.domElement.setAttribute('aria-label', 'Neon Arena: scontro tattico a squadre online')
     this.renderer.domElement.setAttribute('role', 'img')
     container.appendChild(this.renderer.domElement)
-    this.scene.background = new THREE.Color(0x070810)
-    this.scene.fog = new THREE.FogExp2(0x0b0d1a, 0.0115)
+    const initialTheme = this.map.theme ?? DEFAULT_THEME
+    this.scene.background = new THREE.Color(initialTheme.background)
+    this.scene.fog = new THREE.FogExp2(initialTheme.fog, initialTheme.fogDensity)
     this.camera.rotation.order = 'YXZ'
     this.weapons.configure(this.loadout)
     this.equipment = this.createEquipmentSystem()
@@ -244,6 +252,7 @@ export class TctGame {
     this.weapons.configure(loadout)
     this.scores = { alpha: 0, bravo: 0 }
     this.kills = 0
+    this.weaponXp.clear()
     this.deaths = 0
     this.timeRemaining = TCT_CONFIG.matchDuration
     this.playerRespawn = 0
@@ -339,6 +348,9 @@ export class TctGame {
       }
     })
     this.map = map
+    const theme = map.theme ?? DEFAULT_THEME
+    this.scene.background = new THREE.Color(theme.background)
+    this.scene.fog = new THREE.FogExp2(theme.fog, theme.fogDensity)
     this.mapContent = buildMap(map)
     this.obstacles = this.openDoors()
     this.scene.add(this.mapContent.group)
@@ -461,7 +473,11 @@ export class TctGame {
         }
         break
       case 'kill':
-        if (message.killer === this.localId) this.kills += 1
+        if (message.killer === this.localId) {
+          this.kills += 1
+          const weaponId = this.weapons.current?.id
+          if (weaponId) this.weaponXp.set(weaponId, (this.weaponXp.get(weaponId) ?? 0) + WEAPON_XP.tctKill)
+        }
         if (message.victim === this.localId) this.deaths += 1
         else {
           const victim = this.remotes.get(message.victim)
@@ -876,7 +892,7 @@ export class TctGame {
 
   private finish(outcome: TctResult['outcome']): void {
     if (!this.inMatch) return
-    const result: TctResult = { teamScore: this.teamScore, enemyScore: this.enemyScore, kills: this.kills, deaths: this.deaths, outcome }
+    const result: TctResult = { teamScore: this.teamScore, enemyScore: this.enemyScore, kills: this.kills, deaths: this.deaths, outcome, weaponXp: Object.fromEntries(this.weaponXp) }
     this.stop()
     this.events.onMatchEnd(result)
     this.setState(outcome === 'win' ? 'victory' : 'gameover')
@@ -953,6 +969,7 @@ export class TctGame {
 
   private update(delta: number): void {
     this.mapContent.ambient.rotation.y += delta * 0.015
+    animateWeather(this.mapContent.weather, delta)
     this.updatePlayer(delta)
     this.updateRemotes(delta)
     this.updateEquipment(delta)

@@ -3,8 +3,8 @@ import { createMagazine, DEFAULT_WEAPON, MELEE_WEAPONS, PRIMARY_WEAPONS, reloadM
 
 describe('armi basate su dati', () => {
   it('copre tutte le classi primarie e secondarie con slot coerenti', () => {
-    expect(PRIMARY_WEAPONS).toHaveLength(10)
-    expect(SECONDARY_WEAPONS).toHaveLength(3)
+    expect(PRIMARY_WEAPONS).toHaveLength(15)
+    expect(SECONDARY_WEAPONS).toHaveLength(4)
     for (const id of WEAPON_ORDER) {
       const weapon = WEAPONS[id]
       expect(weapon.id).toBe(id)
