@@ -86,6 +86,7 @@
       <div id="respawn-banner" class="respawn-banner hidden">RIENTRO IN COMBATTIMENTO</div>
 
       <div id="low-health" class="low-health" aria-hidden="true"></div>
+      <div id="acid-overlay" class="acid-overlay" aria-hidden="true"></div>
       <div id="downed-banner" class="downed-banner hidden" role="status"><strong id="downed-title">SEI A TERRA</strong><span id="downed-text"></span></div>
       <ul id="coop-team" class="coop-team hidden" aria-label="Squadra"></ul>
       <div id="low-health-text" class="low-health-text hidden" role="status">INTEGRITÀ CRITICA // CERCA UN KIT MEDICO</div>
@@ -257,6 +258,9 @@
               <label><input id="high-contrast" type="checkbox" /> CONTRASTO ELEVATO</label>
               <label for="mouse-sensitivity">SENSIBILITÀ MOUSE <output id="sensitivity-value">1,0×</output></label>
               <input id="mouse-sensitivity" type="range" min="0.5" max="2" step="0.1" value="1" />
+              <label for="ads-sensitivity">SENSIBILITÀ IN MIRA <output id="ads-sensitivity-value">1,0×</output></label>
+              <input id="ads-sensitivity" type="range" min="0.3" max="1.5" step="0.05" value="1" />
+              <small class="settings-hint">In mira la sensibilità si riduce già in base all'ingrandimento dell'ottica; questo valore la regola ulteriormente.</small>
               <label for="master-volume">VOLUME <output id="volume-value">80%</output></label>
               <input id="master-volume" type="range" min="0" max="1" step="0.05" value="0.8" />
             </div>

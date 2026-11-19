@@ -114,6 +114,8 @@ interface Deployable {
   timer: number
   options: EquipmentOptions
   turret?: TurretAnimator
+  /** Integrità della torretta: gli zombie la attaccano e la distruggono. */
+  health?: number
   solid?: CollisionObstacle
   light?: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>
 }
@@ -239,9 +241,24 @@ export class EquipmentSystem {
       this.context.onReveal(EQUIPMENT_STATS.radarDuration, options.hostile)
     }
     deployable.group = group
+    if (kind === 'turret') deployable.health = TURRET_HEALTH
     this.context.scene.add(group)
     this.context.effects.pulse(position, color, 1.8)
     this.deployables.push(deployable)
+  }
+
+  /** Torrette del giocatore locale che gli zombie possono attaccare. */
+  attackableTurrets(): { position: THREE.Vector3; damage: (amount: number) => void }[] {
+    return this.deployables
+      .filter((deployable) => deployable.kind === 'turret' && deployable.options.owned && !deployable.options.hostile && (deployable.health ?? 0) > 0)
+      .map((deployable) => ({
+        position: deployable.position,
+        damage: (amount: number) => {
+          deployable.health = Math.max(0, (deployable.health ?? 0) - amount)
+          this.context.effects.sparks(deployable.position.clone().setY(deployable.position.y + 0.7), new THREE.Vector3(0, 1, 0), 0xffb46b, 5)
+          if (deployable.health <= 0) deployable.life = 0
+        },
+      }))
   }
 
   /** Esplosione di una claymore remota annunciata dalla rete. */
@@ -580,3 +597,6 @@ export class EquipmentSystem {
   /** Notifica i colpi delle torrette locali (tracciante e sincronizzazione di rete). */
   onTurretShot?: (from: THREE.Vector3, to: THREE.Vector3) => void
 }
+
+/** Integrità della torretta: regge una manciata di attacchi prima di esplodere. */
+export const TURRET_HEALTH = 220

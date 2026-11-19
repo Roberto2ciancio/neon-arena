@@ -1,3 +1,6 @@
+import { getAimSensitivityScale } from './accessibility'
+import { getSoldierHitboxes, intersectRayCapsule, LEG_DAMAGE_MULTIPLIER } from './hitboxes'
+import { getRangeMultiplier } from './weapons'
 import { getGunSoundProfile } from './gunSounds'
 import { getSpatialSound } from './spatialAudio'
 import * as THREE from 'three'
@@ -111,6 +114,7 @@ export class TctGame {
   private graphicsQuality: GraphicsQuality = 'medium'
   private active = true
   private reducedMotion = false
+  private adsSensitivity = 1
   private mouseSensitivity = 0.002
   private session: NetSession | null = null
   private unsubscribe: (() => void) | null = null
@@ -167,6 +171,7 @@ export class TctGame {
   setAccessibility(settings: AccessibilitySettings): void {
     this.reducedMotion = settings.reducedMotion
     this.mouseSensitivity = 0.002 * settings.sensitivity
+    this.adsSensitivity = settings.adsSensitivity
   }
 
   setGraphicsQuality(quality: GraphicsQuality): void {
@@ -732,23 +737,24 @@ export class TctGame {
       let hitPoint: THREE.Vector3 | null = null
       let hitDistance = wallDistance ?? definition.range
       let headshot = false
+      let legs = false
       for (const remote of this.livingEnemies()) {
-        for (const zone of [true, false]) {
-          const object = zone ? remote.model.head : remote.model.body
-          const point = ray.intersectSphere(new THREE.Sphere(object.getWorldPosition(new THREE.Vector3()), zone ? 0.3 : 0.55), new THREE.Vector3())
-          if (!point) continue
-          const distance = origin.distanceTo(point)
-          if (distance < hitDistance) {
-            target = remote
-            hitPoint = point
-            hitDistance = distance
-            headshot = zone
-          }
+        // Testa, busto e gambe contigui: prima i colpi sotto il busto attraversavano il bersaglio.
+        const head = remote.model.head.getWorldPosition(new THREE.Vector3())
+        for (const box of getSoldierHitboxes(remote.model.group.position, head, remote.crouch)) {
+          const distance = intersectRayCapsule(ray, box.a, box.b, box.radius)
+          if (distance === null || distance >= hitDistance) continue
+          target = remote
+          hitPoint = origin.clone().addScaledVector(direction, distance)
+          hitDistance = distance
+          headshot = box.zone === 'head'
+          legs = box.zone === 'legs'
         }
       }
       if (target) {
         const entry = damageByTarget.get(target.id) ?? { damage: 0, headshot: false }
-        entry.damage += definition.damage * (headshot ? definition.headshotMultiplier : 1)
+        const zoneMultiplier = headshot ? definition.headshotMultiplier : legs ? LEG_DAMAGE_MULTIPLIER : 1
+        entry.damage += definition.damage * zoneMultiplier * getRangeMultiplier(definition, hitDistance)
         entry.headshot ||= headshot
         anyHeadshot ||= headshot
         damageByTarget.set(target.id, entry)
@@ -1043,7 +1049,7 @@ export class TctGame {
 
   private readonly onMouseMove = (event: MouseEvent): void => {
     if (!this.active || this.state !== 'playing' || !this.alive || document.pointerLockElement !== this.renderer.domElement) return
-    const sensitivity = this.mouseSensitivity * (this.stunTimer > 0 ? 0.45 : 1)
+    const sensitivity = this.mouseSensitivity * (this.stunTimer > 0 ? 0.45 : 1) * (this.aiming ? getAimSensitivityScale(this.camera.fov, 75, this.adsSensitivity) : 1)
     this.yaw -= event.movementX * sensitivity
     this.pitch = THREE.MathUtils.clamp(this.pitch - event.movementY * sensitivity, -1.45, 1.45)
     this.weapons.animator.addLook(event.movementX, event.movementY)

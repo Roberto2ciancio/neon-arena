@@ -15,16 +15,16 @@ describe('upgrade della run', () => {
     const stats = createBaseStats()
     const upgraded = applyUpgrade(stats, 'damage')
 
-    expect(upgraded.damage).toBeCloseTo(stats.damage * 1.2)
+    expect(upgraded.damage).toBeCloseTo(stats.damage * 1.12)
     expect(stats.damage).toBe(20)
   })
 
   it('applica i bonus permanenti alle statistiche iniziali', () => {
     const stats = createBaseStats({ vitality: 2, power: 2, mobility: 2 })
 
-    expect(stats.maxHealth).toBe(120)
-    expect(stats.damage).toBeCloseTo(22)
-    expect(stats.speed).toBeCloseTo(7.4 * 1.06)
+    expect(stats.maxHealth).toBe(112)
+    expect(stats.damage).toBeCloseTo(21.2)
+    expect(stats.speed).toBeCloseTo(7.4 * 1.04)
   })
 
   it('sblocca gli effetti speciali solo dopo i prerequisiti', () => {

@@ -62,11 +62,11 @@ export interface MetaUpgradeDefinition {
 
 export const STORAGE_KEY = 'neon-arena:progress:v1'
 export const MAX_META_LEVEL = 5
-export const META_COSTS = [5, 12, 22, 35, 50] as const
+export const META_COSTS = [8, 18, 32, 50, 75] as const
 export const META_UPGRADES: readonly MetaUpgradeDefinition[] = [
-  { id: 'vitality', name: 'VITALITÀ', description: '+10 integrità iniziale per livello', icon: '⬡' },
-  { id: 'power', name: 'POTENZA', description: '+5% danno iniziale per livello', icon: '⌁' },
-  { id: 'mobility', name: 'MOBILITÀ', description: '+3% velocità iniziale per livello', icon: '»' },
+  { id: 'vitality', name: 'VITALITÀ', description: '+6 integrità iniziale per livello', icon: '⬡' },
+  { id: 'power', name: 'POTENZA', description: '+3% danno iniziale per livello', icon: '⌁' },
+  { id: 'mobility', name: 'MOBILITÀ', description: '+2% velocità iniziale per livello', icon: '»' },
 ]
 
 export function createDefaultProgress(): MetaProgress {

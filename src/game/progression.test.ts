@@ -27,13 +27,13 @@ describe('progressione permanente', () => {
   })
 
   it('acquista un livello e scala il costo successivo', () => {
-    const first = purchaseMetaUpgrade(progressWithCores(20), 'power')
+    const first = purchaseMetaUpgrade(progressWithCores(30), 'power')
     const second = purchaseMetaUpgrade(first, 'power')
 
     expect(first.upgrades.power).toBe(1)
-    expect(first.cores).toBe(15)
+    expect(first.cores).toBe(22)
     expect(second.upgrades.power).toBe(2)
-    expect(second.cores).toBe(3)
+    expect(second.cores).toBe(4)
   })
 
   it('rifiuta acquisti senza fondi o oltre il livello massimo', () => {

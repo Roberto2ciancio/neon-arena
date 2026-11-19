@@ -17,29 +17,29 @@ export const UPGRADE_DEFINITIONS: readonly UpgradeDefinition[] = [
   {
     id: 'damage',
     name: 'SOVRACCARICO',
-    description: '+20% danno dei proiettili.',
+    description: '+12% danno dei proiettili (massimo +60%).',
     icon: '⌁',
     tag: 'ATTACCO',
-    isAvailable: always,
-    apply: (stats) => { stats.damage *= 1.2 },
+    isAvailable: (stats) => stats.damage < 20 * 1.6 * META_DAMAGE_CEILING,
+    apply: (stats) => { stats.damage *= 1.12 },
   },
   {
     id: 'fire-rate',
     name: 'GRILLETTO VELOCE',
-    description: '+18% cadenza di fuoco.',
+    description: '+10% cadenza di fuoco (massimo +50%).',
     icon: '≋',
     tag: 'ATTACCO',
-    isAvailable: always,
-    apply: (stats) => { stats.fireRate *= 1.18 },
+    isAvailable: (stats) => stats.fireRate < 8.5 * 1.5,
+    apply: (stats) => { stats.fireRate *= 1.1 },
   },
   {
     id: 'multishot',
     name: 'ECO BALLISTICO',
-    description: '+1 colpo hitscan per raffica. Massimo 5.',
+    description: '+1 colpo per sparo, ciascuno al 60% del danno. Massimo 3.',
     icon: '⋔',
     tag: 'ATTACCO // RARO',
     rarity: 'rare',
-    isAvailable: (stats) => stats.projectileCount < 5,
+    isAvailable: (stats) => stats.projectileCount < 3,
     apply: (stats) => { stats.projectileCount += 1 },
   },
   {
@@ -55,11 +55,11 @@ export const UPGRADE_DEFINITIONS: readonly UpgradeDefinition[] = [
   {
     id: 'critical',
     name: 'PUNTO DEBOLE',
-    description: '+10% probabilità di colpo critico.',
+    description: '+8% probabilità di colpo critico (massimo 40%).',
     icon: '◎',
     tag: 'ATTACCO',
-    isAvailable: (stats) => stats.critChance < 0.65,
-    apply: (stats) => { stats.critChance += 0.1 },
+    isAvailable: (stats) => stats.critChance < 0.4,
+    apply: (stats) => { stats.critChance = Math.min(0.4, stats.critChance + 0.08) },
   },
   {
     id: 'incendiary',
@@ -88,7 +88,7 @@ export const UPGRADE_DEFINITIONS: readonly UpgradeDefinition[] = [
     icon: 'ϟ',
     tag: 'EFFETTO // RARO // MAX 3',
     rarity: 'rare',
-    isAvailable: (stats) => stats.critChance >= 0.15 && stats.chainLightning < 3,
+    isAvailable: (stats) => stats.critChance >= 0.13 && stats.chainLightning < 3,
     apply: (stats) => { stats.chainLightning += 1 },
   },
   {
@@ -150,14 +150,14 @@ export const UPGRADE_BY_ID = new Map(UPGRADE_DEFINITIONS.map((upgrade) => [upgra
 
 export function createBaseStats(bonuses: MetaBonuses = { vitality: 0, power: 0, mobility: 0 }): PlayerStats {
   return {
-    maxHealth: 100 + bonuses.vitality * 10,
-    speed: 7.4 * (1 + bonuses.mobility * 0.03),
-    damage: 20 * (1 + bonuses.power * 0.05),
+    maxHealth: 100 + bonuses.vitality * META_VITALITY_PER_LEVEL,
+    speed: 7.4 * (1 + bonuses.mobility * META_MOBILITY_PER_LEVEL),
+    damage: 20 * (1 + bonuses.power * META_POWER_PER_LEVEL),
     fireRate: 8.5,
     projectileCount: 1,
     pierce: 0,
     critChance: 0.05,
-    critMultiplier: 2,
+    critMultiplier: 1.75,
     magnetRadius: 2.6,
     armor: 0,
     regen: 0,
@@ -199,3 +199,12 @@ export function applyUpgrade(stats: PlayerStats, upgradeId: string): PlayerStats
   upgrade.apply(nextStats)
   return nextStats
 }
+
+/** Officina: ogni livello conta meno di prima (vedi Fase di bilanciamento). */
+export const META_VITALITY_PER_LEVEL = 6
+export const META_POWER_PER_LEVEL = 0.03
+export const META_MOBILITY_PER_LEVEL = 0.02
+/** Il tetto di Sovraccarico tiene conto del bonus massimo dell'officina (5 livelli). */
+const META_DAMAGE_CEILING = 1 + 5 * META_POWER_PER_LEVEL
+/** I colpi aggiuntivi di Colpo multiplo infliggono questa quota del danno. */
+export const EXTRA_PROJECTILE_DAMAGE = 0.6

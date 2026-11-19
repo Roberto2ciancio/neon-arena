@@ -6,7 +6,7 @@ import type { AudioPosition, SpatialSound } from './spatialAudio'
 export type SoundName =
   | 'shoot' | 'enemyShoot' | 'hit' | 'headshot' | 'kill' | 'damage' | 'dash' | 'pickup' | 'upgrade'
   | 'dry' | 'reloadOut' | 'reloadIn' | 'shell' | 'melee' | 'meleeHit' | 'switch' | 'explosion'
-  | 'groan' | 'groanBig' | 'powerUp' | 'reloadRack' | 'shellLoad' | 'heartbeat' | 'heal'
+  | 'groan' | 'groanBig' | 'powerUp' | 'reloadRack' | 'shellLoad' | 'heartbeat' | 'heal' | 'acidCharge'
 
 /** Voci contemporanee massime: oltre, i suoni nuovi vengono saltati per non saturare CPU e mix. */
 const MAX_VOICES = 48
@@ -188,6 +188,11 @@ export class GameAudio {
         this.click(900, 0.04, options)
         this.noise({ type: 'bandpass', frequency: 1600, gain: 0.1, decay: 0.05, q: 3 }, { ...options, delay: 0.02 })
         this.click(1400, 0.05, { ...options, delay: 0.11 })
+        break
+      case 'acidCharge':
+        // Gorgoglio che sale: avvisa che lo Sputatore sta per sputare.
+        this.noise({ type: 'bandpass', frequency: 300, gain: 0.3, decay: 0.55, q: 3, sweepTo: 1400 }, { ...options, reverb: 0.2 })
+        this.tone(120, 340, 0.5, 'sawtooth', 0.05, options, 900)
         break
       case 'heartbeat':
         // Doppio battito sordo.

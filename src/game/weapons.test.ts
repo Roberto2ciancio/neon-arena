@@ -57,3 +57,18 @@ describe('armi basate su dati', () => {
     expect(reloadMagazine(empty, WEAPONS['p-12'])).toBe(empty)
   })
 })
+
+describe('gittata per categoria', () => {
+  it('danno pieno entro la distanza efficace, poi cala fino al minimo', async () => {
+    const { getRangeMultiplier, WEAPONS: catalog } = await import('./weapons')
+    expect(getRangeMultiplier(catalog['smg-9'], 10)).toBe(1)
+    expect(getRangeMultiplier(catalog['smg-9'], 25)).toBeLessThan(1)
+    expect(getRangeMultiplier(catalog['smg-9'], 80)).toBeCloseTo(0.5)
+    expect(getRangeMultiplier(catalog['sg-6'], 20)).toBeLessThan(0.4)
+    expect(getRangeMultiplier(catalog['sr-50'], 100)).toBe(1)
+    // A 30 m un fucile d'assalto colpisce più forte di una mitraglietta, che perde danno prima.
+    expect(getRangeMultiplier(catalog['ar-07'], 30)).toBeGreaterThan(getRangeMultiplier(catalog['smg-9'], 30))
+    // Una canna lunga sposta in avanti la distanza efficace.
+    expect(getRangeMultiplier({ ...catalog['smg-9'], range: 38 * 1.3 }, 14)).toBe(1)
+  })
+})

@@ -12,12 +12,12 @@ export const ARMORY_STORAGE_KEY = 'neon-arena:armory:v1'
 export const MAX_LEVEL = 30
 
 export const XP_REWARDS = {
-  zombieKill: 10,
-  wave: 60,
-  runComplete: 100,
-  tctKill: 40,
-  tctMatch: 200,
-  tctWin: 200,
+  zombieKill: 6,
+  wave: 40,
+  runComplete: 60,
+  tctKill: 25,
+  tctMatch: 120,
+  tctWin: 120,
 } as const
 
 export interface Loadout {
@@ -73,7 +73,9 @@ export function createDefaultArmory(): ArmoryState {
 
 /** XP necessaria per passare da `level` a `level + 1`. */
 export function xpForLevel(level: number): number {
-  return Math.round(400 + (Math.max(1, level) - 1) * 180)
+  // Curva più ripida: i primi livelli arrivano presto, gli ultimi richiedono molte partite.
+  const step = Math.max(1, level) - 1
+  return Math.round(500 + step * 260 + step * step * 12)
 }
 
 export function isUnlocked(state: Pick<ArmoryState, 'level'>, unlockLevel: number): boolean {

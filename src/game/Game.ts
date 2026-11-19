@@ -1,3 +1,7 @@
+import { GRAVITY } from './world'
+import { getAimSensitivityScale } from './accessibility'
+import { EXTRA_PROJECTILE_DAMAGE } from './upgrades'
+import { getRangeMultiplier } from './weapons'
 import { getSpatialSound } from './spatialAudio'
 import { CoopTeammates } from './coop/CoopTeammates'
 import type { CoopSession } from './coop/CoopSession'
@@ -69,6 +73,10 @@ interface Enemy {
   elite: boolean
   /** Identificativo condiviso fra host e compagni in co-op. */
   netId: number
+  /** Attesa prima di potersi arrampicare di nuovo. */
+  climbCooldown: number
+  /** Sputatore: caricamento visibile prima dello sputo. */
+  windup: number
   /** Ultimo giocatore che l'ha colpito (null = giocatore locale): riceve la ricompensa. */
   lastHitBy: string | null
   /** Solo client co-op: posizione e rotazione ricevute dall'host. */
@@ -239,8 +247,11 @@ export class Game {
   private stations: Station[] = []
   private shardsCollected = 0
   private readonly particleGeometry = new THREE.BoxGeometry(0.07, 0.07, 0.07)
-  private readonly acidGeometry = new THREE.SphereGeometry(0.16, 7, 7)
-  private readonly acidMaterial = new THREE.MeshBasicMaterial({ color: 0x8cff62 })
+  private readonly acidGeometry = new THREE.SphereGeometry(0.22, 10, 8)
+  private readonly acidMaterial = new THREE.MeshBasicMaterial({ color: 0xb6ff5c })
+  private readonly acidRingGeometry = new THREE.RingGeometry(1.35, 1.55, 32)
+  /** Il giocatore locale è dentro una pozza acida (bordo verde nell'HUD). */
+  private inAcid = false
   private readonly pickupGeometry = new THREE.OctahedronGeometry(0.25)
   private readonly medkitBoxGeometry = new THREE.BoxGeometry(0.42, 0.42, 0.36)
   private readonly medkitBoxMaterial = new THREE.MeshStandardMaterial({ color: 0xf2f4f7, emissive: 0x2a3a30, emissiveIntensity: 0.6, roughness: 0.5 })
@@ -291,6 +302,7 @@ export class Game {
   private precisionHits = 0
   private groanTimer = 2
   private reducedMotion = false
+  private adsSensitivity = 1
   private mouseSensitivity = 0.002
   private hudTimer = 0
   private elapsed = 0
@@ -364,6 +376,7 @@ export class Game {
   setAccessibility(settings: AccessibilitySettings): void {
     this.reducedMotion = settings.reducedMotion
     this.mouseSensitivity = 0.002 * settings.sensitivity
+    this.adsSensitivity = settings.adsSensitivity
     if (settings.reducedMotion) this.cameraShake = 0
   }
 
@@ -729,7 +742,7 @@ export class Game {
       score: Math.floor(this.score),
       wave: this.wave,
       kills: this.kills,
-      shards: this.shardsCollected + Math.floor(this.score / 500) + (won ? 10 : 0),
+      shards: Math.floor(this.shardsCollected * 0.6) + Math.floor(this.score / 900) + (won ? 8 : 0),
       time: Math.floor(this.elapsed),
       won,
       map: this.map.name,
@@ -887,6 +900,8 @@ export class Game {
       elite,
       netId: replica ? replica.id : this.nextEnemyId++,
       lastHitBy: null,
+      climbCooldown: 0,
+      windup: 0,
       netTarget: replica ? replica.position.clone() : null,
       netYaw: 0,
       body: { position: model.group.position, velocityY: 0, grounded: true },
@@ -1136,7 +1151,7 @@ export class Game {
       }
       for (const hit of targets) {
         hitAny = true
-        this.applyZombieHit(hit, critical)
+        this.applyZombieHit(hit, critical, shot >= this.weaponDefinition.pellets ? EXTRA_PROJECTILE_DAMAGE : 1)
       }
       const wallPoint = wallDistance === null ? null : origin.clone().addScaledVector(direction, wallDistance)
       const endPoint = targets.at(-1)?.point ?? wallPoint ?? origin.clone().addScaledVector(direction, this.weaponDefinition.range)
@@ -1155,9 +1170,10 @@ export class Game {
     this.killDestroyedEnemies()
   }
 
-  private applyZombieHit(hit: HitscanHit, critical: boolean): void {
+  private applyZombieHit(hit: HitscanHit, critical: boolean, shotFactor = 1): void {
     const enemy = hit.enemy
-    const baseDamage = this.weaponDefinition.damage * (this.stats.damage / 20)
+    // Danno pieno entro la distanza efficace della categoria, poi cala; i colpi di Colpo multiplo valgono meno.
+    const baseDamage = this.weaponDefinition.damage * (this.stats.damage / 20) * shotFactor * getRangeMultiplier(this.weaponDefinition, this.camera.position.distanceTo(hit.point))
     let multiplier = hit.zone === 'head' ? this.weaponDefinition.headshotMultiplier : 1
 
     if (enemy.kind === 'runner' && hit.zone === 'legs') {
@@ -1279,7 +1295,11 @@ export class Game {
     )
     mesh.rotation.x = -Math.PI / 2
     mesh.position.set(position.x, ground + 0.035, position.z)
+    const ring = new THREE.Mesh(this.acidRingGeometry, new THREE.MeshBasicMaterial({ color: 0xc8ff6a, transparent: true, opacity: 0.85, side: THREE.DoubleSide, depthWrite: false }))
+    ring.position.z = 0.005
+    mesh.add(ring)
     this.scene.add(mesh)
+    this.effects.pulse(mesh.position, 0x8cff62, 1.6)
     this.hazards.push({ mesh, life: 5 })
   }
 
@@ -1535,9 +1555,19 @@ export class Game {
         const victimEye = victim.id === null ? this.camera.position : victim.position.clone().setY(victim.position.y + 1.6)
         const aim = this.frameVectors.aim.copy(victimEye).sub(eye).normalize()
         const clearShot = raycastObstacles(eye, aim, eye.distanceTo(victimEye), this.obstacles) === null
-        if (distance < 17 && enemy.specialCooldown <= 0 && clearShot) {
-          this.fireAcid(enemy, victimEye)
-          enemy.specialCooldown = 2.4
+        if (enemy.windup > 0) {
+          // Caricamento: la gola si illumina e lampeggia, lo zombie si ferma per mirare.
+          enemy.windup -= delta
+          movement.set(0, 0, 0)
+          enemy.model.weakPoint.material.emissiveIntensity = 2.5 + Math.sin(this.elapsed * 40) * 1.5
+          if (enemy.windup <= 0) {
+            enemy.model.weakPoint.material.emissiveIntensity = 1.5
+            this.fireAcid(enemy, victimEye)
+          }
+        } else if (distance < 17 && enemy.specialCooldown <= 0 && clearShot) {
+          enemy.windup = SPITTER_WINDUP
+          enemy.specialCooldown = 2.8
+          this.audio.playAt('acidCharge', enemy.model.group.position, this.player, this.yaw)
         }
       }
       if (enemy.kind === 'screamer') {
@@ -1577,6 +1607,13 @@ export class Game {
         enemy.chargeDirection.copy(direction)
         enemy.specialCooldown = 3.8
         this.effects.pulse(enemy.body.position, getZombieColor('leaper'), 1)
+      }
+      // Arrampicata: se il bersaglio è sopra un ostacolo vicino, lo zombie salta su.
+      enemy.climbCooldown = Math.max(0, enemy.climbCooldown - delta)
+      if (!sameLevel && verticalGap > 0.6 && verticalGap < 3.2 && playerDistance < 2.8 && enemy.body.grounded && enemy.climbCooldown <= 0 && enemy.kind !== 'brute' && enemy.kind !== 'crawler') {
+        enemy.body.velocityY = Math.sqrt(2 * GRAVITY * (verticalGap + 0.5))
+        enemy.body.grounded = false
+        enemy.climbCooldown = 1.6
       }
       const leaping = enemy.kind === 'leaper' && !enemy.body.grounded && enemy.specialCooldown > 3
       if (leaping) movement.copy(enemy.chargeDirection)
@@ -1630,9 +1667,12 @@ export class Game {
         enemy.model.leftArm.rotation.x = -1.2 - swing * 1.4
         enemy.model.rightArm.rotation.x = -1.1 - swing * 1.6
       }
-      if (playerDistance < enemy.radius + 0.65 && sameLevel && enemy.attackCooldown <= 0) {
+      // Chi sale su casse o coperture basse non è più al sicuro: gli zombie colpiscono verso l'alto.
+      const verticalReach = enemy.kind === 'brute' ? 2.6 : 1.9
+      const canStrike = sameLevel ? playerDistance < enemy.radius + 0.65 : verticalGap > 0 && verticalGap < verticalReach && playerDistance < enemy.radius + 0.9
+      if (canStrike && enemy.attackCooldown <= 0) {
         enemy.attackAnim = 1
-        this.hitVictim(victim.id, enemy.damage)
+        this.hitVictim(victim, enemy.damage)
         enemy.attackCooldown = enemy.attackInterval * (enemy.buffTimer > 0 ? 0.75 : 1)
         if (charging) {
           enemy.chargeTimer = 0
@@ -1680,6 +1720,7 @@ export class Game {
         continue
       }
       projectile.mesh.position.addScaledVector(projectile.velocity, delta)
+      if (Math.random() < 0.6) this.spawnBurst(projectile.mesh.position, 0x8cff62, 1)
       const limit = this.map.arenaLimit + 2
       const floor = getGroundHeight(projectile.mesh.position.x, projectile.mesh.position.z, projectile.mesh.position.y, 0.1, this.obstacles)
       if (projectile.life <= 0 || projectile.mesh.position.y <= floor || Math.abs(projectile.mesh.position.x) > limit || Math.abs(projectile.mesh.position.z) > limit) {
@@ -1701,7 +1742,7 @@ export class Game {
           && Math.hypot(mate.feet.x - projectile.mesh.position.x, mate.feet.z - projectile.mesh.position.z) < projectile.radius + 0.45
           && projectile.mesh.position.y > mate.feet.y - 0.2 && projectile.mesh.position.y < mate.feet.y + 2)
         if (struck) {
-          this.hitVictim(struck.id, projectile.damage)
+          this.hitPlayer(struck.id, projectile.damage)
           this.spawnHazard(projectile.mesh.position)
           this.removeProjectile(index)
         }
@@ -1710,20 +1751,28 @@ export class Game {
   }
 
   private updateHazards(delta: number): void {
+    this.inAcid = false
     for (let index = this.hazards.length - 1; index >= 0; index -= 1) {
       const hazard = this.hazards[index]
       if (!hazard) continue
       hazard.life -= delta
-      hazard.mesh.material.opacity = Math.min(0.34, hazard.life * 0.12)
+      hazard.mesh.material.opacity = Math.min(0.42, hazard.life * 0.14)
+      // Bordo che pulsa e bolle: la pozza si riconosce anche con la coda dell'occhio.
+      const ring = hazard.mesh.children[0] as THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial> | undefined
+      if (ring) ring.material.opacity = Math.min(1, hazard.life * 0.4) * (0.55 + Math.sin(this.elapsed * 7 + index) * 0.35)
+      if (Math.random() < delta * 6) this.spawnBurst(hazard.mesh.position.clone().add(new THREE.Vector3((Math.random() - 0.5) * 2.4, 0.05, (Math.random() - 0.5) * 2.4)), 0xb6ff5c, 1)
       const dx = this.player.x - hazard.mesh.position.x
       const dz = this.player.z - hazard.mesh.position.z
-      if (dx * dx + dz * dz < 1.55 ** 2 && Math.abs(this.player.y - hazard.mesh.position.y) < 0.6) this.damagePlayer(5)
+      if (dx * dx + dz * dz < 1.55 ** 2 && Math.abs(this.player.y - hazard.mesh.position.y) < 0.6) {
+        this.inAcid = true
+        this.damagePlayer(5)
+      }
       if (this.coopRole === 'host') {
         for (const mate of this.teammates.all) {
           if (mate.status !== 'alive' || mate.hazardCooldown > 0) continue
           if ((mate.feet.x - hazard.mesh.position.x) ** 2 + (mate.feet.z - hazard.mesh.position.z) ** 2 < 1.55 ** 2 && Math.abs(mate.feet.y - hazard.mesh.position.y) < 0.6) {
             mate.hazardCooldown = 0.32
-            this.hitVictim(mate.id, 5)
+            this.hitPlayer(mate.id, 5)
           }
         }
       }
@@ -1731,6 +1780,7 @@ export class Game {
         this.scene.remove(hazard.mesh)
         hazard.mesh.geometry.dispose()
         hazard.mesh.material.dispose()
+        ;(hazard.mesh.children[0] as THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial> | undefined)?.material.dispose()
         this.hazards.splice(index, 1)
       }
     }
@@ -1781,7 +1831,7 @@ export class Game {
     if (this.coopRole === 'host') {
       for (const mate of this.teammates.all) {
         const distance = mate.feet.distanceTo(position)
-        if (mate.status === 'alive' && distance < BLOATER_BLAST.radius) this.hitVictim(mate.id, BLOATER_BLAST.playerDamage * Math.max(0.3, 1 - distance / BLOATER_BLAST.radius))
+        if (mate.status === 'alive' && distance < BLOATER_BLAST.radius) this.hitPlayer(mate.id, BLOATER_BLAST.playerDamage * Math.max(0.3, 1 - distance / BLOATER_BLAST.radius))
       }
     }
     for (const other of this.enemies) {
@@ -2189,23 +2239,37 @@ export class Game {
   }
 
   /** Zombie: insegue il giocatore in piedi più vicino (in solitaria sempre quello locale). */
-  private chooseVictim(enemy: Enemy): { position: THREE.Vector3; id: string | null } {
-    let best: { position: THREE.Vector3; id: string | null } = { position: this.player, id: null }
-    if (!this.coop) return best
+  private chooseVictim(enemy: Enemy): Victim {
+    let best: Victim = { position: this.player, id: null }
     const score = (feet: THREE.Vector3) => Math.hypot(feet.x - enemy.body.position.x, feet.z - enemy.body.position.z) + Math.abs(feet.y - enemy.body.position.y) * 3
     let bestScore = this.coopStatus === 'alive' ? score(this.player) : Number.POSITIVE_INFINITY
-    for (const mate of this.teammates.all) {
-      if (mate.status !== 'alive') continue
-      const value = score(mate.feet)
-      if (value < bestScore) {
+    if (this.coop) {
+      for (const mate of this.teammates.all) {
+        if (mate.status !== 'alive') continue
+        const value = score(mate.feet)
+        if (value < bestScore) {
+          bestScore = value
+          best = { position: mate.feet, id: mate.id }
+        }
+      }
+    }
+    // Una torretta vicina attira gli zombie più del giocatore lontano: la attaccano finché non esplode.
+    for (const turret of this.equipment.attackableTurrets()) {
+      const value = score(turret.position)
+      if (value < TURRET_AGGRO_RANGE && value < bestScore) {
         bestScore = value
-        best = { position: mate.feet, id: mate.id }
+        best = { position: turret.position, id: null, turret }
       }
     }
     return best
   }
 
-  private hitVictim(id: string | null, amount: number): void {
+  private hitVictim(victim: Victim, amount: number): void {
+    if (victim.turret) victim.turret.damage(amount)
+    else this.hitPlayer(victim.id, amount)
+  }
+
+  private hitPlayer(id: string | null, amount: number): void {
     if (id === null) this.damagePlayer(amount)
     else this.coop?.sendTo(id, { t: 'damage', target: id, amount: Math.round(amount * 10) / 10 })
   }
@@ -2536,6 +2600,7 @@ export class Game {
       scoped: this.weapons.current !== null && this.aiming && this.weaponDefinition.adsFov <= 30,
       aiming: this.aiming,
       waveBreak: this.waveBreak,
+      inAcid: this.inAcid,
       enemiesRemaining: this.coopRole === 'client' ? this.coopRemaining : this.enemies.length + this.spawnQueue,
       coop: this.coop ? {
         status: this.coopStatus,
@@ -2692,8 +2757,9 @@ export class Game {
 
   private readonly onMouseMove = (event: MouseEvent): void => {
     if (this.state !== 'playing' || document.pointerLockElement !== this.renderer.domElement) return
-    this.yaw -= event.movementX * this.mouseSensitivity
-    this.pitch -= event.movementY * this.mouseSensitivity
+    const sensitivity = this.mouseSensitivity * (this.aiming ? getAimSensitivityScale(this.camera.fov, 75, this.adsSensitivity) : 1)
+    this.yaw -= event.movementX * sensitivity
+    this.pitch -= event.movementY * sensitivity
     this.pitch = THREE.MathUtils.clamp(this.pitch, -1.45, 1.45)
     this.weapons.animator.addLook(event.movementX, event.movementY)
   }
@@ -2755,3 +2821,15 @@ function round2(value: number): number {
 function toVec3(vector: THREE.Vector3): Vec3 {
   return [round2(vector.x), round2(vector.y), round2(vector.z)]
 }
+
+/** Bersaglio di uno zombie: un giocatore (null = locale) oppure una torretta. */
+interface Victim {
+  position: THREE.Vector3
+  id: string | null
+  turret?: { position: THREE.Vector3; damage: (amount: number) => void }
+}
+
+/** Distanza (pesata) entro cui una torretta attira gli zombie più del giocatore. */
+const TURRET_AGGRO_RANGE = 9
+/** Secondi di caricamento visibile prima dello sputo acido. */
+const SPITTER_WINDUP = 0.6

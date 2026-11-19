@@ -507,3 +507,7 @@ kbd { display: inline-block; color: #aab4cb; font-family: 'Chakra Petch', sans-s
 .downed-banner strong { font-family: 'Chakra Petch', sans-serif; font-size: 24px; letter-spacing: 0.1em; }
 .downed-banner span { color: #e8cfd3; font-size: 13px; }
 @media (prefers-reduced-motion: reduce) { .coop-mate.down { animation: none; } }
+/* Pozza acida: bordo verde finché ci si resta dentro. */
+.acid-overlay { position: absolute; inset: 0; z-index: 3; opacity: 0; pointer-events: none; background: radial-gradient(ellipse at center, transparent 50%, rgba(120, 255, 60, 0.35) 85%, rgba(80, 200, 20, 0.6) 100%); transition: opacity 150ms; }
+.acid-overlay.active { opacity: 1; }
+.settings-hint { display: block; margin-top: 4px; color: #7f88a2; font-size: 10px; line-height: 1.4; }

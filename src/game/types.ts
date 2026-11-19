@@ -74,6 +74,8 @@ export interface HudData {
   stance: 'stand' | 'crouch' | 'slide'
   /** Bonus attivi con il tempo residuo. */
   powerUps: { id: string; name: string; icon: string; remaining: number; duration: number; color: number }[]
+  /** Il giocatore è in una pozza acida. */
+  inAcid?: boolean
   /** Solo partite Zombie cooperative. */
   coop?: {
     status: 'alive' | 'down' | 'dead'

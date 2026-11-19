@@ -22,7 +22,7 @@ describe('protocollo TCT online', () => {
   })
 
   it('calcola il danno massimo plausibile per arma e fonte', () => {
-    expect(getMaxHitDamage('gun', 'sg-6')).toBeCloseTo(11 * 1.5 * 8)
+    expect(getMaxHitDamage('gun', 'sg-6')).toBeCloseTo(12 * 1.5 * 8)
     expect(getMaxHitDamage('grenade', 'ar-07')).toBe(150)
     expect(getMaxHitDamage('melee', 'ar-07')).toBe(140)
     expect(getMaxHitDamage('turret', 'ar-07')).toBe(14)

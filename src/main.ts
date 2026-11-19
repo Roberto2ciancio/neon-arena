@@ -122,6 +122,13 @@ byId<HTMLInputElement>('reduced-motion').checked = accessibility.reducedMotion
 byId<HTMLInputElement>('high-contrast').checked = accessibility.highContrast
 byId<HTMLInputElement>('mouse-sensitivity').value = String(accessibility.sensitivity)
 byId<HTMLOutputElement>('sensitivity-value').textContent = `${accessibility.sensitivity.toFixed(1).replace('.', ',')}×`
+byId<HTMLInputElement>('ads-sensitivity').value = String(accessibility.adsSensitivity)
+byId<HTMLOutputElement>('ads-sensitivity-value').textContent = `${accessibility.adsSensitivity.toFixed(2).replace('.', ',')}×`
+byId<HTMLInputElement>('ads-sensitivity').addEventListener('input', (event) => {
+  const adsSensitivity = Number((event.target as HTMLInputElement).value)
+  byId<HTMLOutputElement>('ads-sensitivity-value').textContent = `${adsSensitivity.toFixed(2).replace('.', ',')}×`
+  updateAccessibility({ adsSensitivity })
+})
 
 function applyGraphicsQuality(quality: GraphicsQuality, notify = false): void {
   graphicsQuality = quality
@@ -309,6 +316,7 @@ function updateHud(data: HudData): void {
   renderWeaponSlots(data.weaponSlots)
   renderPowerUps(data.powerUps)
   renderCoopHud(data.coop)
+  hudEl('acid-overlay').classList.toggle('active', data.inAcid === true && currentState === 'playing')
   if (data.tct) updateTctOverlay(data.tct)
 }
 

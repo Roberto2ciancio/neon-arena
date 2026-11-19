@@ -18,9 +18,9 @@ export const FIELD_WEAPON_POOL: readonly { weapon: Exclude<WeaponId, 'ar-07' | '
 export type FieldTier = 1 | 2 | 3
 
 export const FIELD_TIERS: Record<FieldTier, { name: string; damage: number; magazine: number; cost: number; firstWave: number }> = {
-  1: { name: 'MK II', damage: 1.35, magazine: 1.2, cost: 1, firstWave: 1 },
-  2: { name: 'MK III', damage: 1.6, magazine: 1.35, cost: 1.45, firstWave: 5 },
-  3: { name: 'MK IV', damage: 1.9, magazine: 1.5, cost: 1.9, firstWave: 10 },
+  1: { name: 'MK II', damage: 1.2, magazine: 1.2, cost: 1, firstWave: 1 },
+  2: { name: 'MK III', damage: 1.38, magazine: 1.35, cost: 1.45, firstWave: 5 },
+  3: { name: 'MK IV', damage: 1.55, magazine: 1.5, cost: 1.9, firstWave: 10 },
 }
 
 /** Grado delle armi delle postazioni: sale con le ondate. */

@@ -54,7 +54,7 @@ describe('livelli e varianti delle armi', () => {
     const mk2 = resolveWeapon(WEAPONS['ak-74r'], { optic: 'holo' }, { fieldVariant: true })
     expect(mk2.shortName).toBe('AK-74R MK II')
     expect(mk2.name).toBe('AK-74R MK II // PESANTE')
-    expect(mk2.damage).toBeCloseTo(WEAPONS['ak-74r'].damage * 1.35)
+    expect(mk2.damage).toBeCloseTo(WEAPONS['ak-74r'].damage * 1.2)
     expect(mk2.magazineSize).toBe(36)
     expect(mk2.attachments.optic).toBe('holo')
   })
