@@ -36,7 +36,7 @@ describe('aggrapparsi ai bordi', () => {
     // Gradino basso: si sale camminando, non serve aggrapparsi.
     expect(findMantleLedge(origin, direction, 0.42, 0, [crate(0.3)])).toBeNull()
     // Soffitto basso sopra la cassa: niente spazio per salirci.
-    expect(findMantleLedge(origin, direction, 0.42, 0, [crate(1.4), solid('roof', [-1, 2, -3], [1, 2.3, -1.6])])).toBeNull()
+    expect(findMantleLedge(origin, direction, 0.42, 0, [crate(1.4), solid('roof', [-1, 2, -3], [1, 3.4, -1.6])])).toBeNull()
   })
 
   it('saltando contro una cassa di 1,5 m ci si tira su in automatico', () => {
@@ -57,10 +57,26 @@ describe('aggrapparsi ai bordi', () => {
     expect(controller.position.z).toBeLessThan(-1.6)
   })
 
+  it('si tira su anche sulle casse alte, i furgoni e i container delle mappe (2,2–2,6 m)', () => {
+    for (const height of [2.2, 2.4, 2.6]) {
+      const controller = new PlayerController()
+      controller.reset(0, 0, -1)
+      const solids = [crate(height)]
+      controller.jump(solids)
+      let mantled = false
+      for (let time = 0; time < 1.5 && !(mantled && !controller.mantling); time += STEP) {
+        controller.update(STEP, forward, 0, environment(solids))
+        mantled ||= controller.mantling
+      }
+      run(controller, 0.2, idle, solids)
+      expect(controller.position.y, `cassa da ${height} m`).toBeCloseTo(height)
+    }
+  })
+
   it('non si aggrappa a un muro troppo alto né senza spingere in avanti', () => {
     const tall = new PlayerController()
     tall.reset(0, 0, -1)
-    const wall = [crate(2.6)]
+    const wall = [crate(MANTLE_MAX_HEIGHT + 0.4)]
     tall.jump(wall)
     run(tall, 1.2, forward, wall)
     expect(tall.position.y).toBe(0)

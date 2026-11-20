@@ -27,8 +27,10 @@ const HARD_LANDING_SLOW = 0.4
 const HARD_LANDING_MULTIPLIER = 0.55
 const ROLL_DURATION = 0.45
 /** Il bordo deve trovarsi al massimo così sopra i piedi nel momento in cui ci si aggrappa. */
-const MANTLE_REACH = 1.15
-const MANTLE_DURATION = 0.32
+const MANTLE_REACH = 1.6
+/** Durata della salita: più lunga per i bordi alti. */
+const MANTLE_BASE_DURATION = 0.3
+const MANTLE_DURATION_PER_METER = 0.1
 const MANTLE_PROBE = 0.3
 /** In aria: accelerazione per cambiare direzione e decelerazione quando si va più veloci del normale. */
 const AIR_CONTROL = 5.5
@@ -71,6 +73,7 @@ export class PlayerController {
   private jumpBuffer = 0
   private rollTimer = 0
   private mantleTimer = 0
+  private mantleDuration = MANTLE_BASE_DURATION
   private lastGroundY = 0
   private baseSpeed = 6
   private readonly mantleFrom = new THREE.Vector3()
@@ -171,7 +174,8 @@ export class PlayerController {
     if (ledge === null || ledge <= this.body.position.y || ledge - this.body.position.y > MANTLE_REACH) return false
     this.mantleFrom.copy(this.body.position)
     this.mantleTo.copy(this.body.position).addScaledVector(direction, PLAYER_RADIUS + MANTLE_PROBE).setY(ledge)
-    this.mantleTimer = MANTLE_DURATION
+    this.mantleDuration = MANTLE_BASE_DURATION + MANTLE_DURATION_PER_METER * (ledge - this.body.position.y)
+    this.mantleTimer = this.mantleDuration
     this.velocity.set(0, 0, 0)
     this.body.velocityY = 0
     this.slideTimer = 0
@@ -182,7 +186,7 @@ export class PlayerController {
   /** Salita sul bordo: prima su, poi avanti. */
   private updateMantle(delta: number, solids: readonly CollisionObstacle[]): void {
     this.mantleTimer = Math.max(0, this.mantleTimer - delta)
-    const t = 1 - this.mantleTimer / MANTLE_DURATION
+    const t = 1 - this.mantleTimer / this.mantleDuration
     const up = 1 - (1 - Math.min(1, t / 0.6)) ** 2
     const across = Math.max(0, Math.min(1, (t - 0.35) / 0.65))
     const position = this.body.position

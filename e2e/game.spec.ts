@@ -817,16 +817,16 @@ test('saltando contro una cassa ci si tira su (mantling)', async ({ page }) => {
     game.clearEntities()
     game.activePowerUps.set('barrier', 999)
     game.debugPlace(0, 0, 12, 0, 0)
-    // Cassa di 1,4 m davanti al giocatore, in un punto libero della mappa.
+    // Cassa di 2,4 m (come furgoni e casse alte delle mappe) davanti al giocatore.
     const { x, y, z } = game.controller.position
     const forward = game.camera.getWorldDirection(game.controller.position.clone()).setY(0).normalize()
     const box = game.obstacles[0].box.clone()
     const cx = x + forward.x * 1.6
     const cz = z + forward.z * 1.6
     box.min.set(cx - 0.6, y, cz - 0.6)
-    box.max.set(cx + 0.6, y + 1.4, cz + 0.6)
+    box.max.set(cx + 0.6, y + 2.4, cz + 0.6)
     game.obstacles.push({ id: 'test-crate', box })
-    return y + 1.4
+    return y + 2.4
   })
   await page.keyboard.down('KeyW')
   try {

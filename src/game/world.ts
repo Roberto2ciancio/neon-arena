@@ -82,8 +82,12 @@ export function resolveBodyCollisions(position: THREE.Vector3, radius: number, h
   return position
 }
 
-/** Bordo più alto a cui ci si aggrappa saltando, misurato dal pavimento di partenza. */
-export const MANTLE_MAX_HEIGHT = 1.6
+/**
+ * Bordo più alto a cui ci si aggrappa saltando, misurato dal pavimento di partenza. Copre casse
+ * alte, furgoni e container delle mappe (2,2–2,6 m); resta sotto l'arrampicata degli zombie
+ * (3,2 m), quindi non crea rifugi irraggiungibili.
+ */
+export const MANTLE_MAX_HEIGHT = 2.7
 /** Quanto avanti si cerca il bordo oltre il raggio del corpo. */
 const MANTLE_PROBE = 0.3
 
