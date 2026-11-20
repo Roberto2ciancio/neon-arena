@@ -17,7 +17,7 @@ import type { GraphicsQuality } from './graphics'
 import { raycastObstacles } from './collision'
 import type { CollisionObstacle } from './collision'
 import { getGroundHeight, resolveBodyCollisions } from './world'
-import { PlayerController, readMovementInput } from './PlayerController'
+import { getRollDip, PlayerController, readMovementInput } from './PlayerController'
 import { CombatEffects } from './effects'
 import { disposeObject } from './equipmentModels'
 import { buildMap } from './mapBuilder'
@@ -697,7 +697,7 @@ export class TctGame implements TouchTarget {
       arenaLimit: this.map.arenaLimit,
     })
     this.localTarget.height = this.controller.height
-    const frameInput = { aiming: this.aiming, crouched: this.controller.crouched, blocked: !controllable || this.controller.sprinting }
+    const frameInput = { aiming: this.aiming, crouched: this.controller.crouched, blocked: !controllable || this.controller.sprinting || this.controller.mantling }
     const frame = this.weapons.update(delta, frameInput)
     for (const sound of frame.sounds) this.audio.play(sound)
     this.pitch = THREE.MathUtils.clamp(this.pitch - frame.recovery.pitch, -1.45, 1.45)
@@ -718,7 +718,7 @@ export class TctGame implements TouchTarget {
       this.camera.position.x += (Math.random() - 0.5) * this.cameraShake * 0.25
       this.camera.position.y += (Math.random() - 0.5) * this.cameraShake * 0.2
     }
-    this.camera.rotation.set(this.pitch, this.yaw, this.reducedMotion ? 0 : this.controller.roll)
+    this.camera.rotation.set(this.pitch + (this.reducedMotion ? 0 : getRollDip(this.controller.rollProgress)), this.yaw, this.reducedMotion ? 0 : this.controller.roll)
     const weapon = this.weapons.current
     const aiming = this.aiming && weapon !== null
     const adsFov = weapon?.adsFov ?? 55

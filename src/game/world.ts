@@ -82,6 +82,31 @@ export function resolveBodyCollisions(position: THREE.Vector3, radius: number, h
   return position
 }
 
+/** Bordo più alto a cui ci si aggrappa saltando, misurato dal pavimento di partenza. */
+export const MANTLE_MAX_HEIGHT = 1.6
+/** Quanto avanti si cerca il bordo oltre il raggio del corpo. */
+const MANTLE_PROBE = 0.3
+
+/**
+ * Bordo su cui tirarsi su davanti al corpo: la sommità più alta entro `MANTLE_MAX_HEIGHT` dal
+ * pavimento `groundY`, oltre un gradino normale, con spazio libero sopra almeno da accovacciati.
+ * Restituisce la quota del bordo o null.
+ */
+export function findMantleLedge(position: THREE.Vector3, direction: THREE.Vector3, radius: number, groundY: number, solids: readonly CollisionObstacle[]): number | null {
+  const length = Math.hypot(direction.x, direction.z)
+  if (length < 0.001) return null
+  const x = position.x + (direction.x / length) * (radius + MANTLE_PROBE)
+  const z = position.z + (direction.z / length) * (radius + MANTLE_PROBE)
+  const ledge = getGroundHeight(x, z, groundY + MANTLE_MAX_HEIGHT - STEP_HEIGHT, radius, solids)
+  if (ledge <= groundY + STEP_HEIGHT) return null
+  // Sopra il bordo deve entrare un corpo accovacciato.
+  for (const { box } of solids) {
+    if (box.max.y <= ledge + 0.05 || box.min.y >= ledge + CROUCH_HEIGHT) continue
+    if (overlapsFootprint(box, x, z, radius)) return null
+  }
+  return ledge
+}
+
 /** Vero se un corpo alto `height` entra nella posizione senza toccare soffitti. */
 export function hasHeadroom(position: THREE.Vector3, radius: number, height: number, solids: readonly CollisionObstacle[]): boolean {
   return getCeilingHeight(position.x, position.z, position.y, radius, solids) >= position.y + height

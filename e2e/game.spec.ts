@@ -740,10 +740,14 @@ test('le uccisioni smembrano, lasciano sangue, fanno combo ed esecuzioni senza c
   await expect(page.locator('#combo-count')).toHaveText(/×[2-9]/)
 
   // Esecuzione: uno zombie quasi morto davanti al giocatore si finisce con il corpo a corpo.
+  await page.waitForFunction(() => (window as any).__neonArena.game.enemies.some((candidate: any) => candidate.spawnTimer <= 0 && candidate.health > 0 && !['brute', 'leaper', 'bloater', 'spitter'].includes(candidate.kind)), null, { timeout: 30000 })
   const executed = await page.evaluate(() => {
     const game = (window as any).__neonArena.game
-    const enemy = game.enemies.find((candidate: any) => candidate.spawnTimer <= 0 && candidate.kind !== 'brute' && candidate.health > 0)
+    // Un tipo base, stordito: non si sposta (il Saltatore balza, lo Sputatore indietreggia).
+    const alive = game.enemies.filter((candidate: any) => candidate.spawnTimer <= 0 && candidate.health > 0)
+    const enemy = alive.find((candidate: any) => ['walker', 'runner', 'armored'].includes(candidate.kind)) ?? alive.find((candidate: any) => !['brute', 'leaper', 'bloater', 'spitter'].includes(candidate.kind))
     if (!enemy) return null
+    enemy.stunTimer = 10
     const forward = game.camera.getWorldDirection(enemy.body.position.clone()).setY(0).normalize()
     enemy.body.position.set(game.player.x + forward.x * 1.4, game.player.y, game.player.z + forward.z * 1.4)
     enemy.health = enemy.maxHealth * 0.1
@@ -797,5 +801,39 @@ test('le uccisioni smembrano, lasciano sangue, fanno combo ed esecuzioni senza c
   })
   await page.waitForTimeout(300)
   expect(await page.evaluate(() => [(window as any).__neonArena.game.gore.debrisCount, (window as any).__neonArena.game.gore.poolCount])).toEqual([0, 0])
+  expect(errors).toEqual([])
+})
+
+test('saltando contro una cassa ci si tira su (mantling)', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  await page.addInitScript(() => window.localStorage.setItem('neon-arena:graphics:v1', 'low'))
+  await page.goto('/')
+  await page.locator('[data-map="district-zero"]').click()
+  await page.getByRole('button', { name: 'INIZIA RUN' }).click()
+  await expect(page.locator('#app')).toHaveAttribute('data-state', 'playing')
+  const ledge = await page.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    game.clearEntities()
+    game.activePowerUps.set('barrier', 999)
+    game.debugPlace(0, 0, 12, 0, 0)
+    // Cassa di 1,4 m davanti al giocatore, in un punto libero della mappa.
+    const { x, y, z } = game.controller.position
+    const forward = game.camera.getWorldDirection(game.controller.position.clone()).setY(0).normalize()
+    const box = game.obstacles[0].box.clone()
+    const cx = x + forward.x * 1.6
+    const cz = z + forward.z * 1.6
+    box.min.set(cx - 0.6, y, cz - 0.6)
+    box.max.set(cx + 0.6, y + 1.4, cz + 0.6)
+    game.obstacles.push({ id: 'test-crate', box })
+    return y + 1.4
+  })
+  await page.keyboard.down('KeyW')
+  try {
+    await page.keyboard.press('Space')
+    await expect.poll(() => page.evaluate(() => (window as any).__neonArena.game.controller.position.y), { timeout: 3000 }).toBeGreaterThan(ledge - 0.05)
+  } finally {
+    await page.keyboard.up('KeyW')
+  }
   expect(errors).toEqual([])
 })

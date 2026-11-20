@@ -41,7 +41,7 @@ import type { NavigationGraph } from './navigation'
 import type { NavPoint } from './structures'
 import { getGroundHeight, moveBody, resolveBodyCollisions, steerBody } from './world'
 import type { Body } from './world'
-import { PlayerController, readMovementInput } from './PlayerController'
+import { getRollDip, PlayerController, readMovementInput } from './PlayerController'
 import { WeaponHandler } from './WeaponHandler'
 import type { ActiveSlot } from './WeaponHandler'
 import { DEFAULT_LOADOUT, resolveLoadout } from './armory'
@@ -1153,7 +1153,7 @@ export class Game implements TouchTarget {
     })
     if (result.landingSpeed > 7) this.cameraShake = Math.max(this.cameraShake, Math.min(0.3, (result.landingSpeed - 7) * 0.05))
 
-    const frameInput = { aiming: this.aiming, crouched: this.controller.crouched, blocked: this.controller.sprinting || this.coopStatus !== 'alive' || this.state !== 'playing', fireRateMultiplier: (this.stats.fireRate / 8.5) * (this.activePowerUps.has('rapid-fire') ? 1.6 : 1) }
+    const frameInput = { aiming: this.aiming, crouched: this.controller.crouched, blocked: this.controller.sprinting || this.controller.mantling || this.coopStatus !== 'alive' || this.state !== 'playing', fireRateMultiplier: (this.stats.fireRate / 8.5) * (this.activePowerUps.has('rapid-fire') ? 1.6 : 1) }
     const frame = this.weapons.update(delta, frameInput)
     for (const sound of frame.sounds) this.audio.play(sound)
     this.pitch = THREE.MathUtils.clamp(this.pitch - frame.recovery.pitch, -1.45, 1.45)
@@ -1178,7 +1178,7 @@ export class Game implements TouchTarget {
     // Spinta dello sparo: la visuale sobbalza appena e il campo visivo si allarga per un istante.
     this.firePunch = Math.max(0, this.firePunch - delta * 9)
     const punch = this.reducedMotion ? 0 : this.firePunch
-    this.camera.rotation.set(this.pitch + punch * 0.012, this.yaw, (this.reducedMotion ? 0 : this.controller.roll) + punch * this.punchRoll * 0.01)
+    this.camera.rotation.set(this.pitch + punch * 0.012 + this.rollDip(), this.yaw, (this.reducedMotion ? 0 : this.controller.roll) + punch * this.punchRoll * 0.01)
     if (this.coopStatus !== 'alive') {
       // A terra: visuale rasoterra e inclinata, come sdraiati.
       this.camera.position.y -= 1.15
@@ -3355,6 +3355,11 @@ export class Game implements TouchTarget {
       detail = golden ? (this.coopRole === 'client' ? 'IN GIRO' : `SCAPPA TRA ${Math.ceil(golden.goldenLife)}s`) : this.goldenPending > 0 ? 'IN ARRIVO' : ''
     }
     return { name, icon, color, detail }
+  }
+
+  /** Visuale che si abbassa durante il rotolamento (mai con Riduci movimento). */
+  private rollDip(): number {
+    return this.reducedMotion ? 0 : getRollDip(this.controller.rollProgress)
   }
 
   /** C'è uno zombie da giustiziare a portata di corpo a corpo, davanti al giocatore. */
