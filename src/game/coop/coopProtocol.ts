@@ -65,7 +65,7 @@ export type CoopHostMessage =
   | { t: 'world'; wave: number; waveBreak: number; remaining: number; enemies: PackedEnemy[]; players: CoopPlayerState[] }
   | { t: 'shot'; by: string; from: Vec3; to: Vec3 }
   | { t: 'wave'; wave: number; event?: WaveEventId | null }
-  | { t: 'kill'; enemy: number; by: string; kind: EnemyKind; pos: Vec3; score: number; xp: number; shards: number; precision: boolean; credits?: number }
+  | { t: 'kill'; enemy: number; by: string; kind: EnemyKind; pos: Vec3; score: number; xp: number; shards: number; precision: boolean; credits?: number; gore?: number; dir?: [number, number]; fall?: number; impulse?: number }
   | { t: 'damage'; target: string; amount: number }
   | { t: 'acid'; pos: Vec3; vel: Vec3 }
   | { t: 'power-spawn'; id: number; power: PowerUpId; pos: Vec3 }
@@ -147,6 +147,13 @@ export function parseCoopHostMessage(raw: unknown): CoopHostMessage | null {
   if (data.t === 'world' && (!Array.isArray(data.enemies) || !Array.isArray(data.players))) return null
   if (data.t === 'bounty' && !(['progress', 'done', 'failed'].includes(data.s as string) && isFiniteNumber(data.kills) && isFiniteNumber(data.target) && data.target > 0 && isFiniteNumber(data.time))) return null
   if (data.t === 'wave' && data.event !== undefined && data.event !== null && !isWaveEventId(data.event)) data.event = null
+  if (data.t === 'kill') {
+    // Dati solo visivi della morte: se malformati si ignorano.
+    if (!(Number.isInteger(data.gore) && (data.gore as number) >= 0 && (data.gore as number) < 32)) data.gore = 0
+    if (!(Array.isArray(data.dir) && data.dir.length === 2 && data.dir.every(isFiniteNumber))) data.dir = undefined
+    if (!(Number.isInteger(data.fall) && (data.fall as number) >= 0 && (data.fall as number) < 4)) data.fall = 0
+    if (!(isFiniteNumber(data.impulse) && data.impulse >= 0 && data.impulse <= 20)) data.impulse = undefined
+  }
   if (data.t === 'kill' && data.credits !== undefined && !(isFiniteNumber(data.credits) && data.credits >= 0 && data.credits <= 1000)) data.credits = 0
   return data as unknown as CoopHostMessage
 }

@@ -94,6 +94,10 @@ export interface HudData {
   inAcid?: boolean
   /** Evento casuale dell'ondata in corso, con l'avanzamento (taglia, zombie dorato). */
   waveEvent?: { name: string; icon: string; color: number; detail: string }
+  /** Combo di uccisioni in corso (da 2 in su), con il tempo rimasto 0–1. */
+  combo?: { count: number; multiplier: number; timer: number }
+  /** Uno zombie da giustiziare è a portata di corpo a corpo. */
+  execution?: boolean
   /** Solo partite Zombie cooperative. */
   coop?: {
     status: 'alive' | 'down' | 'dead'
@@ -120,6 +124,8 @@ export interface RunResult {
   precisionHits?: number
   /** Esperienza guadagnata da ogni arma durante la run (livello dell'arma). */
   weaponXp?: Partial<Record<string, number>>
+  /** Combo di uccisioni più lunga della run. */
+  bestCombo?: number
 }
 
 export interface LeaderboardEntry {
@@ -144,7 +150,11 @@ export interface GameEvents {
   /** Bonus raccolto: annuncio a schermo. */
   onPowerUp?: (name: string, description: string, color: number) => void
   /** Uccisione confermata: il mirino mostra un segno dedicato. */
-  onKill?: () => void
+  onKill?: (variant?: 'kill' | 'headshot' | 'execution') => void
+  /** Annuncio di combo (DOPPIA, MASSACRO…) o di esecuzione. */
+  onCombo?: (text: string, count: number) => void
+  /** Numero di danno da mostrare (coordinate dello schermo 0–1). */
+  onDamageNumber?: (x: number, y: number, amount: number, kind: 'body' | 'head' | 'kill') => void
   /** Avviso informativo (es. nuovo tipo di zombie). */
   onNotice?: (title: string, text: string, color: number) => void
 }

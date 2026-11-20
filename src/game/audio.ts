@@ -6,7 +6,7 @@ import type { AudioPosition, SpatialSound } from './spatialAudio'
 export type SoundName =
   | 'shoot' | 'enemyShoot' | 'hit' | 'headshot' | 'kill' | 'damage' | 'dash' | 'pickup' | 'upgrade'
   | 'dry' | 'reloadOut' | 'reloadIn' | 'shell' | 'melee' | 'meleeHit' | 'switch' | 'explosion'
-  | 'groan' | 'groanBig' | 'powerUp' | 'reloadRack' | 'shellLoad' | 'heartbeat' | 'heal' | 'acidCharge'
+  | 'groan' | 'groanBig' | 'powerUp' | 'reloadRack' | 'shellLoad' | 'heartbeat' | 'heal' | 'acidCharge' | 'headPop' | 'bodyFall' | 'execution' | 'combo'
 
 /** Voci contemporanee massime: oltre, i suoni nuovi vengono saltati per non saturare CPU e mix. */
 const MAX_VOICES = 48
@@ -211,6 +211,23 @@ export class GameAudio {
         // Bossolo che rimbalza a terra.
         this.tone(5200, 5000, 0.05, 'sine', 0.025, { ...options, delay: 0.22 + Math.random() * 0.1 })
         this.tone(4700, 4600, 0.04, 'sine', 0.018, { ...options, delay: 0.34 + Math.random() * 0.1 })
+        break
+      case 'headPop':
+        // Schiocco secco e colpo sordo: la testa che salta.
+        this.noise({ type: 'bandpass', frequency: 2300, gain: 0.55, decay: 0.07, q: 1.4 }, options)
+        this.tone(190, 55, 0.14, 'sine', 0.4, options)
+        break
+      case 'bodyFall':
+        this.noise({ type: 'lowpass', frequency: 420, gain: 0.35, decay: 0.2 }, options)
+        this.tone(72, 38, 0.16, 'sine', 0.3, options)
+        break
+      case 'execution':
+        this.tone(150, 45, 0.28, 'sawtooth', 0.22, { ...options, reverb: 0.3 }, 700)
+        this.noise({ type: 'bandpass', frequency: 1900, gain: 0.45, decay: 0.1, q: 2 }, { ...options, delay: 0.03 })
+        break
+      case 'combo':
+        this.tone(660, 990, 0.12, 'triangle', 0.06, options)
+        this.tone(990, 1320, 0.14, 'sine', 0.04, { ...options, delay: 0.06 })
         break
       case 'explosion':
         this.noise({ type: 'lowpass', frequency: 900, gain: 1, decay: 0.7, sweepTo: 120 }, { ...options, reverb: 0.7 })

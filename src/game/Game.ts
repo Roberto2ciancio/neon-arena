@@ -1,4 +1,7 @@
 import { DEFAULT_THEME } from './maps'
+import { GoreSystem } from './gore'
+import { chooseFallStyle, createCombo, EXECUTION_CREDITS, EXECUTION_HEAL_SHARE, EXECUTION_HINT_RANGE, FALL_DURATION, FALL_STYLES, getBloodColor, getBloodCount, getComboMultiplier, getDeathImpulse, getHitStop, HIT_STOP_TIME_SCALE, isExecutable, normalizeGore, PART_HEAD, PART_LEFT_ARM, PART_LEFT_LEG, PART_RIGHT_ARM, PART_RIGHT_LEG, registerComboKill, rollDismemberment, tickCombo } from './killFeel'
+import type { ComboState, FallStyle, GoreLevel, HitStopEvent, KillCause } from './killFeel'
 import { BOUNTY_CREDITS, BOUNTY_TIME, CHAIN_BLAST_COOLDOWN, CHAIN_BLAST_RADIUS, filterSpawnPool, getBountyTarget, getChainBlastDamage, getWaveEventModifiers, getZoneDamageMultiplier, GOLDEN_CREDITS, GOLDEN_HEALTH_MULTIPLIER, GOLDEN_LIFETIME, GOLDEN_POWER_UPS, GOLDEN_SPAWN_DELAY, GOLDEN_SPEED_MULTIPLIER, GOLDEN_TEAM_CREDITS, rollWaveEvent, SUPPLY_DROP_COUNT, WAVE_EVENTS } from './waveEvents'
 import type { WaveEventId, WaveEventModifiers } from './waveEvents'
 import { shouldSprint, TOUCH_ACTION_KEYS, TOUCH_LOOK_SCALE } from './touchInput'
@@ -83,6 +86,11 @@ interface PowerUpPickup {
 interface Enemy {
   model: EnemyModel
   elite: boolean
+  /** Ultimo colpo ricevuto: decide smembramento e caduta. */
+  lastCause: KillCause
+  lastZone: HitZone | null
+  lastHitDir: THREE.Vector3
+  lastHitDistance: number
   /** Zombie dorato dell'evento: scappa dopo un po' e lascia un grosso bottino. */
   golden: boolean
   /** Secondi prima che lo zombie dorato scappi (solo host). */
@@ -138,8 +146,16 @@ interface DyingEnemy {
   model: EnemyModel
   kind: EnemyKind
   life: number
-  direction: number
   baseY: number
+  style: FallStyle
+  /** Asse di rotazione della caduta (perpendicolare alla spinta). */
+  axis: THREE.Vector3
+  /** Spinta orizzontale e, per le esplosioni, verticale. */
+  push: THREE.Vector3
+  /** Orientamento al momento della morte. */
+  base: THREE.Quaternion
+  elapsed: number
+  landed: boolean
 }
 
 interface Projectile {
@@ -324,6 +340,15 @@ export class Game implements TouchTarget {
   private coop: CoopSession | null = null
   private coopUnsubscribe: (() => void)[] = []
   private readonly teammates = new CoopTeammates(this.scene)
+  // --- Sensazione d'uccisione --------------------------------------------------------------
+  private readonly gore = new GoreSystem(this.scene)
+  private goreLevel: GoreLevel = 'full'
+  private damageNumbers = false
+  private combo: ComboState = createCombo()
+  private hitStop = 0
+  private frameKills = 0
+  private readonly tiltQuaternion = new THREE.Quaternion()
+  private readonly spinQuaternion = new THREE.Quaternion()
   /** Giocatori della partita co-op (1 = da solo). */
   private coopPlayers = 1
   private coopStatus: CoopPlayerStatus = 'alive'
@@ -422,6 +447,8 @@ export class Game implements TouchTarget {
     this.reducedMotion = settings.reducedMotion
     this.mouseSensitivity = 0.002 * settings.sensitivity
     this.adsSensitivity = settings.adsSensitivity
+    this.goreLevel = normalizeGore(settings.gore)
+    this.damageNumbers = settings.damageNumbers === true
     if (settings.reducedMotion) this.cameraShake = 0
   }
 
@@ -436,6 +463,7 @@ export class Game implements TouchTarget {
     this.renderer.shadowMap.autoUpdate = false
     this.renderer.shadowMap.needsUpdate = true
     this.effects.setLightsEnabled(quality !== 'low')
+    this.gore.setQuality(quality)
     // Preset basso: niente pioggia, polvere o spore (meno carico sui computer deboli).
     if (this.mapContent.weather) this.mapContent.weather.visible = quality !== 'low'
     let staticLightIndex = 0
@@ -477,6 +505,7 @@ export class Game implements TouchTarget {
         if (!enemy || enemy.health <= 0) return
         const explosive = source === 'grenade' || source === 'claymore' || source === 'molotov' ? 1 + (1 - this.stats.demolition) * 1.25 : 1
         this.dealDamage(enemy, this.scaleDamage(enemy, amount * (this.stats.damage / 20) * explosive * this.executionBonus(enemy)))
+        if (source === 'grenade' || source === 'claymore') this.recordHit(enemy, 'explosion', null, null)
         enemy.hitFlash = 0.1
         enemy.flinch = Math.min(1, enemy.flinch + (source === 'molotov' ? 0.15 : 0.6))
         if (source === 'molotov') enemy.burnTimer = Math.max(enemy.burnTimer, 0.6)
@@ -801,6 +830,7 @@ export class Game implements TouchTarget {
     }
     this.enemyPool.clear()
     this.decals.dispose()
+    this.gore.dispose()
     this.equipment.dispose()
     this.weapons.dispose()
     this.effects.dispose()
@@ -842,6 +872,7 @@ export class Game implements TouchTarget {
       won,
       map: this.map.name,
       precisionHits: this.precisionHits,
+      bestCombo: this.combo.best,
       weaponXp: Object.fromEntries(this.weaponXp),
     }
   }
@@ -902,9 +933,11 @@ export class Game implements TouchTarget {
       model.group.position.y = 0
       this.scene.add(model.group)
     })
+    const restoreGore = this.gore.prewarm(this.camera.position, forward)
     this.renderer.compile(this.scene, this.camera)
     this.renderer.shadowMap.needsUpdate = true
     this.pipeline.render()
+    restoreGore()
     for (const model of created) {
       this.scene.remove(model.group)
       model.group.position.set(0, 0, 0)
@@ -1005,6 +1038,13 @@ export class Game implements TouchTarget {
     model.rightLeg.rotation.x = 0
     model.leftArm.rotation.x = 0
     model.rightArm.rotation.x = 0
+    model.head.rotation.x = 0
+    // Un modello riusato dopo uno smembramento ritorna intero.
+    model.head.visible = true
+    model.leftArm.visible = true
+    model.rightArm.visible = true
+    model.leftLeg.visible = true
+    model.rightLeg.visible = true
     model.group.position.copy(replica ? replica.position : this.pickSpawnPoint(stats.radius))
     this.scene.add(model.group)
     this.effects.pulse(model.group.position, getZombieColor(kind), 1.4)
@@ -1025,6 +1065,10 @@ export class Game implements TouchTarget {
       elite,
       golden: isGolden,
       goldenLife: isGolden ? GOLDEN_LIFETIME : 0,
+      lastCause: 'bullet',
+      lastZone: null,
+      lastHitDir: new THREE.Vector3(0, 0, -1),
+      lastHitDistance: 10,
       netId: replica ? replica.id : this.nextEnemyId++,
       lastHitBy: null,
       climbCooldown: 0,
@@ -1184,13 +1228,21 @@ export class Game implements TouchTarget {
       const distance = offset.length()
       if (distance > melee.range + enemy.radius) continue
       if (distance > 0.3 && offset.divideScalar(distance).dot(forward) < minimumDot) continue
-      // Dopo l'ondata 4 un fendente non basta più a uccidere: toglie al massimo il 60% della vita.
-      const shieldFactor = enemy.kind === 'shielder' && this.isShieldFacing(enemy, this.player) ? 0.3 : 1
-      this.dealDamage(enemy, this.scaleDamage(enemy, getMeleeDamage(melee.damage * (this.stats.damage / 20), this.wave, enemy.maxHealth) * shieldFactor))
+      // Gli zombie storditi o quasi morti si giustiziano con un colpo solo.
+      if (isExecutable(enemy.kind, enemy.health, enemy.maxHealth, enemy.stunTimer > 0)) {
+        this.recordHit(enemy, 'execution', 'head', null)
+        this.dealDamage(enemy, enemy.health + 1)
+        this.executeBonus()
+      } else {
+        // Dopo l'ondata 4 un fendente non basta più a uccidere: toglie al massimo il 60% della vita.
+        const shieldFactor = enemy.kind === 'shielder' && this.isShieldFacing(enemy, this.player) ? 0.3 : 1
+        this.dealDamage(enemy, this.scaleDamage(enemy, getMeleeDamage(melee.damage * (this.stats.damage / 20), this.wave, enemy.maxHealth) * shieldFactor))
+        this.recordHit(enemy, 'melee', 'body', null)
+      }
       enemy.hitFlash = 0.12
       enemy.flinch = 1
       enemy.knockback.addScaledVector(forward, enemy.kind === 'brute' ? 1 : 4)
-      this.spawnBurst(enemy.model.body.getWorldPosition(new THREE.Vector3()), 0x9b3147, 8)
+      this.spawnBlood(enemy.model.body.getWorldPosition(new THREE.Vector3()), forward, enemy.kind, 8)
       hit = true
     }
     if (hit) {
@@ -1346,8 +1398,12 @@ export class Game implements TouchTarget {
 
     const precisionZone = hit.zone === 'head' || hit.zone === 'generator' || hit.zone === 'core' || hit.zone === 'spine' || hit.zone === 'throat' || hit.zone === 'back' || hit.zone === 'belly'
     const damage = this.scaleDamage(enemy, baseDamage * multiplier * (critical ? this.stats.critMultiplier : 1) * this.executionBonus(enemy) * getZoneDamageMultiplier(this.waveMods, precisionZone))
+    const healthBefore = enemy.health
     this.dealDamage(enemy, damage, precisionZone)
     enemy.hitFlash = 0.08
+    this.recordHit(enemy, this.weaponDefinition.pellets > 1 ? 'shotgun' : 'bullet', hit.zone, hit.point)
+    this.spawnBlood(hit.point, enemy.lastHitDir, enemy.kind, hit.zone === 'head' ? 7 : 3)
+    if (this.damageNumbers) this.emitDamageNumber(hit.point, damage, healthBefore > 0 && enemy.health <= 0 ? 'kill' : precisionZone ? 'head' : 'body')
     // Reazione al colpo: sobbalzo e piccola spinta all'indietro.
     enemy.flinch = Math.min(1, enemy.flinch + (enemy.kind === 'brute' ? 0.25 : 0.7))
     const push = hit.point.clone().sub(this.camera.position).setY(0)
@@ -1633,7 +1689,10 @@ export class Game implements TouchTarget {
         continue
       }
 
-      enemy.marker.visible = this.radarTimer > 0
+      const executableHint = this.coopStatus === 'alive' && isExecutable(enemy.kind, enemy.health, enemy.maxHealth, enemy.stunTimer > 0)
+        && enemy.body.position.distanceToSquared(this.player) < EXECUTION_HINT_RANGE * EXECUTION_HINT_RANGE
+      enemy.marker.visible = this.radarTimer > 0 || executableHint
+      ;(enemy.marker as THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>).material.color.setHex(executableHint ? 0xffd166 : 0xff4f6e)
       enemy.stunTimer = Math.max(0, enemy.stunTimer - delta)
       if (enemy.stunTimer > 0) {
         // Stordito dal flashbang: barcolla sul posto.
@@ -1995,7 +2054,6 @@ export class Game implements TouchTarget {
     if (!enemy) return
     const position = enemy.model.group.position.clone()
     if (enemy.kind === 'bloater') this.explodeBloater(position)
-    const color = getZombieColor(enemy.kind)
     const score = enemy.score * this.wave * this.lootMultiplier * this.waveMods.score
     const shards = enemy.kind === 'brute' ? 8 : Math.random() < 0.26 ? 1 : 0
     const killer = enemy.lastHitBy
@@ -2004,26 +2062,119 @@ export class Game implements TouchTarget {
     if (dropped) this.spawnPowerPickup(position, dropped)
     if (enemy.golden) this.dropGoldenLoot(position, active)
     if (this.waveEvent === 'chain-reaction') this.chainBlast(enemy, position)
-    this.spawnBurst(position.clone().setY(position.y + enemy.model.height * 0.5), color, enemy.kind === 'brute' ? 28 : 12)
+    // Smembramento deciso qui (in co-op dall'host) come con il sangue completo; ognuno lo mostra secondo la sua impostazione.
+    const overkill = Math.max(0, -enemy.health / enemy.maxHealth)
+    const goreMask = rollDismemberment({ cause: enemy.lastCause, zone: enemy.lastZone, kind: enemy.kind, distance: enemy.lastHitDistance, overkill })
+    const fall = chooseFallStyle(enemy.lastCause, enemy.lastZone)
+    const impulse = getDeathImpulse(enemy.lastCause, overkill)
+    const dirX = round2(enemy.lastHitDir.x)
+    const dirZ = round2(enemy.lastHitDir.z)
     if (this.coopRole === 'host') {
-      this.coop?.broadcast({ t: 'kill', enemy: enemy.netId, by: killer ?? COOP_HOST_ID, kind: enemy.kind, pos: toVec3(position), score, xp: enemy.xp, shards, precision: false, credits: enemy.golden ? GOLDEN_CREDITS : 0 })
+      this.coop?.broadcast({ t: 'kill', enemy: enemy.netId, by: killer ?? COOP_HOST_ID, kind: enemy.kind, pos: toVec3(position), score, xp: enemy.xp, shards, precision: false, credits: enemy.golden ? GOLDEN_CREDITS : 0, gore: goreMask, dir: [dirX, dirZ], fall: FALL_STYLES.indexOf(fall), impulse: round2(impulse) })
       if (killer) this.teammateKills.set(killer, (this.teammateKills.get(killer) ?? 0) + 1)
     }
-    if (killer === null) this.rewardKill(enemy.kind, position, score, enemy.xp, shards, enemy.elite, enemy.golden ? GOLDEN_CREDITS : 0)
-    else if (enemy.golden) this.shareGoldenCredits()
+    if (killer === null) {
+      const variant = enemy.lastCause === 'execution' ? 'execution' : (goreMask & PART_HEAD) !== 0 || enemy.lastZone === 'head' ? 'headshot' : 'kill'
+      this.rewardKill(enemy.kind, position, score, enemy.xp, shards, enemy.elite, enemy.golden ? GOLDEN_CREDITS : 0, variant)
+      this.requestHitStop({ boss: enemy.kind === 'brute', lethalHeadshot: enemy.lastZone === 'head', execution: enemy.lastCause === 'execution' })
+    } else if (enemy.golden) this.shareGoldenCredits()
     this.advanceBounty()
     this.enemies.splice(index, 1)
-    enemy.model.group.rotation.x = 0
-    this.dyingEnemies.push({ model: enemy.model, kind: enemy.kind, life: 0.65, direction: Math.random() < 0.5 ? -1 : 1, baseY: position.y })
+    this.startDeath(enemy.model, enemy.kind, position, goreMask, fall, enemy.lastHitDir, impulse)
     this.audio.playAt('kill', position, this.player, this.yaw)
   }
 
+  /** Memorizza causa, zona e direzione dell'ultimo colpo (per caduta e smembramento). */
+  private recordHit(enemy: Enemy, cause: KillCause, zone: HitZone | null, point: THREE.Vector3 | null, origin: THREE.Vector3 = this.camera.position): void {
+    // Un'esplosione resta la causa anche se nello stesso istante arriva un proiettile.
+    enemy.lastCause = cause
+    enemy.lastZone = zone
+    const target = point ?? enemy.body.position
+    enemy.lastHitDistance = origin.distanceTo(target)
+    enemy.lastHitDir.set(enemy.body.position.x - origin.x, 0, enemy.body.position.z - origin.z)
+    if (enemy.lastHitDir.lengthSq() < 0.0001) enemy.lastHitDir.set(0, 0, -1)
+    enemy.lastHitDir.normalize()
+  }
+
+  /**
+   * Inizio della morte, uguale per host, client e partita in solitaria: parti staccate,
+   * sangue a terra e caduta nella direzione del colpo.
+   */
+  private startDeath(model: EnemyModel, kind: EnemyKind, position: THREE.Vector3, goreMask: number, style: FallStyle, direction: THREE.Vector3, impulse: number): void {
+    const dir = direction.clone().setY(0)
+    if (dir.lengthSq() < 0.0001) dir.set(0, 0, -1)
+    dir.normalize()
+    const bloodColor = getBloodColor(kind, this.goreLevel)
+    const chest = position.clone().setY(position.y + model.height * 0.6)
+    if (bloodColor === null) {
+      this.spawnBurst(chest, getZombieColor(kind), kind === 'brute' ? 28 : 12)
+    } else {
+      this.spawnBlood(chest, dir, kind, kind === 'brute' ? 26 : 12)
+      this.gore.splat(position, position.y, kind === 'brute' ? 2.1 : 0.7 + Math.random() * 0.5, bloodColor)
+    }
+    if (this.goreLevel === 'full' && goreMask !== 0) {
+      const parts: [number, THREE.Object3D][] = [[PART_HEAD, model.head], [PART_LEFT_ARM, model.leftArm], [PART_RIGHT_ARM, model.rightArm], [PART_LEFT_LEG, model.leftLeg], [PART_RIGHT_LEG, model.rightLeg]]
+      const push = dir.clone().multiplyScalar(impulse * 0.8)
+      for (const [bit, part] of parts) {
+        if ((goreMask & bit) === 0) continue
+        this.gore.detach(part, push, position.y)
+        this.spawnBlood(part.getWorldPosition(new THREE.Vector3()), dir, kind, bit === PART_HEAD ? 10 : 6)
+      }
+      if ((goreMask & PART_HEAD) !== 0) this.audio.playAt('headPop', position, this.player, this.yaw)
+    }
+    const axis = new THREE.Vector3(dir.z, 0, -dir.x)
+    const push = style === 'launch'
+      ? dir.clone().multiplyScalar(impulse).setY(4 + impulse * 0.35)
+      : dir.clone().multiplyScalar(impulse * 0.35)
+    model.group.updateMatrix()
+    this.dyingEnemies.push({ model, kind, life: FALL_DURATION, baseY: position.y, style, axis, push, base: model.group.quaternion.clone(), elapsed: 0, landed: false })
+  }
+
+  /** Pausa d'impatto: solo in solitaria, decisa dalle regole pure. */
+  private requestHitStop(event: HitStopEvent): void {
+    this.hitStop = Math.max(this.hitStop, getHitStop(event, this.coop !== null, this.reducedMotion))
+  }
+
+  /** Esecuzione riuscita: cura, crediti extra, suono dedicato e scossone. */
+  private executeBonus(): void {
+    this.health = Math.min(this.stats.maxHealth, this.health + this.stats.maxHealth * EXECUTION_HEAL_SHARE)
+    this.shards += EXECUTION_CREDITS
+    this.audio.play('execution')
+    this.cameraShake = Math.max(this.cameraShake, 0.2)
+    this.events.onCombo?.('ESECUZIONE', 0)
+  }
+
+  /** Sangue direzionale secondo l'impostazione; senza sangue restano le scintille del tipo. */
+  private spawnBlood(position: THREE.Vector3, direction: THREE.Vector3, kind: EnemyKind, base: number): void {
+    const color = getBloodColor(kind, this.goreLevel)
+    if (color === null) {
+      this.spawnBurst(position, getZombieColor(kind), Math.ceil(base * 0.5))
+      return
+    }
+    this.spawnBurst(position, color, getBloodCount(this.goreLevel, base), direction)
+  }
+
+  private emitDamageNumber(point: THREE.Vector3, amount: number, kind: 'body' | 'head' | 'kill'): void {
+    const projected = point.clone().project(this.camera)
+    if (projected.z > 1 || Math.abs(projected.x) > 1 || Math.abs(projected.y) > 1) return
+    this.events.onDamageNumber?.((projected.x + 1) / 2, (1 - projected.y) / 2, Math.round(amount), kind)
+  }
+
   /** Ricompense dell'uccisione per il giocatore locale: punti, esperienza, frammenti e kit. */
-  private rewardKill(kind: EnemyKind, position: THREE.Vector3, score: number, xp: number, shards: number, elite = false, bonusCredits = 0): void {
+  private rewardKill(kind: EnemyKind, position: THREE.Vector3, score: number, xp: number, shards: number, elite = false, bonusCredits = 0, variant: 'kill' | 'headshot' | 'execution' = 'kill'): void {
     this.score += score
     this.kills += 1
+    // Combo: uccisioni ravvicinate aumentano i crediti fino a ×2.
+    const combo = registerComboKill(this.combo)
+    this.combo = combo.state
+    if (combo.announcement) {
+      this.events.onCombo?.(combo.announcement, combo.state.count)
+      this.audio.play('combo')
+    }
+    this.frameKills += 1
+    if (this.frameKills === 2) this.requestHitStop({ multiKill: true })
     // Crediti per comprare in partita e esperienza per l'arma impugnata.
-    this.shards += Math.round(getKillCredits(kind, elite) * this.lootMultiplier * this.waveMods.credits)
+    this.shards += Math.round(getKillCredits(kind, elite) * this.lootMultiplier * this.waveMods.credits * getComboMultiplier(this.combo.count))
     if (bonusCredits > 0) {
       this.shards += bonusCredits
       this.events.onNotice?.('ZOMBIE DORATO ABBATTUTO', `+${bonusCredits} crediti e bonus a terra.`, WAVE_EVENTS['golden-zombie'].color)
@@ -2038,7 +2189,7 @@ export class Game implements TouchTarget {
       this.spawnPickup(position.clone().add(offset), 1)
     }
     this.gainXp(xp)
-    this.events.onKill?.()
+    this.events.onKill?.(variant)
   }
 
   private get lootMultiplier(): number {
@@ -2253,7 +2404,7 @@ export class Game implements TouchTarget {
     }
   }
 
-  private spawnBurst(position: THREE.Vector3, color: number, count: number): void {
+  private spawnBurst(position: THREE.Vector3, color: number, count: number, direction?: THREE.Vector3): void {
     const available = Math.max(0, 130 - this.particles.length)
     for (let index = 0; index < Math.min(count, available); index += 1) {
       const particle = this.particlePool.pop() ?? {
@@ -2267,6 +2418,8 @@ export class Game implements TouchTarget {
       particle.mesh.position.copy(position)
       particle.mesh.scale.setScalar(1)
       particle.velocity.set((Math.random() - 0.5) * 6, Math.random() * 3.5, (Math.random() - 0.5) * 6)
+      // Il sangue esce nella direzione del colpo.
+      if (direction) particle.velocity.multiplyScalar(0.55).addScaledVector(direction, 3 + Math.random() * 4)
       particle.life = 0.25 + Math.random() * 0.35
       particle.maxLife = particle.life
       this.scene.add(particle.mesh)
@@ -2274,16 +2427,71 @@ export class Game implements TouchTarget {
     }
   }
 
+  /**
+   * Caduta credibile senza motore fisico: inclinazione con accelerazione, rimbalzo leggero,
+   * arti che seguono in ritardo; le esplosioni lanciano il corpo con una parabola.
+   */
+  private animateDeath(dying: DyingEnemy, delta: number): void {
+    dying.elapsed += delta
+    const t = dying.elapsed
+    const group = dying.model.group
+    let angle: number
+    if (dying.style === 'launch') {
+      dying.push.y -= 18 * delta
+      group.position.addScaledVector(dying.push, delta)
+      if (group.position.y <= dying.baseY) {
+        group.position.y = dying.baseY
+        dying.push.multiplyScalar(0.4)
+        dying.push.y = 0
+      }
+      angle = Math.min(1.55, t * 4)
+    } else {
+      group.position.x += dying.push.x * delta
+      group.position.z += dying.push.z * delta
+      dying.push.multiplyScalar(Math.exp(-6 * delta))
+      if (dying.style === 'knees') {
+        // Prima cede sulle ginocchia, poi crolla in avanti verso chi ha sparato.
+        const kneel = Math.min(1, t / 0.22)
+        group.position.y = dying.baseY - kneel * 0.32
+        const fall = Math.max(0, Math.min(1, (t - 0.18) / 0.45))
+        angle = -fall * fall * 1.4
+      } else {
+        const fall = Math.min(1, t / 0.5)
+        angle = fall * fall * 1.5
+        if (fall >= 1) angle -= Math.sin((t - 0.5) * 22) * 0.07 * Math.exp(-(t - 0.5) * 7)
+      }
+    }
+    this.tiltQuaternion.setFromAxisAngle(dying.axis, angle)
+    if (dying.style === 'spin') {
+      this.spinQuaternion.setFromAxisAngle(THREE.Object3D.DEFAULT_UP, Math.min(1, t / 0.5) * 2.4)
+      group.quaternion.copy(this.tiltQuaternion).multiply(this.spinQuaternion).multiply(dying.base)
+    } else {
+      group.quaternion.copy(this.tiltQuaternion).multiply(dying.base)
+    }
+    // Arti e testa seguono con un piccolo ritardo, come se fossero molli.
+    const flail = Math.exp(-t * 3.5)
+    dying.model.leftArm.rotation.x = -1.1 * (1 - flail) + Math.sin(t * 13) * 0.4 * flail
+    dying.model.rightArm.rotation.x = -0.8 * (1 - flail) + Math.cos(t * 11) * 0.4 * flail
+    dying.model.leftLeg.rotation.x = 0.25 * (1 - flail)
+    dying.model.head.rotation.x = Math.sin(t * 12) * 0.35 * flail
+    if (!dying.landed && Math.abs(angle) > 1.3) {
+      dying.landed = true
+      this.audio.playAt('bodyFall', group.position, this.player, this.yaw)
+    }
+    // Negli ultimi istanti affonda nel terreno prima di sparire.
+    const sink = Math.max(0, 0.25 - dying.life) / 0.25
+    if (sink > 0 && dying.style !== 'launch') group.position.y = Math.min(group.position.y, dying.baseY - (dying.style === 'knees' ? 0.32 : 0) - sink * 0.35)
+  }
+
   private updateEffects(delta: number): void {
+    this.gore.update(delta)
     this.decals.update(delta)
     this.effects.update(delta)
     for (let index = this.dyingEnemies.length - 1; index >= 0; index -= 1) {
       const dying = this.dyingEnemies[index]
       if (!dying) continue
       dying.life -= delta
-      const progress = Math.min(1, 1 - dying.life / 0.65)
-      dying.model.group.rotation.z = dying.direction * progress * 1.45
-      dying.model.group.position.y = dying.baseY - progress * 0.22
+      this.animateDeath(dying, delta)
       if (dying.life <= 0) {
         this.releaseEnemyModel(dying.kind, dying.model)
         this.dyingEnemies.splice(index, 1)
@@ -2358,6 +2566,9 @@ export class Game implements TouchTarget {
     this.medkits = []
     this.sinceDamage = 0
     this.decals.clear()
+    this.gore.clear()
+    this.combo = createCombo()
+    this.hitStop = 0
     for (const enemy of this.enemies) this.releaseEnemyModel(enemy.kind, enemy.model)
     for (const dying of this.dyingEnemies) this.releaseEnemyModel(dying.kind, dying.model)
     for (const projectile of this.projectiles) this.scene.remove(projectile.mesh)
@@ -2654,20 +2865,19 @@ export class Game implements TouchTarget {
       case 'kill': {
         const index = this.enemies.findIndex((candidate) => candidate.netId === message.enemy)
         const position = new THREE.Vector3(...message.pos)
+        const direction = new THREE.Vector3(message.dir?.[0] ?? 0, 0, message.dir?.[1] ?? -1)
         if (index >= 0) {
           const enemy = this.enemies[index]!
           this.enemies.splice(index, 1)
-          enemy.model.group.rotation.x = 0
-          this.dyingEnemies.push({ model: enemy.model, kind: enemy.kind, life: 0.65, direction: Math.random() < 0.5 ? -1 : 1, baseY: position.y })
+          this.startDeath(enemy.model, enemy.kind, position, message.gore ?? 0, FALL_STYLES[message.fall ?? 0] ?? 'back', direction, message.impulse ?? 1.6)
         }
         if (message.kind === 'bloater') this.effects.explosion(position.clone().setY(position.y + 1), BLOATER_BLAST.radius, getZombieColor('bloater'), position.y)
         else if (this.waveEvent === 'chain-reaction' && this.chainCooldown <= 0) {
           this.chainCooldown = CHAIN_BLAST_COOLDOWN
           this.effects.explosion(position.clone().setY(position.y + 0.8), CHAIN_BLAST_RADIUS, WAVE_EVENTS['chain-reaction'].color, position.y)
         }
-        this.spawnBurst(position.clone().setY(position.y + 1), getZombieColor(message.kind), message.kind === 'brute' ? 28 : 12)
         this.audio.playAt('kill', position, this.player, this.yaw)
-        if (message.by === localId) this.rewardKill(message.kind, position, message.score, message.xp, message.shards, false, message.credits ?? 0)
+        if (message.by === localId) this.rewardKill(message.kind, position, message.score, message.xp, message.shards, false, message.credits ?? 0, ((message.gore ?? 0) & PART_HEAD) !== 0 ? 'headshot' : 'kill')
         else if ((message.credits ?? 0) > 0) this.shareGoldenCredits()
         return
       }
@@ -2821,6 +3031,8 @@ export class Game implements TouchTarget {
       weaponSlots: this.weapons.hudSlots,
       stance: this.controller.sliding ? 'slide' : this.controller.crouched ? 'crouch' : 'stand',
       waveEvent: this.hudWaveEvent(),
+      combo: this.combo.count >= 2 ? { count: this.combo.count, multiplier: getComboMultiplier(this.combo.count), timer: this.combo.timer / 2.5 } : undefined,
+      execution: this.canExecute(),
       performance: { fps: this.fps, drawCalls: this.renderer.info.render.calls },
     })
   }
@@ -2871,7 +3083,12 @@ export class Game implements TouchTarget {
 
   private readonly animate = (time: number): void => {
     const frameDuration = Math.max(0, (time - this.lastTime) / 1000)
-    const delta = Math.min(frameDuration, 0.05)
+    let delta = Math.min(frameDuration, 0.05)
+    // Pausa d'impatto: il mondo rallenta per qualche centesimo di secondo.
+    if (this.hitStop > 0) {
+      this.hitStop -= frameDuration
+      delta *= HIT_STOP_TIME_SCALE
+    }
     this.lastTime = time
     if (this.renderer.domElement.classList.contains('hidden')) {
       this.animationId = requestAnimationFrame(this.animate)
@@ -2885,6 +3102,7 @@ export class Game implements TouchTarget {
       this.fpsFrames = 0
     }
     this.pathBudget = PATH_BUDGET_PER_FRAME
+    this.frameKills = 0
     if (this.state === 'playing' || (this.state === 'paused' && this.coop)) this.update(delta)
     else if (this.state === 'menu') this.updateMenu(time)
     this.shadowTimer -= frameDuration
@@ -3098,7 +3316,23 @@ export class Game implements TouchTarget {
     return { name, icon, color, detail }
   }
 
+  /** C'è uno zombie da giustiziare a portata di corpo a corpo, davanti al giocatore. */
+  private canExecute(): boolean {
+    if (this.coopStatus !== 'alive') return false
+    const forward = this.camera.getWorldDirection(this.frameVectors.effect).setY(0).normalize()
+    for (const enemy of this.enemies) {
+      if (enemy.spawnTimer > 0 || !isExecutable(enemy.kind, enemy.health, enemy.maxHealth, enemy.stunTimer > 0)) continue
+      const dx = enemy.body.position.x - this.player.x
+      const dz = enemy.body.position.z - this.player.z
+      const distance = Math.hypot(dx, dz)
+      if (distance > 2.6 || Math.abs(enemy.body.position.y - this.player.y) > 1.4) continue
+      if (distance < 0.3 || (dx * forward.x + dz * forward.z) / distance > 0.5) return true
+    }
+    return false
+  }
+
   private updateWaveEvent(delta: number): void {
+    this.combo = tickCombo(this.combo, delta)
     this.chainCooldown = Math.max(0, this.chainCooldown - delta)
     this.updateEventLighting(delta)
     if (this.bounty) {
@@ -3210,6 +3444,7 @@ export class Game implements TouchTarget {
       other.health -= damage
       other.hitFlash = 0.12
       other.lastHitBy = source.lastHitBy
+      this.recordHit(other, 'explosion', null, null, position)
     }
   }
 

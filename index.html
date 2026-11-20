@@ -84,6 +84,10 @@
       <div id="door-prompt" class="door-prompt hidden"><kbd>E</kbd><span id="door-prompt-text">APRI PORTA</span></div>
       <div id="crosshair" class="crosshair hidden" aria-hidden="true"><i></i><i></i><i></i><i></i><b></b></div>
       <div id="hitmarker" class="hitmarker" aria-hidden="true">×</div>
+      <div id="combo-meter" class="combo-meter hidden" aria-live="off"><strong id="combo-count">×2</strong><span id="combo-multiplier">CREDITI ×1,05</span><i id="combo-timer"></i></div>
+      <div id="combo-callout" class="combo-callout hidden" aria-live="polite"></div>
+      <div id="execution-prompt" class="execution-prompt hidden"><kbd>F</kbd><span>ESECUZIONE</span></div>
+      <div id="damage-numbers-layer" class="damage-numbers-layer" aria-hidden="true"></div>
       <div id="respawn-banner" class="respawn-banner hidden">RIENTRO IN COMBATTIMENTO</div>
 
       <div id="low-health" class="low-health" aria-hidden="true"></div>
@@ -254,6 +258,15 @@
                 <option value="medium">MEDIA</option>
                 <option value="high">ALTA // AO + BLOOM</option>
               </select>
+            </div>
+            <div class="settings-card">
+              <label for="gore-level" class="hud-label">SANGUE E SMEMBRAMENTO</label>
+              <select id="gore-level">
+                <option value="full">COMPLETO</option>
+                <option value="reduced">RIDOTTO // POCO SANGUE, NIENTE ARTI STACCATI</option>
+                <option value="off">NESSUNO // SOLO SCINTILLE</option>
+              </select>
+              <label class="settings-check"><input id="damage-numbers" type="checkbox" /> NUMERI DI DANNO</label>
             </div>
             <div class="settings-card">
               <label for="touch-preference" class="hud-label">CONTROLLI TOUCH</label>

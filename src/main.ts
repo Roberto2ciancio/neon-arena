@@ -1,6 +1,7 @@
 import { prestigeBadge } from './game/cosmetics'
 import { enterImmersive, loadTouchPreference, resolveTouchEnabled, saveTouchPreference, TouchControls } from './touchControls'
 import { normalizeTouchPreference } from './game/touchInput'
+import { normalizeGore } from './game/killFeel'
 import * as THREE from 'three'
 import './style.css'
 import { GameAudio } from './game/audio'
@@ -106,6 +107,8 @@ const game = new Game(byId('scene'), {
   onFlash: showFlash,
   onPowerUp: showPowerUp,
   onKill: showKillMarker,
+  onCombo: showComboCallout,
+  onDamageNumber: showDamageNumber,
   // I colori dei nemici sono spenti: schiariti per restare leggibili sul fondo scuro.
   onNotice: (title, text, color) => showPowerUp(title, text, new THREE.Color(color).lerp(new THREE.Color(0xffffff), 0.45).getHex()),
 })
@@ -383,7 +386,19 @@ function updateHud(data: HudData): void {
   hudEl('acid-overlay').classList.toggle('active', data.inAcid === true && currentState === 'playing')
   if (data.tct) updateTctOverlay(data.tct)
   renderWaveEvent(data.waveEvent)
+  renderCombo(data.combo)
+  hudEl('execution-prompt').classList.toggle('hidden', !data.execution || currentState !== 'playing')
   touchControls.update(data)
+}
+
+/** Contatore della combo accanto al mirino, con il tempo rimasto. */
+function renderCombo(combo: HudData['combo']): void {
+  const meter = hudEl('combo-meter')
+  meter.classList.toggle('hidden', !combo || currentState !== 'playing')
+  if (!combo) return
+  setText(hudEl('combo-count'), `×${combo.count}`)
+  setText(hudEl('combo-multiplier'), `CREDITI ×${combo.multiplier.toFixed(2).replace('.', ',')}`)
+  hudEl('combo-timer').style.transform = `scaleX(${Math.max(0, Math.min(1, combo.timer)).toFixed(3)})`
 }
 
 /** Evento casuale dell'ondata sotto il contatore, con l'avanzamento (taglia, zombie dorato). */
@@ -690,7 +705,7 @@ function completeRun(result: RunResult): void {
   const xp = result.kills * XP_REWARDS.zombieKill + Math.max(0, result.wave - 1) * XP_REWARDS.wave + XP_REWARDS.runComplete
   byId('gameover-message').textContent = (result.won
     ? 'Hai superato tutte le 15 ondate. Bonus vittoria: 8 frammenti.'
-    : `L’orda ti ha sopraffatto all’ondata ${result.wave} di 15.`) + grantXp(xp) + grantWeaponXp(result.weaponXp ?? {})
+    : `L’orda ti ha sopraffatto all’ondata ${result.wave} di 15.`) + ((result.bestCombo ?? 0) >= 2 ? ` Combo migliore: ×${result.bestCombo}.` : '') + grantXp(xp) + grantWeaponXp(result.weaponXp ?? {})
   byId('gameover-title').textContent += result.score > previousBest && result.score > 0 ? ' // NUOVO RECORD' : ''
   renderMenu()
 }
@@ -831,13 +846,53 @@ function showHitmarker(headshot: boolean): void {
   hitmarkerTimer = window.setTimeout(() => hitmarker.classList.remove('active'), 120)
 }
 
-/** Uccisione: segno rosso più grande e più lungo del normale indicatore di colpo. */
-function showKillMarker(): void {
+/** Uccisione: segno rosso più grande; dorato per la testa, viola per l'esecuzione. */
+function showKillMarker(variant: 'kill' | 'headshot' | 'execution' = 'kill'): void {
   window.clearTimeout(hitmarkerTimer)
-  hitmarker.classList.remove('active', 'headshot')
+  hitmarker.classList.remove('active', 'headshot', 'kill-head', 'kill-execution')
   void hitmarker.offsetWidth
   hitmarker.classList.add('active', 'kill')
-  hitmarkerTimer = window.setTimeout(() => hitmarker.classList.remove('active', 'kill'), 260)
+  if (variant === 'headshot') hitmarker.classList.add('kill-head')
+  if (variant === 'execution') hitmarker.classList.add('kill-execution')
+  hitmarkerTimer = window.setTimeout(() => hitmarker.classList.remove('active', 'kill', 'kill-head', 'kill-execution'), variant === 'kill' ? 260 : 380)
+}
+
+let comboCalloutTimer = 0
+
+/** Annuncio breve vicino al mirino: DOPPIA, MASSACRO, ESECUZIONE… */
+function showComboCallout(text: string, count: number): void {
+  const callout = byId('combo-callout')
+  window.clearTimeout(comboCalloutTimer)
+  callout.textContent = count > 0 ? `${text} // ${count}` : text
+  callout.classList.toggle('big', count >= 10 || count === 0)
+  callout.classList.add('hidden')
+  void callout.offsetWidth
+  callout.classList.remove('hidden')
+  comboCalloutTimer = window.setTimeout(() => callout.classList.add('hidden'), 1100)
+}
+
+/** Numeri di danno da un pool fisso di elementi, riusati a rotazione. */
+const damageNumberPool: HTMLElement[] = []
+let damageNumberIndex = 0
+
+function showDamageNumber(x: number, y: number, amount: number, kind: 'body' | 'head' | 'kill'): void {
+  const layer = byId('damage-numbers-layer')
+  if (damageNumberPool.length === 0) {
+    for (let index = 0; index < 12; index += 1) {
+      const element = document.createElement('span')
+      layer.append(element)
+      damageNumberPool.push(element)
+    }
+  }
+  const element = damageNumberPool[damageNumberIndex]!
+  damageNumberIndex = (damageNumberIndex + 1) % damageNumberPool.length
+  element.textContent = String(amount)
+  element.className = `damage-number ${kind}`
+  element.style.left = `${(x * 100).toFixed(2)}%`
+  element.style.top = `${(y * 100).toFixed(2)}%`
+  element.style.animation = 'none'
+  void element.offsetWidth
+  element.style.animation = ''
 }
 
 function flashDamage(): void {
@@ -1102,6 +1157,10 @@ window.addEventListener('keydown', (event) => {
 renderPlayerLevel()
 
 
+byId<HTMLSelectElement>('gore-level').value = accessibility.gore
+byId<HTMLSelectElement>('gore-level').addEventListener('change', (event) => updateAccessibility({ gore: normalizeGore((event.target as HTMLSelectElement).value) }))
+byId<HTMLInputElement>('damage-numbers').checked = accessibility.damageNumbers
+byId<HTMLInputElement>('damage-numbers').addEventListener('change', (event) => updateAccessibility({ damageNumbers: (event.target as HTMLInputElement).checked }))
 byId<HTMLInputElement>('reduced-motion').addEventListener('change', (event) => updateAccessibility({ reducedMotion: (event.target as HTMLInputElement).checked }))
 byId<HTMLInputElement>('high-contrast').addEventListener('change', (event) => updateAccessibility({ highContrast: (event.target as HTMLInputElement).checked }))
 byId<HTMLInputElement>('mouse-sensitivity').addEventListener('input', (event) => {

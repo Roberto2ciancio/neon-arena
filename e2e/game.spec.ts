@@ -705,3 +705,96 @@ test('gli eventi delle ondate cambiano la partita senza cali di frame', async ({
   expect(await page.evaluate(() => (window as any).__neonArena.game.kills)).toBeGreaterThan(5)
   expect(errors).toEqual([])
 })
+
+test('le uccisioni smembrano, lasciano sangue, fanno combo ed esecuzioni senza cali di frame', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  await page.addInitScript(() => window.localStorage.setItem('neon-arena:graphics:v1', 'low'))
+  await page.goto('/')
+  await page.locator('[data-map="district-zero"]').click()
+  await page.getByRole('button', { name: 'INIZIA RUN' }).click()
+  await expect(page.locator('#app')).toHaveAttribute('data-state', 'playing')
+  await page.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    game.clearEntities()
+    game.activePowerUps.set('barrier', 999)
+    game.wave = 6
+    game.nextWave()
+    game.startWaveEvent(null)
+    game.debugPlace(0, 0, 12, 0, 0)
+  })
+  await page.waitForFunction(() => (window as any).__neonArena.game.enemies.filter((enemy: any) => enemy.spawnTimer <= 0).length >= 6)
+
+  // Sangue completo: le esplosioni staccano arti, a terra restano macchie; due uccisioni = combo.
+  await page.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    for (const enemy of game.enemies.filter((candidate: any) => candidate.spawnTimer <= 0 && candidate.kind !== 'brute').slice(0, 3)) {
+      enemy.lastCause = 'explosion'
+      enemy.health = 0
+    }
+  })
+  await expect.poll(() => page.evaluate(() => (window as any).__neonArena.game.gore.debrisCount)).toBeGreaterThan(0)
+  expect(await page.evaluate(() => (window as any).__neonArena.game.gore.poolCount)).toBeGreaterThan(0)
+  await expect(page.locator('#combo-meter')).toBeVisible()
+  await expect(page.locator('#combo-count')).toHaveText(/×[2-9]/)
+
+  // Esecuzione: uno zombie quasi morto davanti al giocatore si finisce con il corpo a corpo.
+  const executed = await page.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    const enemy = game.enemies.find((candidate: any) => candidate.spawnTimer <= 0 && candidate.kind !== 'brute' && candidate.health > 0)
+    if (!enemy) return null
+    const forward = game.camera.getWorldDirection(enemy.body.position.clone()).setY(0).normalize()
+    enemy.body.position.set(game.player.x + forward.x * 1.4, game.player.y, game.player.z + forward.z * 1.4)
+    enemy.health = enemy.maxHealth * 0.1
+    enemy.speed = 0
+    return enemy.netId
+  })
+  expect(executed).not.toBeNull()
+  await expect(page.locator('#execution-prompt')).toBeVisible()
+  const healthBefore = await page.evaluate(() => (window as any).__neonArena.game.health)
+  await page.keyboard.press('KeyF')
+  await expect(page.locator('#combo-callout')).toContainText('ESECUZIONE')
+  await expect.poll(() => page.evaluate((id) => (window as any).__neonArena.game.enemies.some((enemy: any) => enemy.netId === id), executed)).toBe(false)
+  expect(await page.evaluate(() => (window as any).__neonArena.game.health)).toBeGreaterThanOrEqual(healthBefore)
+
+  // Molte uccisioni con smembramento di fila: nessun picco rispetto alla mediana.
+  await page.waitForFunction(() => (window as any).__neonArena.game.enemies.length >= 8)
+  const frames = await page.evaluate(async () => new Promise<number[]>((resolve) => {
+    const game = (window as any).__neonArena.game
+    const deltas: number[] = []
+    let previous = 0
+    const frame = (now: number) => {
+      if (previous > 0) deltas.push(now - previous)
+      previous = now
+      if (deltas.length % 3 === 0) {
+        const victim = game.enemies.find((enemy: any) => enemy.health > 0 && enemy.spawnTimer <= 0)
+        if (victim) {
+          victim.lastCause = deltas.length % 2 === 0 ? 'explosion' : 'bullet'
+          victim.lastZone = 'head'
+          victim.health = 0
+        }
+      }
+      if (deltas.length >= 60) resolve(deltas)
+      else requestAnimationFrame(frame)
+    }
+    requestAnimationFrame(frame)
+  }))
+  const sorted = [...frames].sort((first, second) => first - second)
+  const median = sorted[Math.floor(sorted.length / 2)]!
+  const spikes = frames.filter((duration) => duration > Math.max(100, median * 3))
+  expect(spikes.length, `mediana ${Math.round(median)} ms, picchi ${spikes.map(Math.round).join(', ')}`).toBeLessThanOrEqual(Math.max(1, Math.floor(frames.length * 0.02)))
+
+  // Senza sangue: nessun arto staccato e nessuna macchia.
+  await page.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    game.gore.clear()
+    game.setAccessibility({ reducedMotion: false, highContrast: false, sensitivity: 1, adsSensitivity: 1, gore: 'off', damageNumbers: false })
+    for (const enemy of game.enemies.filter((candidate: any) => candidate.spawnTimer <= 0).slice(0, 3)) {
+      enemy.lastCause = 'explosion'
+      enemy.health = 0
+    }
+  })
+  await page.waitForTimeout(300)
+  expect(await page.evaluate(() => [(window as any).__neonArena.game.gore.debrisCount, (window as any).__neonArena.game.gore.poolCount])).toEqual([0, 0])
+  expect(errors).toEqual([])
+})

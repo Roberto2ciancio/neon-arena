@@ -136,6 +136,7 @@ export class TouchControls {
       setSmall(button, entry.cooldown > 0 ? `${Math.ceil(entry.cooldown)}` : '')
     })
     this.buttons.get('aim')!.classList.toggle('active', data.aiming)
+    this.buttons.get('melee')!.classList.toggle('available', data.execution === true)
     this.buttons.get('reload')!.classList.toggle('alert', !data.melee && data.ammo === 0)
     const tct = data.tct !== undefined
     this.buttons.get('interact')!.classList.toggle('hidden', tct)

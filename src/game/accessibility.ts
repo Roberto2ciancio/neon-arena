@@ -1,4 +1,6 @@
 import type { KeyValueStorage } from './progression'
+import { normalizeGore } from './killFeel'
+import type { GoreLevel } from './killFeel'
 
 export interface AccessibilitySettings {
   reducedMotion: boolean
@@ -6,10 +8,14 @@ export interface AccessibilitySettings {
   sensitivity: number
   /** Moltiplicatore in mira, applicato sopra la riduzione automatica per ingrandimento. */
   adsSensitivity: number
+  /** Sangue e smembramento: completo, ridotto o assente. */
+  gore: GoreLevel
+  /** Numeri di danno sopra gli zombie colpiti. */
+  damageNumbers: boolean
 }
 
 export const ACCESSIBILITY_STORAGE_KEY = 'neon-arena:accessibility:v1'
-export const DEFAULT_ACCESSIBILITY: AccessibilitySettings = { reducedMotion: false, highContrast: false, sensitivity: 1, adsSensitivity: 1 }
+export const DEFAULT_ACCESSIBILITY: AccessibilitySettings = { reducedMotion: false, highContrast: false, sensitivity: 1, adsSensitivity: 1, gore: 'full', damageNumbers: false }
 
 export function normalizeAccessibility(value: unknown): AccessibilitySettings {
   if (typeof value !== 'object' || value === null) return { ...DEFAULT_ACCESSIBILITY }
@@ -23,6 +29,8 @@ export function normalizeAccessibility(value: unknown): AccessibilitySettings {
     adsSensitivity: typeof settings.adsSensitivity === 'number' && Number.isFinite(settings.adsSensitivity)
       ? Math.max(0.3, Math.min(1.5, settings.adsSensitivity))
       : 1,
+    gore: normalizeGore(settings.gore),
+    damageNumbers: settings.damageNumbers === true,
   }
 }
 

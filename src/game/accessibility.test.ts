@@ -5,7 +5,7 @@ import type { KeyValueStorage } from './progression'
 describe('accessibilità', () => {
   it('normalizza valori non validi e sensibilità fuori limite', () => {
     expect(normalizeAccessibility(null)).toEqual(DEFAULT_ACCESSIBILITY)
-    expect(normalizeAccessibility({ reducedMotion: true, highContrast: true, sensitivity: 20 })).toEqual({ reducedMotion: true, highContrast: true, sensitivity: 2, adsSensitivity: 1 })
+    expect(normalizeAccessibility({ reducedMotion: true, highContrast: true, sensitivity: 20 })).toEqual({ reducedMotion: true, highContrast: true, sensitivity: 2, adsSensitivity: 1, gore: 'full', damageNumbers: false })
     expect(normalizeAccessibility({ sensitivity: -1 }).sensitivity).toBe(0.5)
   })
 
@@ -15,7 +15,7 @@ describe('accessibilità', () => {
       getItem(key) { return key === ACCESSIBILITY_STORAGE_KEY ? this.value : null },
       setItem(key, value) { if (key === ACCESSIBILITY_STORAGE_KEY) this.value = value },
     }
-    const settings = { reducedMotion: true, highContrast: true, sensitivity: 1.4, adsSensitivity: 0.8 }
+    const settings = { reducedMotion: true, highContrast: true, sensitivity: 1.4, adsSensitivity: 0.8, gore: 'reduced' as const, damageNumbers: true }
     saveAccessibility(storage, settings)
     expect(loadAccessibility(storage)).toEqual(settings)
   })
@@ -28,5 +28,7 @@ describe('accessibilità', () => {
     expect(scope).toBeLessThan(redDot / 2)
     expect(getAimSensitivityScale(52, 75, 0.5)).toBeCloseTo(redDot / 2)
     expect(normalizeAccessibility({ adsSensitivity: 9 }).adsSensitivity).toBe(1.5)
+    expect(normalizeAccessibility({ gore: 'troppo' }).gore).toBe('full')
+    expect(normalizeAccessibility({}).damageNumbers).toBe(false)
   })
 })
