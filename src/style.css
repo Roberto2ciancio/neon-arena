@@ -631,3 +631,46 @@ body.touch-mode .execution-prompt kbd { display: none; }
 .touch-melee.available { color: #070810; background: #c9a6ff; border-color: #c9a6ff; box-shadow: 0 0 16px rgba(154, 123, 255, 0.7); }
 .settings-check { display: flex; align-items: center; gap: 8px; margin-top: 10px; color: #c3c9de; font-family: 'Chakra Petch', sans-serif; font-size: 10px; letter-spacing: 0.1em; }
 @media (prefers-reduced-motion: reduce) { .combo-callout, .damage-number { animation-duration: 0.01ms; } }
+
+/* --- Classifica globale (Fase F) --- */
+.global-leaderboard { display: grid; gap: 10px; margin-bottom: 18px; }
+.lb-tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.lb-tabs button { padding: 8px 4px; color: #8a93ad; border: 1px solid var(--line); background: transparent; font-family: 'Chakra Petch', sans-serif; font-size: 10px; letter-spacing: 0.1em; cursor: pointer; }
+.lb-tabs button.selected { color: var(--cyan); border-color: var(--cyan); background: var(--cyan-soft); }
+.lb-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+.lb-filters label { display: grid; gap: 4px; }
+.lb-filters label.hidden { display: none; }
+.lb-filters select { padding: 7px 8px; color: #eef1fb; border: 1px solid var(--line); background: #0c1020; font-family: 'Chakra Petch', sans-serif; font-size: 11px; }
+.lb-rows { display: grid; max-height: 46vh; overflow-y: auto; }
+.lb-row { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto 76px; align-items: center; gap: 8px; padding: 6px 4px; color: #a4adc4; border-bottom: 1px solid var(--line); font-family: 'Chakra Petch', sans-serif; font-size: 11px; }
+.lb-row.me { color: #070810; background: var(--cyan); }
+.lb-row.me .lb-rank, .lb-row.me .lb-name, .lb-row.me .lb-value { color: #070810; }
+.lb-rank { color: var(--cyan); }
+.lb-name { overflow: hidden; padding: 0; color: #eef1fb; border: 0; background: none; font: inherit; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.lb-name:hover, .lb-name:focus-visible { text-decoration: underline; outline: none; }
+.lb-prestige { color: #ffd166; }
+.lb-value { color: #eef1fb; text-align: right; }
+.lb-games { font-size: 9px; text-align: right; opacity: 0.8; }
+.lb-status { min-height: 1em; color: #8a93ad; font-size: 11px; }
+.lb-weapon-usage { display: grid; gap: 4px; }
+.lb-weapon-usage.hidden { display: none; }
+.lb-usage-row { display: grid; grid-template-columns: 70px 1fr 60px; align-items: center; gap: 8px; color: #c3c9de; font-family: 'Chakra Petch', sans-serif; font-size: 10px; }
+.lb-usage-row i { display: block; height: 6px; background: var(--cyan); transform-origin: left; }
+.lb-usage-row strong { text-align: right; }
+.public-profile-card { width: min(100%, 620px); max-height: 90vh; overflow-y: auto; text-align: left; }
+.public-profile-body { display: grid; gap: 8px; margin: 12px 0 18px; }
+.pp-level { margin: 0; color: #ffd166; font-family: 'Chakra Petch', sans-serif; font-size: 11px; letter-spacing: 0.1em; }
+.pp-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 6px; }
+.pp-stat { display: grid; gap: 2px; padding: 8px; border: 1px solid var(--line); }
+.pp-stat span { color: #8a93ad; font-size: 9px; letter-spacing: 0.1em; }
+.pp-stat strong { color: #eef1fb; font-family: 'Chakra Petch', sans-serif; font-size: 14px; }
+.pp-weapons { display: flex; flex-wrap: wrap; gap: 6px; }
+.pp-weapons span { padding: 4px 8px; color: var(--cyan); border: 1px solid var(--line); font-family: 'Chakra Petch', sans-serif; font-size: 10px; }
+.pp-recent { display: grid; }
+.pp-run { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; padding: 5px 0; color: #a4adc4; border-bottom: 1px solid var(--line); font-family: 'Chakra Petch', sans-serif; font-size: 10px; }
+.account-hidden-row { margin: 8px 0; }
+@media (max-width: 520px) {
+  .lb-row { grid-template-columns: 34px minmax(0, 1fr) auto; }
+  .lb-games { display: none; }
+  .pp-run { grid-template-columns: 1fr 1fr; }
+}

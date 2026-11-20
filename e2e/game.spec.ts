@@ -837,3 +837,66 @@ test('saltando contro una cassa ci si tira su (mantling)', async ({ page }) => {
   }
   expect(errors).toEqual([])
 })
+
+test('la classifica globale mostra schede, K/D con partite e profilo pubblico', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  const requests: Record<string, unknown>[] = []
+  await page.route('https://fake-supabase.test/rest/v1/rpc/**', async (route) => {
+    const url = route.request().url()
+    const body = JSON.parse(route.request().postData() ?? '{}')
+    requests.push({ url, ...body })
+    if (url.endsWith('/get_leaderboard')) {
+      const rows = body.p_category === 'kd'
+        ? [{ rank: 1, username: 'Nova_7', prestige: 2, value: 2.35, games: 24, is_me: false }, { rank: 2, username: 'Ombra', prestige: 0, value: 1.4, games: 11, is_me: false }]
+        : [{ rank: 1, username: 'Nova_7', prestige: 2, value: 18250, games: 31, is_me: false }, { rank: 2, username: 'Ombra', prestige: 0, value: 9100, games: 6, is_me: false }]
+      return route.fulfill({ json: rows })
+    }
+    if (url.endsWith('/get_weapon_usage')) return route.fulfill({ json: [{ weapon_id: 'ar-07', kills: 900, players: 12 }, { weapon_id: 'smg-9', kills: 400, players: 8 }] })
+    if (url.endsWith('/get_public_profile')) {
+      return route.fulfill({ json: {
+        username: 'Nova_7', prestige: 2, level: 34,
+        zombie: { runs: 31, wins: 3, bestScore: 18250, bestWave: 15, averageWave: 9.4, kills: 2200, bestCombo: 27, precisionHits: 900, playTime: 36000 },
+        tct: { matches: 24, wins: 15, kills: 188, deaths: 80 },
+        recent: [{ score: 18250, wave: 15, kills: 240, time: 1500, won: true, map: 'district-zero', combo: 27 }],
+        weapons: [{ id: 'ar-07', kills: 1200 }],
+      } })
+    }
+    return route.fulfill({ status: 404, body: '' })
+  })
+  await page.goto('/')
+  await page.evaluate(() => (window as any).__neonArena.useCloud('https://fake-supabase.test', 'test-key'))
+  await page.locator('[data-drawer="leaderboard"]').first().click()
+
+  await expect(page.locator('#global-leaderboard')).toBeVisible()
+  await expect(page.locator('.lb-row')).toHaveCount(2)
+  await expect(page.locator('.lb-row').first()).toContainText('NOVA_7')
+  await expect(page.locator('.lb-row').first()).toContainText('18.250 PT')
+
+  // TCT: K/D con il numero di partite accanto e la soglia spiegata.
+  await page.locator('[data-lb-tab="tct"]').click()
+  await expect(page.locator('#lb-category')).toHaveValue('kd')
+  await expect(page.locator('.lb-row').first()).toContainText('2,35')
+  await expect(page.locator('.lb-row').first()).toContainText('24 PARTITE')
+  await expect(page.locator('#lb-note')).toContainText('10 partite')
+
+  // Armi: utilizzo della comunità.
+  await page.locator('[data-lb-tab="weapons"]').click()
+  await expect(page.locator('#lb-weapon-usage')).toContainText('AR-07')
+
+  // Settimanale: la richiesta chiede gli ultimi 7 giorni.
+  await page.locator('[data-lb-tab="weekly"]').click()
+  await expect.poll(() => requests.some((request) => request.p_period === 'week')).toBe(true)
+
+  // Profilo pubblico cliccando il nome.
+  await page.locator('.lb-row .lb-name').first().click()
+  await expect(page.locator('#public-profile')).toBeVisible()
+  await expect(page.locator('#public-profile-body')).toContainText('LIVELLO 34')
+  await expect(page.locator('#public-profile-body')).toContainText('24 partite')
+  await expect(page.locator('#public-profile-body')).toContainText('DISTRETTO ZERO')
+  await page.keyboard.press('Escape')
+  await expect(page.locator('#public-profile')).toBeHidden()
+  // Esc chiude solo il profilo, il pannello resta aperto.
+  await expect(page.locator('#menu-drawer')).toBeVisible()
+  expect(errors).toEqual([])
+})

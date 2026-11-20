@@ -9,7 +9,7 @@ import { getLowHealthWarning } from './game/healing'
 import { Game } from './game/Game'
 import { loadAccessibility, saveAccessibility } from './game/accessibility'
 import { SupabaseCloud } from './game/cloud'
-import type { OnlineLeaderboardEntry } from './game/cloud'
+import { LeaderboardPanel } from './leaderboardPanel'
 import { loadIdentity, normalizeCallsign, saveIdentity } from './game/identity'
 import { TctGame } from './game/TctGame'
 import type { TctResult } from './game/TctGame'
@@ -76,10 +76,10 @@ const soundButton = byId<HTMLButtonElement>('sound-button')
 
 let progress = loadProgress(window.localStorage)
 let identity = loadIdentity(window.localStorage)
-const cloud = import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY
+let cloud = import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY
   ? new SupabaseCloud(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY)
   : null
-let onlineLeaderboard: OnlineLeaderboardEntry[] | null = null
+const leaderboardPanel = new LeaderboardPanel({ getCloud: () => cloud, getToken: accountToken })
 let graphicsQuality = loadGraphicsQuality()
 let accessibility = loadAccessibility(window.localStorage)
 let currentState: GameState = 'menu'
@@ -516,14 +516,43 @@ function syncCloudProfile(): void {
 
 async function refreshOnlineLeaderboard(): Promise<void> {
   if (!cloud) return
+  leaderboardPanel.invalidate()
   try {
-    onlineLeaderboard = await cloud.getLeaderboard()
+    await cloud.getGlobalLeaderboard({ category: 'score', limit: 1 })
     byId('cloud-status').textContent = 'ONLINE // SUPABASE'
   } catch {
-    onlineLeaderboard = null
     byId('cloud-status').textContent = 'OFFLINE // CLASSIFICA LOCALE'
   }
-  renderMenu()
+}
+
+async function accountToken(): Promise<string | undefined> {
+  return (await accountPanel?.accountCredentials())?.accessToken
+}
+
+/** Partite TCT nella classifica online: come le run, solo per gli account con un nome utente. */
+async function submitOnlineMatch(result: TctResult): Promise<void> {
+  if (!cloud || !accountPanel?.username) return
+  const account = await accountPanel.accountCredentials()
+  if (!account) return
+  try {
+    await cloud.submitTctMatch(account, { kills: result.kills, deaths: result.deaths, outcome: result.outcome, duration: result.duration, mapId: result.mapId, weaponKills: result.weaponKills })
+    leaderboardPanel.invalidate()
+  } catch {
+    byId('cloud-status').textContent = 'OFFLINE // PARTITA SALVATA IN LOCALE'
+  }
+}
+
+/** Legge la scelta "nascondi il mio profilo" dell'account. */
+async function syncPrivacy(): Promise<void> {
+  const checkbox = byId<HTMLInputElement>('account-hidden')
+  const account = cloud ? await accountPanel?.accountCredentials() : null
+  checkbox.disabled = !account
+  if (!cloud || !account) return
+  try {
+    checkbox.checked = await cloud.getHidden(account)
+  } catch {
+    checkbox.disabled = true
+  }
 }
 
 async function initializeCloud(): Promise<void> {
@@ -605,6 +634,7 @@ const DRAWER_TITLES: Record<string, string> = {
 function openDrawer(panel: string): void {
   byId('drawer-title').textContent = DRAWER_TITLES[panel] ?? ''
   if (panel === 'profile') renderProfileSection()
+  if (panel === 'leaderboard') void leaderboardPanel.open()
   document.querySelectorAll<HTMLElement>('[data-drawer-panel]').forEach((section) => {
     section.classList.toggle('active', section.dataset.drawerPanel === panel)
   })
@@ -714,6 +744,7 @@ function completeTctMatch(result: TctResult): void {
   progress = recordTctMatch(progress, { kills: result.kills, deaths: result.deaths, outcome: result.outcome })
   saveProgress(window.localStorage, progress)
   syncCloudProfile()
+  void submitOnlineMatch(result)
   byId('result-score-label').textContent = 'SQUADRA'
   byId('result-wave-label').textContent = 'AVVERSARI'
   byId('result-kills-label').textContent = 'ELIMINAZIONI / MORTI'
@@ -735,14 +766,13 @@ function renderMenu(): void {
   byId('core-balance').textContent = String(progress.cores)
   byId('core-balance-side').textContent = String(progress.cores)
 
-  const ranking = onlineLeaderboard ?? progress.leaderboard
-  byId('leaderboard-title').textContent = onlineLeaderboard ? 'CLASSIFICA ONLINE // TOP 5' : 'CLASSIFICA LOCALE // TOP 5'
+  const ranking = progress.leaderboard
   const leaderboardRows: HTMLElement[] = ranking.map((entry, index) => {
     const row = document.createElement('div')
     row.className = 'leaderboard-row'
     const minutes = Math.floor(entry.time / 60)
     const seconds = String(entry.time % 60).padStart(2, '0')
-    const waveLabel = 'callsign' in entry ? `${entry.callsign} · ONDATA ${entry.wave}` : `ONDATA ${entry.wave}`
+    const waveLabel = `ONDATA ${entry.wave}`
     row.innerHTML = `<span>#${index + 1}</span><span>${waveLabel}</span><span>${entry.score.toLocaleString('it-IT')} PT</span><span>${minutes}:${seconds}</span>`
     return row
   })
@@ -1241,7 +1271,10 @@ accountPanel = new AccountPanel({
   storage: window.localStorage,
   getLocal: localSave,
   applyMerged: applyMergedSave,
-  onProfileChange: renderProfile,
+  onProfileChange: () => {
+    renderProfile()
+    void syncPrivacy()
+  },
   onUsername: (username) => {
     // Con un account il nome mostrato (classifica, TCT) è il nome utente; da ospite resta il callsign libero.
     if (username) {
@@ -1279,7 +1312,31 @@ void initializeCloud()
 void accountPanel.initialize()
 window.addEventListener('pagehide', () => session?.close())
 // Accesso di debug per i test visivi, solo in sviluppo.
-if (import.meta.env.DEV) Object.assign(window, { __neonArena: { game, tctGame } })
+byId<HTMLInputElement>('account-hidden').addEventListener('change', async (event) => {
+  const checkbox = event.target as HTMLInputElement
+  const account = await accountPanel?.accountCredentials()
+  if (!cloud || !account) return
+  try {
+    await cloud.setHidden(account, checkbox.checked)
+    leaderboardPanel.invalidate()
+  } catch {
+    checkbox.checked = !checkbox.checked
+  }
+})
+
+if (import.meta.env.DEV) {
+  Object.assign(window, {
+    __neonArena: {
+      game,
+      tctGame,
+      // Solo nei test: collega la classifica a un server finto (Playwright intercetta le richieste).
+      useCloud: (url: string, key: string) => {
+        cloud = new SupabaseCloud(url, key)
+        leaderboardPanel.invalidate()
+      },
+    },
+  })
+}
 if (import.meta.hot) import.meta.hot.dispose(() => {
   session?.close()
   game.destroy()

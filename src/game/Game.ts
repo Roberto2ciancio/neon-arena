@@ -374,6 +374,8 @@ export class Game implements TouchTarget {
   private precisionHits = 0
   /** Esperienza accumulata da ogni arma in questa run. */
   private readonly weaponXp = new Map<string, number>()
+  /** Uccisioni fatte con ogni arma nella run (classifica delle armi). */
+  private readonly weaponKills = new Map<string, number>()
   /** Potenziamenti scelti in questa run, con il numero di volte. */
   private readonly chosenUpgrades = new Map<string, number>()
   private groanTimer = 2
@@ -662,6 +664,7 @@ export class Game implements TouchTarget {
     this.touchMoveY = 0
     this.precisionHits = 0
     this.weaponXp.clear()
+    this.weaponKills.clear()
     this.chosenUpgrades.clear()
     this.elapsed = 0
     this.weapons.configure(this.loadout)
@@ -882,6 +885,9 @@ export class Game implements TouchTarget {
       bestCombo: this.combo.best,
       medals: getRunMedals({ ...this.feats, bestCombo: this.combo.best }),
       weaponXp: Object.fromEntries(this.weaponXp),
+      mapId: this.map.id,
+      players: this.coopPlayers,
+      weaponKills: Object.fromEntries(this.weaponKills),
     }
   }
 
@@ -2216,6 +2222,7 @@ export class Game implements TouchTarget {
       this.events.onNotice?.('ZOMBIE DORATO ABBATTUTO', `+${bonusCredits} crediti e bonus a terra.`, WAVE_EVENTS['golden-zombie'].color)
     }
     const weaponId = this.weapons.current?.id
+    if (weaponId) this.weaponKills.set(weaponId, (this.weaponKills.get(weaponId) ?? 0) + 1)
     if (weaponId && this.weapons.slot !== 'melee') this.weaponXp.set(weaponId, (this.weaponXp.get(weaponId) ?? 0) + getWeaponKillXp(kind, elite, WEAPON_XP.zombieKill))
     if (Math.random() < getMedkitDropChance(kind, this.health / this.stats.maxHealth) * this.stats.luck) this.spawnMedkit(position)
     if (this.stats.lifesteal > 0 && this.coopStatus === 'alive') this.health = Math.min(this.stats.maxHealth, this.health + this.stats.lifesteal)

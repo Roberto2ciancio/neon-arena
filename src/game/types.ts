@@ -120,6 +120,12 @@ export interface RunResult {
   won?: boolean
   /** Mappa giocata (per lo storico del profilo). */
   map?: string
+  /** Id della mappa (filtri della classifica online). */
+  mapId?: string
+  /** Giocatori della partita: 1 = solitaria, 2–4 = co-op. */
+  players?: number
+  /** Uccisioni per arma (id del catalogo). */
+  weaponKills?: Partial<Record<string, number>>
   /** Colpi a segno su testa o punti deboli. */
   precisionHits?: number
   /** Esperienza guadagnata da ogni arma durante la run (livello dell'arma). */

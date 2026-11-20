@@ -83,6 +83,66 @@ begin
     insert into public.player_saves (user_id, callsign) values (other, 'X');
     insert into rls_results values ('account scrive salvataggio altrui', 'ACCETTATO (male)');
   exception when others then insert into rls_results values ('account scrive salvataggio altrui', 'rifiutato: ' || sqlerrm); end;
+  -- Fase F: statistiche per run, partite TCT, privacy e funzioni pubbliche.
+  begin
+    insert into public.leaderboard (player_id, callsign, score, wave, kills, time_seconds, best_combo) values (me, 'ME', 100, 3, 5, 60, 9);
+    insert into rls_results values ('F: combo più lunga delle eliminazioni', 'ACCETTATO (male)');
+  exception when others then insert into rls_results values ('F: combo più lunga delle eliminazioni', 'rifiutato: ' || sqlerrm); end;
+  begin
+    insert into public.leaderboard (player_id, callsign, score, wave, kills, time_seconds, weapon_kills) values (me, 'ME', 100, 3, 5, 60, '{"ar-07": 9}');
+    insert into rls_results values ('F: uccisioni per arma oltre il totale', 'ACCETTATO (male)');
+  exception when others then insert into rls_results values ('F: uccisioni per arma oltre il totale', 'rifiutato: ' || sqlerrm); end;
+  begin
+    insert into public.leaderboard (player_id, callsign, score, wave, kills, time_seconds, best_combo, precision_hits, players, map, weapon_kills)
+      values (me, 'ME', 3000, 3, 20, 120, 6, 12, 1, 'district-zero', '{"ar-07": 15, "p-9": 5}');
+    insert into rls_results values ('F: run completa valida', 'accettata');
+  exception when others then insert into rls_results values ('F: run completa valida', 'RIFIUTATA (male): ' || sqlerrm); end;
+  begin
+    insert into public.tct_matches (player_id, kills, deaths, outcome, duration_seconds) values (other, 5, 2, 'win', 180);
+    insert into rls_results values ('F: account inserisce partita TCT altrui', 'ACCETTATO (male)');
+  exception when others then insert into rls_results values ('F: account inserisce partita TCT altrui', 'rifiutato: ' || sqlerrm); end;
+  begin
+    insert into public.tct_matches (player_id, kills, deaths, outcome, duration_seconds) values (me, 25, 0, 'win', 30);
+    insert into rls_results values ('F: partita TCT impossibile', 'ACCETTATO (male)');
+  exception when others then insert into rls_results values ('F: partita TCT impossibile', 'rifiutato: ' || sqlerrm); end;
+  begin
+    insert into public.tct_matches (player_id, kills, deaths, outcome, duration_seconds, map, weapon_kills) values (me, 9, 4, 'win', 180, 'depot-06', '{"smg-9": 9}');
+    insert into rls_results values ('F: partita TCT valida', 'accettata');
+  exception when others then insert into rls_results values ('F: partita TCT valida', 'RIFIUTATA (male): ' || sqlerrm); end;
+  begin
+    update public.leaderboard_privacy set hidden = true where user_id = other;
+    get diagnostics n = row_count;
+    insert into rls_results values ('F: account cambia la privacy altrui', n || ' righe modificate');
+  exception when others then insert into rls_results values ('F: account cambia la privacy altrui', 'rifiutato: ' || sqlerrm); end;
+  select count(*) into n from public.get_leaderboard('score') where username = 'Nova' and is_me;
+  insert into rls_results values ('F: classifica mostra la propria riga', n || ' righe (atteso 1)');
+  select count(*) into n from public.get_leaderboard('kd');
+  insert into rls_results values ('F: K/D sotto le 10 partite escluso', n || ' righe (atteso 0)');
+  insert into public.leaderboard_privacy (user_id, hidden) values (me, true);
+  reset role;
+
+  -- Da qui in poi nessun utente autenticato: auth.uid() è null.
+  perform set_config('request.jwt.claims', '', true);
+  set local role anon;
+  begin
+    insert into public.tct_matches (player_id, kills, deaths, outcome, duration_seconds) values (me, 1, 1, 'loss', 180);
+    insert into rls_results values ('F: anon inserisce partita TCT', 'ACCETTATO (male)');
+  exception when others then insert into rls_results values ('F: anon inserisce partita TCT', 'rifiutato: ' || sqlerrm); end;
+  select count(*) into n from public.tct_matches;
+  insert into rls_results values ('F: anon legge le partite TCT', n || ' righe visibili');
+  select count(*) into n from public.leaderboard_privacy;
+  insert into rls_results values ('F: anon legge la privacy', n || ' righe visibili');
+  begin
+    perform * from public.leaderboard_values('score', '-infinity', null, null, null);
+    insert into rls_results values ('F: anon chiama la funzione interna con gli id', 'ACCETTATO (male)');
+  exception when others then insert into rls_results values ('F: anon chiama la funzione interna con gli id', 'rifiutato: ' || sqlerrm); end;
+  select count(*) into n from public.get_leaderboard('score') where username = 'Nova';
+  insert into rls_results values ('F: profilo nascosto fuori dalla classifica', n || ' righe (atteso 0)');
+  insert into rls_results values ('F: profilo nascosto non leggibile', coalesce(public.get_public_profile('Nova')::text, 'null (atteso)'));
+  select count(*) into n from public.get_weapon_usage() where weapon_id = 'ar-07';
+  insert into rls_results values ('F: armi della comunità (aggregate)', n || ' righe (atteso 1)');
+  select count(*) into n from public.leaderboard;
+  insert into rls_results values ('F: anon legge le run direttamente', n || ' righe visibili (atteso 0 dopo global_stats_close_reads)');
   reset role;
 
   delete from auth.users where id in (me, other);

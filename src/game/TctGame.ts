@@ -79,6 +79,11 @@ export interface TctResult {
   outcome: 'win' | 'loss' | 'draw'
   /** Esperienza guadagnata da ogni arma (eliminazioni fatte con quell'arma). */
   weaponXp?: Partial<Record<string, number>>
+  /** Uccisioni per arma (id del catalogo). */
+  weaponKills?: Partial<Record<string, number>>
+  /** Durata della partita in secondi. */
+  duration?: number
+  mapId?: string
 }
 
 interface TctEvents {
@@ -98,6 +103,7 @@ export class TctGame implements TouchTarget {
   private shadowTimer = 0
   /** Esperienza delle armi accumulata nella partita. */
   private readonly weaponXp = new Map<string, number>()
+  private readonly weaponKills = new Map<string, number>()
   private readonly scene = new THREE.Scene()
   private readonly decals = new DecalEffects(this.scene)
   private readonly effects = new CombatEffects(this.scene)
@@ -264,6 +270,7 @@ export class TctGame implements TouchTarget {
     this.scores = { alpha: 0, bravo: 0 }
     this.kills = 0
     this.weaponXp.clear()
+    this.weaponKills.clear()
     this.deaths = 0
     this.timeRemaining = TCT_CONFIG.matchDuration
     this.playerRespawn = 0
@@ -490,6 +497,7 @@ export class TctGame implements TouchTarget {
           this.kills += 1
           const weaponId = this.weapons.current?.id
           if (weaponId) this.weaponXp.set(weaponId, (this.weaponXp.get(weaponId) ?? 0) + WEAPON_XP.tctKill)
+          if (weaponId) this.weaponKills.set(weaponId, (this.weaponKills.get(weaponId) ?? 0) + 1)
         }
         if (message.victim === this.localId) this.deaths += 1
         else {
@@ -910,7 +918,7 @@ export class TctGame implements TouchTarget {
 
   private finish(outcome: TctResult['outcome']): void {
     if (!this.inMatch) return
-    const result: TctResult = { teamScore: this.teamScore, enemyScore: this.enemyScore, kills: this.kills, deaths: this.deaths, outcome, weaponXp: Object.fromEntries(this.weaponXp) }
+    const result: TctResult = { teamScore: this.teamScore, enemyScore: this.enemyScore, kills: this.kills, deaths: this.deaths, outcome, weaponXp: Object.fromEntries(this.weaponXp), weaponKills: Object.fromEntries(this.weaponKills), duration: Math.round(TCT_CONFIG.matchDuration - Math.max(0, this.timeRemaining)), mapId: this.map.id }
     this.stop()
     this.events.onMatchEnd(result)
     this.setState(outcome === 'win' ? 'victory' : 'gameover')
