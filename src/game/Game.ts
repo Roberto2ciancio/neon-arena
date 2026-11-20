@@ -1,7 +1,7 @@
 import { DEFAULT_THEME } from './maps'
 import { GoreSystem } from './gore'
-import { chooseFallStyle, createCombo, EXECUTION_CREDITS, EXECUTION_HEAL_SHARE, EXECUTION_HINT_RANGE, FALL_DURATION, FALL_STYLES, getBloodColor, getBloodCount, getComboMultiplier, getDeathImpulse, getHitStop, HIT_STOP_TIME_SCALE, isExecutable, normalizeGore, PART_HEAD, PART_LEFT_ARM, PART_LEFT_LEG, PART_RIGHT_ARM, PART_RIGHT_LEG, registerComboKill, rollDismemberment, tickCombo } from './killFeel'
-import type { ComboState, FallStyle, GoreLevel, HitStopEvent, KillCause } from './killFeel'
+import { chooseFallStyle, createCombo, createFeats, getRunMedals, EXECUTION_CREDITS, EXECUTION_HEAL_SHARE, EXECUTION_HINT_RANGE, FALL_DURATION, FALL_STYLES, getBloodColor, getBloodCount, getComboMultiplier, getDeathImpulse, getHitStop, HIT_STOP_TIME_SCALE, isExecutable, normalizeGore, PART_HEAD, PART_LEFT_ARM, PART_LEFT_LEG, PART_RIGHT_ARM, PART_RIGHT_LEG, registerComboKill, rollDismemberment, tickCombo } from './killFeel'
+import type { ComboState, RunFeats, FallStyle, GoreLevel, HitStopEvent, KillCause } from './killFeel'
 import { BOUNTY_CREDITS, BOUNTY_TIME, CHAIN_BLAST_COOLDOWN, CHAIN_BLAST_RADIUS, filterSpawnPool, getBountyTarget, getChainBlastDamage, getWaveEventModifiers, getZoneDamageMultiplier, GOLDEN_CREDITS, GOLDEN_HEALTH_MULTIPLIER, GOLDEN_LIFETIME, GOLDEN_POWER_UPS, GOLDEN_SPAWN_DELAY, GOLDEN_SPEED_MULTIPLIER, GOLDEN_TEAM_CREDITS, rollWaveEvent, SUPPLY_DROP_COUNT, WAVE_EVENTS } from './waveEvents'
 import type { WaveEventId, WaveEventModifiers } from './waveEvents'
 import { shouldSprint, TOUCH_ACTION_KEYS, TOUCH_LOOK_SCALE } from './touchInput'
@@ -72,6 +72,9 @@ import { BLOATER_BLAST, ENEMY_FIRST_WAVE, ENEMY_INTEL, FINAL_WAVE, getEliteChanc
 import { INSTA_KILL_BOSS_MULTIPLIER, POWER_UP_LIFETIME, POWER_UPS, rollPowerUp, SHOCKWAVE_RADIUS } from './powerups'
 import type { PowerUpId } from './powerups'
 import type { EnemyKind, GameEvents, GameState, HitZone, HudData, MetaBonuses, RunResult } from './types'
+
+/** Durata del lampo sul punto debole colpito. */
+const WEAK_FLASH_TIME = 0.16
 
 interface PowerUpPickup {
   /** Identificativo condiviso in co-op. */
@@ -345,6 +348,10 @@ export class Game implements TouchTarget {
   private goreLevel: GoreLevel = 'full'
   private damageNumbers = false
   private combo: ComboState = createCombo()
+  private feats: RunFeats = createFeats()
+  private headshotRun = 0
+  /** Punti deboli che lampeggiano dopo un colpo di precisione. */
+  private readonly weakFlashes: { mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>; base: number; time: number }[] = []
   private hitStop = 0
   private frameKills = 0
   private readonly tiltQuaternion = new THREE.Quaternion()
@@ -873,6 +880,7 @@ export class Game implements TouchTarget {
       map: this.map.name,
       precisionHits: this.precisionHits,
       bestCombo: this.combo.best,
+      medals: getRunMedals({ ...this.feats, bestCombo: this.combo.best }),
       weaponXp: Object.fromEntries(this.weaponXp),
     }
   }
@@ -1420,6 +1428,7 @@ export class Game implements TouchTarget {
     if (precisionHit) {
       this.precisionHitThisShot = true
       this.precisionHits += 1
+      this.flashWeakPoint(enemy.model.weakPoint)
     }
     this.events.onHit(precisionHit)
     this.spawnBurst(hit.point, precisionHit ? 0xffd166 : 0x9b3147, precisionHit ? 7 : 4)
@@ -2075,6 +2084,7 @@ export class Game implements TouchTarget {
     }
     if (killer === null) {
       const variant = enemy.lastCause === 'execution' ? 'execution' : (goreMask & PART_HEAD) !== 0 || enemy.lastZone === 'head' ? 'headshot' : 'kill'
+      if (enemy.lastCause === 'explosion') this.feats.explosiveKills += 1
       this.rewardKill(enemy.kind, position, score, enemy.xp, shards, enemy.elite, enemy.golden ? GOLDEN_CREDITS : 0, variant)
       this.requestHitStop({ boss: enemy.kind === 'brute', lethalHeadshot: enemy.lastZone === 'head', execution: enemy.lastCause === 'execution' })
     } else if (enemy.golden) this.shareGoldenCredits()
@@ -2130,6 +2140,27 @@ export class Game implements TouchTarget {
     this.dyingEnemies.push({ model, kind, life: FALL_DURATION, baseY: position.y, style, axis, push, base: model.group.quaternion.clone(), elapsed: 0, landed: false })
   }
 
+  /** Il punto debole visibile si illumina un istante quando viene colpito. */
+  private flashWeakPoint(mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>): void {
+    if (!mesh.visible) return
+    const existing = this.weakFlashes.find((flash) => flash.mesh === mesh)
+    if (existing) existing.time = WEAK_FLASH_TIME
+    else this.weakFlashes.push({ mesh, base: mesh.material.emissiveIntensity, time: WEAK_FLASH_TIME })
+  }
+
+  private updateWeakFlashes(delta: number): void {
+    for (let index = this.weakFlashes.length - 1; index >= 0; index -= 1) {
+      const flash = this.weakFlashes[index]!
+      flash.time -= delta
+      if (flash.time <= 0) {
+        flash.mesh.material.emissiveIntensity = flash.base
+        this.weakFlashes.splice(index, 1)
+      } else {
+        flash.mesh.material.emissiveIntensity = Math.max(flash.mesh.material.emissiveIntensity, flash.base + 5 * (flash.time / WEAK_FLASH_TIME))
+      }
+    }
+  }
+
   /** Pausa d'impatto: solo in solitaria, decisa dalle regole pure. */
   private requestHitStop(event: HitStopEvent): void {
     this.hitStop = Math.max(this.hitStop, getHitStop(event, this.coop !== null, this.reducedMotion))
@@ -2173,6 +2204,11 @@ export class Game implements TouchTarget {
     }
     this.frameKills += 1
     if (this.frameKills === 2) this.requestHitStop({ multiKill: true })
+    if (variant === 'execution') this.feats.executions += 1
+    if (variant === 'headshot') {
+      this.headshotRun += 1
+      this.feats.headshotStreak = Math.max(this.feats.headshotStreak, this.headshotRun)
+    } else if (variant === 'kill') this.headshotRun = 0
     // Crediti per comprare in partita e esperienza per l'arma impugnata.
     this.shards += Math.round(getKillCredits(kind, elite) * this.lootMultiplier * this.waveMods.credits * getComboMultiplier(this.combo.count))
     if (bonusCredits > 0) {
@@ -2485,6 +2521,7 @@ export class Game implements TouchTarget {
 
   private updateEffects(delta: number): void {
     this.gore.update(delta)
+    this.updateWeakFlashes(delta)
     this.decals.update(delta)
     this.effects.update(delta)
     for (let index = this.dyingEnemies.length - 1; index >= 0; index -= 1) {
@@ -2568,6 +2605,10 @@ export class Game implements TouchTarget {
     this.decals.clear()
     this.gore.clear()
     this.combo = createCombo()
+    this.feats = createFeats()
+    this.headshotRun = 0
+    for (const flash of this.weakFlashes) flash.mesh.material.emissiveIntensity = flash.base
+    this.weakFlashes.length = 0
     this.hitStop = 0
     for (const enemy of this.enemies) this.releaseEnemyModel(enemy.kind, enemy.model)
     for (const dying of this.dyingEnemies) this.releaseEnemyModel(dying.kind, dying.model)

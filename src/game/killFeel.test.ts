@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   chooseFallStyle,
   createCombo,
+  createFeats,
+  getRunMedals,
   getBloodColor,
   getBloodCount,
   getComboAnnouncement,
@@ -115,5 +117,12 @@ describe('esecuzioni e sangue', () => {
     expect(getBloodCount('off', 10)).toBe(0)
     expect(getBloodColor('walker', 'off')).toBeNull()
     expect(getBloodColor('spitter', 'full')).not.toBe(getBloodColor('walker', 'full'))
+  })
+
+  it('assegna le medaglie di fine run con il grado più alto raggiunto', () => {
+    expect(getRunMedals(createFeats())).toEqual([])
+    const medals = getRunMedals({ bestCombo: 12, headshotStreak: 4, explosiveKills: 40, executions: 3 })
+    expect(medals.map((medal) => [medal.id, medal.tier])).toEqual([['bestCombo', 'silver'], ['explosiveKills', 'gold'], ['executions', 'bronze']])
+    expect(getRunMedals({ bestCombo: Number.NaN }).length).toBe(0)
   })
 })

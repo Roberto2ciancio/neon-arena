@@ -735,6 +735,7 @@ test('le uccisioni smembrano, lasciano sangue, fanno combo ed esecuzioni senza c
   })
   await expect.poll(() => page.evaluate(() => (window as any).__neonArena.game.gore.debrisCount)).toBeGreaterThan(0)
   expect(await page.evaluate(() => (window as any).__neonArena.game.gore.poolCount)).toBeGreaterThan(0)
+  expect(await page.evaluate(() => (window as any).__neonArena.game.feats.explosiveKills)).toBeGreaterThanOrEqual(3)
   await expect(page.locator('#combo-meter')).toBeVisible()
   await expect(page.locator('#combo-count')).toHaveText(/×[2-9]/)
 

@@ -6,7 +6,7 @@ import type { AudioPosition, SpatialSound } from './spatialAudio'
 export type SoundName =
   | 'shoot' | 'enemyShoot' | 'hit' | 'headshot' | 'kill' | 'damage' | 'dash' | 'pickup' | 'upgrade'
   | 'dry' | 'reloadOut' | 'reloadIn' | 'shell' | 'melee' | 'meleeHit' | 'switch' | 'explosion'
-  | 'groan' | 'groanBig' | 'powerUp' | 'reloadRack' | 'shellLoad' | 'heartbeat' | 'heal' | 'acidCharge' | 'headPop' | 'bodyFall' | 'execution' | 'combo'
+  | 'groan' | 'groanBig' | 'powerUp' | 'reloadRack' | 'shellLoad' | 'heartbeat' | 'heal' | 'acidCharge' | 'headPop' | 'bodyFall' | 'execution' | 'combo' | 'lastRound'
 
 /** Voci contemporanee massime: oltre, i suoni nuovi vengono saltati per non saturare CPU e mix. */
 const MAX_VOICES = 48
@@ -173,6 +173,11 @@ export class GameAudio {
         break
       case 'dry':
         this.click(3200, 0.02, options)
+        break
+      case 'lastRound':
+        // Otturatore che resta aperto: due clic acuti ravvicinati.
+        this.click(4200, 0.025, { ...options, delay: 0.04 })
+        this.click(2600, 0.03, { ...options, delay: 0.075 })
         break
       case 'reloadOut':
         this.click(1500, 0.035, options)

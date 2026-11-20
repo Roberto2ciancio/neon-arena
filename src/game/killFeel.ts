@@ -175,3 +175,44 @@ export function getBloodColor(kind: EnemyKind, gore: GoreLevel): number | null {
 /** Detriti (arti staccati) e macchie a terra contemporanei per preset. */
 export const DEBRIS_LIMIT: Record<GraphicsQuality, number> = { low: 16, medium: 32, high: 48 }
 export const BLOOD_POOL_LIMIT: Record<GraphicsQuality, number> = { low: 20, medium: 40, high: 72 }
+
+// --- Medaglie di fine run ------------------------------------------------------------------
+export interface RunFeats {
+  bestCombo: number
+  /** Uccisioni con colpo alla testa consecutive (la serie si rompe con un'uccisione al corpo). */
+  headshotStreak: number
+  explosiveKills: number
+  executions: number
+}
+
+export type MedalTier = 'bronze' | 'silver' | 'gold'
+
+export interface RunMedal {
+  id: keyof RunFeats
+  name: string
+  tier: MedalTier
+  value: number
+}
+
+const MEDAL_RULES: { id: keyof RunFeats; name: string; thresholds: [number, number, number] }[] = [
+  { id: 'bestCombo', name: 'CARNEFICINA', thresholds: [5, 10, 20] },
+  { id: 'headshotStreak', name: 'OCCHIO DI FALCO', thresholds: [5, 10, 20] },
+  { id: 'explosiveKills', name: 'ARTIFICIERE', thresholds: [8, 20, 40] },
+  { id: 'executions', name: 'BOIA', thresholds: [3, 8, 15] },
+]
+
+export function createFeats(): RunFeats {
+  return { bestCombo: 0, headshotStreak: 0, explosiveKills: 0, executions: 0 }
+}
+
+/** Medaglie ottenute, con il grado più alto raggiunto per ciascuna. */
+export function getRunMedals(feats: Partial<RunFeats>): RunMedal[] {
+  const medals: RunMedal[] = []
+  for (const rule of MEDAL_RULES) {
+    const value = Math.max(0, Math.floor(Number(feats[rule.id]) || 0))
+    const [bronze, silver, gold] = rule.thresholds
+    const tier: MedalTier | null = value >= gold ? 'gold' : value >= silver ? 'silver' : value >= bronze ? 'bronze' : null
+    if (tier) medals.push({ id: rule.id, name: rule.name, tier, value })
+  }
+  return medals
+}

@@ -126,6 +126,8 @@ export interface RunResult {
   weaponXp?: Partial<Record<string, number>>
   /** Combo di uccisioni più lunga della run. */
   bestCombo?: number
+  /** Medaglie ottenute nella run (combo, serie di colpi alla testa, esplosivi, esecuzioni). */
+  medals?: { name: string; tier: 'bronze' | 'silver' | 'gold'; value: number }[]
 }
 
 export interface LeaderboardEntry {

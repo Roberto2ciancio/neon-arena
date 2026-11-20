@@ -705,7 +705,7 @@ function completeRun(result: RunResult): void {
   const xp = result.kills * XP_REWARDS.zombieKill + Math.max(0, result.wave - 1) * XP_REWARDS.wave + XP_REWARDS.runComplete
   byId('gameover-message').textContent = (result.won
     ? 'Hai superato tutte le 15 ondate. Bonus vittoria: 8 frammenti.'
-    : `L’orda ti ha sopraffatto all’ondata ${result.wave} di 15.`) + ((result.bestCombo ?? 0) >= 2 ? ` Combo migliore: ×${result.bestCombo}.` : '') + grantXp(xp) + grantWeaponXp(result.weaponXp ?? {})
+    : `L’orda ti ha sopraffatto all’ondata ${result.wave} di 15.`) + ((result.bestCombo ?? 0) >= 2 ? ` Combo migliore: ×${result.bestCombo}.` : '') + formatMedals(result.medals) + grantXp(xp) + grantWeaponXp(result.weaponXp ?? {})
   byId('gameover-title').textContent += result.score > previousBest && result.score > 0 ? ' // NUOVO RECORD' : ''
   renderMenu()
 }
@@ -855,6 +855,14 @@ function showKillMarker(variant: 'kill' | 'headshot' | 'execution' = 'kill'): vo
   if (variant === 'headshot') hitmarker.classList.add('kill-head')
   if (variant === 'execution') hitmarker.classList.add('kill-execution')
   hitmarkerTimer = window.setTimeout(() => hitmarker.classList.remove('active', 'kill', 'kill-head', 'kill-execution'), variant === 'kill' ? 260 : 380)
+}
+
+const MEDAL_TIER_LABEL = { bronze: 'BRONZO', silver: 'ARGENTO', gold: 'ORO' } as const
+
+/** Medaglie della run in una riga: "Medaglie: CARNEFICINA (ORO, 21) · BOIA (BRONZO, 3)." */
+function formatMedals(medals: RunResult['medals']): string {
+  if (!medals || medals.length === 0) return ''
+  return ` Medaglie: ${medals.map((medal) => `${medal.name} (${MEDAL_TIER_LABEL[medal.tier]}, ${medal.value})`).join(' · ')}.`
 }
 
 let comboCalloutTimer = 0

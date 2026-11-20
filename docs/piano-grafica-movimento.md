@@ -151,4 +151,4 @@ Criteri di chiusura: test RLS estesi in `supabase/tests/rls.sql` (lettura pubbli
 2. Quanto sangue: realistico, ridotto o configurabile (consiglio: configurabile).
 3. Moduli di mobilità solo in Zombie o anche nel TCT (consiglio: solo Zombie per ora).
 4. Se e quando passare ad asset veri (Fase E).
-5. Classifica: quali statistiche mostrare a tutti e se il K/D del TCT va mostrato pur non essendo verificabile lato server (consiglio: sì, con il numero di partite e una soglia minima).
+5. ~~Classifica e K/D del TCT~~ — **deciso (2026-11-20)**: il K/D si mostra con accanto il numero di partite e una soglia minima per entrare.

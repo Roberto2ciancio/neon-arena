@@ -41,6 +41,20 @@ describe('gestione delle armi del loadout', () => {
     expect(shots).toBeLessThanOrEqual(13)
   })
 
+  it('l’ultimo colpo del caricatore ha un clic dedicato, solo quello', () => {
+    const handler = createHandler({ primary: 'br-3' })
+    const sounds: string[] = []
+    handler.setTrigger(true)
+    for (let time = 0; time < 12; time += 1 / 60) {
+      const frame = handler.update(1 / 60, input)
+      sounds.push(...frame.sounds)
+      if (handler.ammo === 0) break
+      if (frame.shots > 0) { handler.setTrigger(false); handler.update(1 / 60, input); handler.setTrigger(true) }
+    }
+    expect(handler.ammo).toBe(0)
+    expect(sounds.filter((sound) => sound === 'lastRound')).toHaveLength(1)
+  })
+
   it('la raffica spara esattamente tre colpi per pressione', () => {
     const handler = createHandler({ primary: 'br-3' })
     handler.setTrigger(true)

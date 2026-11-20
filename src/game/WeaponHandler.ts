@@ -34,7 +34,7 @@ export interface FrameInput {
   fireRateMultiplier?: number
 }
 
-export type MechanicalSound = 'dry' | ReloadCue
+export type MechanicalSound = 'dry' | 'lastRound' | ReloadCue
 
 export interface FrameResult {
   /** Colpi da risolvere in questo frame (raycast a carico del motore). */
@@ -336,6 +336,8 @@ export class WeaponHandler {
         } else {
           if (weapon.fireMode === 'burst' && this.burstRemaining === 0) this.burstRemaining = weapon.burstCount
           current.magazine = { ...current.magazine, ammo: current.magazine.ammo - 1 }
+          // Ultimo colpo: clic metallico più acuto, avvisa che il caricatore è vuoto.
+          if (current.magazine.ammo === 0) this.pendingSounds.push('lastRound')
           shots = 1
           this.muzzleTimer = weapon.suppressed ? 0.03 : 0.045
           // Rinculo visivo proporzionale alla potenza dell'arma: pistole e SMG leggeri, fucili a pompa e cecchini pesanti.
