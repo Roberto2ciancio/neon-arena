@@ -18,6 +18,7 @@ Data: 2026-11-20. Autore: Claude. Revisione richiesta a Kimi per le parti di pre
 | C | Moduli di mobilità nella build (corsa sui muri ecc.) | Dipende da B; cambia il modo di giocare le ondate | 2–3 sessioni |
 | D | Grafica "realismo stilizzato" | Molto visibile ma tocca prestazioni: va misurata con Kimi | 2–3 sessioni |
 | E | Asset veri (zombie animati glTF) — **facoltativa** | Il salto di realismo più grande, ma il più costoso e rischioso | da decidere |
+| F | Classifica globale e statistiche di tutti i giocatori | Indipendente dalle altre fasi (database e menu): si può fare in parallelo | 1–2 sessioni |
 
 Ogni fase si chiude con: test unitari per le regole pure, E2E esistenti verdi, test dei picchi di frame verde, misura su GPU reale (preset basso e alto) confrontata con la misura precedente, e il run di pubblicazione verde.
 
@@ -100,6 +101,43 @@ Criteri di chiusura: confronto di screenshot prima/dopo sulle 5 mappe; mediana e
 - Impatti: dimensione del download (da qualche MB a decine di MB), tempo di caricamento, animazione scheletrica che costa CPU con 30–40 zombie (si gestisce con animazioni condivise e meno aggiornamenti per gli zombie lontani), tutta la logica di hitbox e smembramento da adattare.
 - Consiglio: decidere dopo le Fasi A–D, partendo da un solo tipo di zombie come prova e misurando prestazioni e peso prima di estendere.
 
+## Fase F — Classifica globale e statistiche di tutti i giocatori
+
+Obiettivo: una sezione CLASSIFICA nel menu dove chiunque (anche da ospite, in sola lettura) vede le statistiche dei giocatori con account e può aprire il profilo pubblico di ognuno.
+
+### Da dove si parte
+
+- `leaderboard` su Supabase salva le singole run (punteggio, ondata, eliminazioni, durata, vittoria) solo per gli account, con il trigger `validate_leaderboard_run` che scarta le run non plausibili.
+- Le statistiche complete (`stats` e `history` in `progression.ts`: tempo di gioco, vittorie, colpi di precisione, partite/uccisioni/morti TCT) esistono solo nel salvataggio privato (`player_saves`), non visibili agli altri.
+- La combo migliore della run (`RunResult.bestCombo`) arriva con la Fase A; l'uso delle armi per run esiste come XP (`weaponXp`), non come uccisioni per arma.
+
+### Cosa si vede
+
+| Scheda | Classifiche (top 100 + la propria posizione) |
+|---|---|
+| **Zombie** | punteggio migliore, ondata più alta, run completate (vittorie all'ondata 15), media dell'ondata di fine run, eliminazioni totali, combo più lunga, precisione (colpi alla testa / colpi a segno), tempo di gioco |
+| **TCT** | K/D, uccisioni totali, partite giocate e vinte, percentuale di vittoria (con un minimo di partite per entrare, es. 10) |
+| **Armi** | armi più usate da tutta la comunità (uccisioni per arma) e, per ogni arma, i migliori giocatori per uccisioni e livello di maestria |
+| **Settimanale** | le stesse classifiche Zombie limitate agli ultimi 7 giorni, così i nuovi giocatori hanno una possibilità |
+
+Filtri: mappa, solitaria/co-op (numero di giocatori), periodo (sempre / settimana). **Profilo pubblico** cliccando un nome: livello e prestigio, statistiche principali, ultime 10 run, 3 armi preferite, medaglie della Fase A.
+
+### Come si costruisce
+
+1. **Dati per run più ricchi**: `leaderboard` riceve anche `best_combo`, `precision_hits`, `hits`, `map`, `players` (co-op) e `weapon_kills` (jsonb arma → uccisioni, solo armi del catalogo, al massimo 12 voci). Il trigger di validazione si estende ai campi nuovi (combo ≤ eliminazioni, colpi alla testa ≤ colpi, somma delle uccisioni per arma ≤ eliminazioni).
+2. **Partite TCT registrate**: nuova tabella `tct_matches` (giocatore, uccisioni, morti, esito, durata, mappa) con trigger di plausibilità (uccisioni e morti limitate dalla durata, massimo di partite in 10 minuti).
+3. **Aggregati calcolati dal database, non dal client**: tabella `player_stats` aggiornata da trigger a ogni inserimento (somme, massimi, medie come somma/conteggio), più una vista `weapon_usage` per le armi della comunità. Il client non scrive mai gli aggregati: niente statistiche gonfiate a mano.
+4. **Lettura pubblica limitata**: funzioni RPC `get_leaderboard(categoria, periodo, filtri)` e `get_public_profile(nome)` che restituiscono solo nome utente, prestigio e statistiche (mai email o id dell'account); paginazione a 100 righe; indici sulle colonne ordinate.
+5. **Interfaccia**: pannello CLASSIFICA nel menu (sostituisce/estende la classifica attuale) con schede, filtri, propria posizione evidenziata e profilo pubblico; dati in cache per 60 s per non interrogare il database a ogni apertura.
+6. **Privacy**: entrano in classifica solo gli account con nome utente; opzione "Nascondi il mio profilo dalla classifica" nella schermata account; l'eliminazione dell'account (Fase 9) cancella anche run e statistiche.
+
+### Limiti da dichiarare
+
+- **TCT e co-op non sono verificabili lato server**: le partite girano fra i browser (PeerJS) e ogni giocatore invia le proprie cifre. I trigger scartano i valori impossibili, ma un K/D alterato con cura non si può escludere finché non esiste un server autorevole (Fase 12 della roadmap futura). Per questo il K/D va mostrato con il numero di partite accanto e con una soglia minima.
+- Le run giocate prima di questa fase non hanno combo né armi: le classifiche nuove partono vuote (si può importare solo ciò che `leaderboard` già contiene).
+
+Criteri di chiusura: test RLS estesi in `supabase/tests/rls.sql` (lettura pubblica solo tramite RPC, nessuna scrittura sugli aggregati, run non plausibili rifiutate); test unitari sul calcolo delle statistiche lato client e sulla preparazione dei dati da inviare; E2E con classifica caricata da un server finto (offline nei test, come oggi); advisor di Supabase senza avvisi nuovi.
+
 ## Rischi principali
 
 - **Prestazioni sul telefono**: ogni fase ha una versione per il preset basso; la prova su un telefono reale va fatta prima di chiudere la Fase D.
@@ -113,3 +151,4 @@ Criteri di chiusura: confronto di screenshot prima/dopo sulle 5 mappe; mediana e
 2. Quanto sangue: realistico, ridotto o configurabile (consiglio: configurabile).
 3. Moduli di mobilità solo in Zombie o anche nel TCT (consiglio: solo Zombie per ora).
 4. Se e quando passare ad asset veri (Fase E).
+5. Classifica: quali statistiche mostrare a tutti e se il K/D del TCT va mostrato pur non essendo verificabile lato server (consiglio: sì, con il numero di partite e una soglia minima).
