@@ -1177,6 +1177,59 @@ test('decisioni della run: sinergia, cassa maledetta, nube tossica e porta blocc
   expect(errors).toEqual([])
 })
 
+test('nemici e situazioni: copertura abbattuta, Urlatore che rianima, evento raro', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  await page.addInitScript(() => window.localStorage.setItem('neon-arena:graphics:v1', 'low'))
+  await page.goto('/')
+  await page.locator('[data-map="station-13"]').click()
+  await page.getByRole('button', { name: 'INIZIA RUN' }).click()
+  await expect(page.locator('#app')).toHaveAttribute('data-state', 'playing')
+  // Dietro una copertura bassa: lo zombie dall'altra parte la abbatte invece di aggirarla.
+  const coverId = await page.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    game.clearEntities()
+    game.spawnQueue = 5
+    game.spawnTimer = 999
+    game.activePowerUps.set('barrier', 999)
+    const id = [...game.mapContent.covers.keys()].find((candidate: string) => {
+      const box = game.obstacles.find((obstacle: any) => obstacle.id === candidate).box
+      return box.max.x - box.min.x > 2.5
+    })
+    const box = game.obstacles.find((obstacle: any) => obstacle.id === id).box
+    const cx = (box.min.x + box.max.x) / 2
+    game.debugPlace(cx, 0, box.max.z + 1.4, Math.PI, 0)
+    const zombie = game.spawnEnemy('walker')
+    zombie.body.position.set(cx, 0, box.min.z - 1.2)
+    zombie.spawnTimer = 0
+    game.coverHealth.set(id, 5)
+    return id
+  })
+  await expect.poll(() => page.evaluate((id) => (window as any).__neonArena.game.destroyedCovers.has(id), coverId), { timeout: 20000 }).toBe(true)
+  // L'Urlatore rianima uno zombie appena caduto vicino a lui.
+  await page.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    game.clearEntities()
+    game.debugPlace(0, 0, 18, 0, 0)
+    const screamer = game.spawnEnemy('screamer')
+    screamer.body.position.set(0, 0, 6)
+    screamer.spawnTimer = 0
+    screamer.specialCooldown = 0
+    game.corpses = [{ kind: 'walker', x: 2, y: 0, z: 6, time: game.elapsed }]
+  })
+  await expect.poll(() => page.evaluate(() => (window as any).__neonArena.game.enemies.filter((enemy: any) => enemy.kind === 'walker').length)).toBe(1)
+  // Evento raro: l'orda di Corridori nell'ondata scelta.
+  const horde = await page.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    game.clearEntities()
+    game.rareEvent = { id: 'horde', wave: game.wave + 1 }
+    game.nextWave()
+    return game.hordeRemaining
+  })
+  expect(horde).toBeGreaterThan(30)
+  expect(errors).toEqual([])
+})
+
 test('la classifica globale mostra schede, K/D con partite e profilo pubblico', async ({ page }) => {
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))

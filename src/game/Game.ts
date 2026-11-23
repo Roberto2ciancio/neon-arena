@@ -29,6 +29,8 @@ import type { MinibossId } from './minibosses'
 import { createBeacon, createGeneratorModel, createSupplyCrate, createToxicCloud, setGeneratorLook } from './objectiveModels'
 import { chooseSupplyReward, getSupplyCredits, shouldDropSupplyCrate, SUPPLY_CRATE, SUPPLY_LABELS } from './waveBreak'
 import type { SupplyReward } from './waveBreak'
+import { canBeRevived, COVER, ESCORT, getCoverHealth, getEscortPoint, isRareEventId, pickRevivals, RARE_EVENT, RARE_EVENTS, rollRareEvent } from './enemyTactics'
+import type { Corpse, RareEventId } from './enemyTactics'
 import { CURSED_BOX, hasToxicCloud, isBoxCursed, isInsideToxicCloud, shouldLockDoor, DOOR_LOCK, stepToxicCloud, TOXIC_CLOUD } from './mapHazards'
 import { BLOOD_OATH_HEAL_SHARE, getNewSynergies, SYNERGIES } from './synergies'
 import type { SynergyId } from './synergies'
@@ -51,6 +53,7 @@ import { DecalEffects } from './decals'
 import { getGraphicsSettings } from './graphics'
 import type { GraphicsQuality } from './graphics'
 import { raycastObstacles } from './collision'
+import type { CollisionObstacle } from './collision'
 import { createNavigation } from './mapGeometry'
 import { advanceWaypoints } from './navigation'
 import type { NavigationGraph } from './navigation'
@@ -159,6 +162,8 @@ interface Enemy {
   /** Secondi dall'ultimo colpo subito (rigenerazione del miniboss). */
   sinceHit: number
   abilityTimer: number
+  /** Secondi passati bloccato contro una copertura. */
+  coverTimer: number
   /** Porta chiusa che lo zombie sta andando ad abbattere (giocatore irraggiungibile altrimenti). */
   breachDoor: Door | null
   /** Boss: fase attuale (1–3) e caricamento del colpo a terra o del lancio. */
@@ -361,6 +366,18 @@ export class Game implements TouchTarget {
   private toxicCloud: { x: number; z: number } | null = null
   private toxicTick = 0
   private readonly toxicCloudMesh = createToxicCloud()
+  /** Coperture abbattute (si ripristinano a inizio run) e resistenza di quelle colpite. */
+  private readonly destroyedCovers = new Map<string, CollisionObstacle | null>()
+  private readonly coverHealth = new Map<string, number>()
+  private coverNoticeShown = false
+  /** Zombie caduti di recente, che un Urlatore può rianimare. */
+  private corpses: Corpse[] = []
+  private reviveNoticeShown = false
+  /** Evento raro della run (deciso all'inizio) e stato dell'orda o del Tiranno in arrivo. */
+  private rareEvent: { id: RareEventId; wave: number } | null = null
+  private hordeRemaining = 0
+  private hordeTimer = 0
+  private rogueTyrantTimer = 0
   /** Ricompensa della cassa della pausa in corso (null = nessuna cassa). */
   private supplyReward: SupplyReward | null = null
   private readonly pickups: Pickup[] = []
@@ -702,6 +719,8 @@ export class Game implements TouchTarget {
     this.scene.background = new THREE.Color(theme.background)
     this.scene.fog = new THREE.FogExp2(theme.fog, theme.fogDensity)
     this.mapContent = buildMap(map)
+    // Mappa nuova: le coperture abbattute appartenevano alla vecchia.
+    this.destroyedCovers.clear()
     this.obstacles = this.mapContent.obstacles
     this.doors = this.mapContent.doors.map((door) => ({ ...door, open: false, progress: 0, breachHealth: getDoorHealth(1), breachWarned: false }))
     this.navigation = createNavigation(map)
@@ -1049,7 +1068,9 @@ export class Game implements TouchTarget {
     this.spawnQueue = Math.max(1, Math.round(getWaveSpawnCount(this.wave) * getCoopScaling(this.coopPlayers).spawnCount * this.waveMods.spawnCount))
     this.spawnTimer = 0.65
     this.onCoopWave()
-    if (this.coopRole === 'host') this.coop?.broadcast({ t: 'wave', wave: this.wave, event: this.waveEvent })
+    const rare = this.rareEvent && this.rareEvent.wave === this.wave ? this.rareEvent.id : null
+    if (rare) this.startRareEvent(rare)
+    if (this.coopRole === 'host') this.coop?.broadcast({ t: 'wave', wave: this.wave, event: this.waveEvent, ...(rare ? { rare } : {}) })
     this.waveBreak = 0
     this.waveActive = true
     this.minibossSpawned = false
@@ -1122,6 +1143,7 @@ export class Game implements TouchTarget {
   }
 
   private updateSpawning(delta: number): void {
+    this.updateRareSpawns(delta)
     if (this.evacuation >= 0) {
       // Evacuazione: zombie in arrivo continuo finché l'elicottero non parte.
       if (this.enemies.length >= scaleMaxActive(getMaxActiveZombies(this.graphicsQuality), this.coopPlayers)) return
@@ -1155,7 +1177,7 @@ export class Game implements TouchTarget {
       }
       return
     }
-    if (this.enemies.length > 0 || this.goldenPending > 0) return
+    if (this.enemies.length > 0 || this.goldenPending > 0 || this.hordeRemaining > 0 || this.rogueTyrantTimer > 0) return
     if (this.waveActive) {
       this.waveActive = false
       this.endWaveEvent()
@@ -1297,6 +1319,7 @@ export class Game implements TouchTarget {
       miniboss: null,
       sinceHit: 0,
       abilityTimer: 2,
+      coverTimer: 0,
       bossPhase: 1,
       slamWindup: 0,
       slamCooldown: 2,
@@ -2173,6 +2196,7 @@ export class Game implements TouchTarget {
             if (ally !== enemy && ally.model.group.position.distanceTo(enemy.model.group.position) < 9) ally.buffTimer = 4
           }
           enemy.specialCooldown = 7
+          this.reviveCorpses(enemy)
           this.spawnBurst(this.frameVectors.effect.copy(enemy.model.group.position).setY(enemy.model.height * 0.7), 0xc486ff, 20)
           this.audio.playAt('enemyShoot', enemy.model.group.position, this.player, this.yaw)
         }
@@ -2244,6 +2268,31 @@ export class Game implements TouchTarget {
         if (enemy.coreExposedTimer > 0) movement.multiplyScalar(0.25)
       }
 
+      // Lo Scudiero fa da scudo allo Sputatore più vicino, restando rivolto al bersaglio.
+      if (enemy.kind === 'shielder' && !followingPath && playerDistance > ESCORT.minPlayerDistance) {
+        const spitter = this.enemies.find((other) => other.kind === 'spitter' && other.health > 0 && other.spawnTimer <= 0 && other.body.position.distanceTo(enemy.body.position) < ESCORT.searchRadius)
+        if (spitter) {
+          const point = getEscortPoint(spitter.body.position.x, spitter.body.position.z, victim.position.x, victim.position.z)
+          const toPoint = this.frameVectors.strafe.set(point.x - enemy.body.position.x, 0, point.z - enemy.body.position.z)
+          if (toPoint.lengthSq() > 0.25) movement.copy(toPoint.normalize())
+          else movement.set(0, 0, 0)
+        }
+      }
+      // Copertura bassa fra lo zombie e il bersaglio vicino: invece di aggirarla la abbatte.
+      if (sameLevel && playerDistance < 6 && !followingPath && !isBoss(enemy.kind) && enemy.kind !== 'leaper') {
+        const cover = this.findCoverAhead(enemy, direction)
+        if (cover) {
+          enemy.coverTimer += delta
+          if (enemy.coverTimer > COVER.stuckTime) {
+            movement.set(0, 0, 0)
+            if (enemy.attackCooldown <= 0) {
+              enemy.attackAnim = 1
+              enemy.attackCooldown = enemy.attackInterval
+              this.hitCover(cover, enemy.damage * (enemy.kind === 'armored' ? 2 : 1))
+            }
+          }
+        } else enemy.coverTimer = Math.max(0, enemy.coverTimer - delta)
+      }
       const breach = enemy.breachDoor
       if (breach && !breach.open && this.doorDistance(breach, enemy.body.position.x, enemy.body.position.z) < DOOR_BREACH_RANGE + enemy.radius) {
         movement.set(0, 0, 0)
@@ -2512,6 +2561,10 @@ export class Game implements TouchTarget {
     if (!enemy) return
     const position = enemy.model.group.position.clone()
     if (enemy.kind === 'bloater') this.explodeBloater(position)
+    if (this.coopRole !== 'client' && canBeRevived(enemy.kind) && !enemy.miniboss && !enemy.golden) {
+      this.corpses.push({ kind: enemy.kind, x: position.x, y: position.y, z: position.z, time: this.elapsed })
+      if (this.corpses.length > 24) this.corpses.shift()
+    }
     const score = enemy.score * this.wave * this.lootMultiplier * this.waveMods.score
     const shards = isBoss(enemy.kind) ? 8 : Math.random() < 0.26 ? 1 : 0
     const killer = enemy.lastHitBy
@@ -3080,7 +3133,121 @@ export class Game implements TouchTarget {
     this.toxicCloud = null
     this.toxicCloudMesh.visible = false
     if (!this.toxicCloudMesh.parent) this.scene.add(this.toxicCloudMesh)
+    this.restoreCovers()
+    this.corpses = []
+    this.coverNoticeShown = false
+    this.reviveNoticeShown = false
+    this.rareEvent = this.coopRole === 'client' ? null : rollRareEvent()
+    this.hordeRemaining = 0
+    this.rogueTyrantTimer = 0
     for (const door of this.doors) door.locked = false
+  }
+
+  // --- Coperture, nemici che si combinano, eventi rari (piano gameplay G3) -------------------
+  private findCoverAhead(enemy: Enemy, direction: THREE.Vector3): CollisionObstacle | null {
+    const probeX = enemy.body.position.x + direction.x * (enemy.radius + 0.45)
+    const probeZ = enemy.body.position.z + direction.z * (enemy.radius + 0.45)
+    for (const obstacle of this.obstacles) {
+      if (!this.mapContent.covers.has(obstacle.id) || this.destroyedCovers.has(obstacle.id)) continue
+      const { min, max } = obstacle.box
+      if (probeX < min.x - 0.15 || probeX > max.x + 0.15 || probeZ < min.z - 0.15 || probeZ > max.z + 0.15) continue
+      if (min.y > enemy.body.position.y + 0.5) continue
+      return obstacle
+    }
+    return null
+  }
+
+  private hitCover(cover: CollisionObstacle, damage: number): void {
+    const health = (this.coverHealth.get(cover.id) ?? getCoverHealth(this.wave)) - damage
+    this.coverHealth.set(cover.id, health)
+    const center = cover.box.getCenter(new THREE.Vector3())
+    this.audio.playAt('meleeHit', center, this.player, this.yaw)
+    this.spawnBurst(center, 0x8a9aa4, 3)
+    if (health > 0) return
+    this.destroyCover(cover.id)
+    if (this.coopRole === 'host') this.coop?.broadcast({ t: 'cover', id: cover.id })
+  }
+
+  /** La copertura sparisce: istanza ridotta a zero e collisione rimossa (si ripristina a inizio run). */
+  private destroyCover(id: string): void {
+    const entry = this.mapContent.covers.get(id)
+    if (!entry || this.destroyedCovers.has(id)) return
+    entry.mesh.setMatrixAt(entry.index, new THREE.Matrix4().makeScale(0, 0, 0))
+    entry.mesh.instanceMatrix.needsUpdate = true
+    const index = this.obstacles.findIndex((obstacle) => obstacle.id === id)
+    const obstacle = index >= 0 ? this.obstacles[index] : undefined
+    if (index >= 0) this.obstacles.splice(index, 1)
+    // L'ostacolo rimosso si conserva per rimetterlo a inizio run.
+    this.destroyedCovers.set(id, obstacle ?? null)
+    if (obstacle) {
+      const center = obstacle.box.getCenter(new THREE.Vector3())
+      this.effects.explosion(center, 1.4, 0xb8c4cc, obstacle.box.min.y)
+      this.spawnBurst(center, 0x8a9aa4, 16)
+    }
+    this.renderer.shadowMap.needsUpdate = true
+    if (!this.coverNoticeShown) {
+      this.coverNoticeShown = true
+      this.events.onNotice?.('COPERTURA ABBATTUTA', 'Gli zombie distruggono le coperture basse dietro cui ti nascondi.', 0xb8c4cc)
+    }
+  }
+
+  private restoreCovers(): void {
+    for (const [id, solid] of this.destroyedCovers) {
+      const entry = this.mapContent.covers.get(id)
+      if (!entry) continue
+      entry.mesh.setMatrixAt(entry.index, entry.matrix)
+      entry.mesh.instanceMatrix.needsUpdate = true
+      if (solid && !this.obstacles.includes(solid)) this.obstacles.push(solid)
+    }
+    this.destroyedCovers.clear()
+    this.coverHealth.clear()
+  }
+
+  /** L'Urlatore rianima gli zombie caduti da poco attorno a lui. */
+  private reviveCorpses(screamer: Enemy): void {
+    if (this.coopRole === 'client') return
+    const revivals = pickRevivals(this.corpses, screamer.body.position.x, screamer.body.position.z, this.elapsed)
+    for (const corpse of revivals) {
+      this.corpses.splice(this.corpses.indexOf(corpse), 1)
+      const revived = this.spawnEnemy(corpse.kind)
+      revived.body.position.set(corpse.x, corpse.y, corpse.z)
+      this.effects.pulse(revived.body.position, 0xc486ff, 1.6)
+    }
+    if (revivals.length > 0 && !this.reviveNoticeShown) {
+      this.reviveNoticeShown = true
+      this.events.onNotice?.('L’URLATORE RIANIMA I CADUTI', 'Abbattilo per primo: finché urla, gli zombie appena uccisi si rialzano.', 0xc486ff)
+    }
+  }
+
+  private startRareEvent(id: RareEventId): void {
+    const event = RARE_EVENTS[id]
+    this.events.onNotice?.(`EVENTO RARO // ${event.name}`, event.description, event.color)
+    if (id === 'pitch-black') {
+      this.waveMods = { ...this.waveMods, lightScale: 0.12, fogScale: 2.6, credits: this.waveMods.credits * 2 }
+      return
+    }
+    if (this.coopRole === 'client') return
+    if (id === 'horde') {
+      this.hordeRemaining = Math.round(RARE_EVENT.hordeSize * getCoopScaling(this.coopPlayers).spawnCount)
+      this.hordeTimer = 2
+    } else this.rogueTyrantTimer = 4
+  }
+
+  private updateRareSpawns(delta: number): void {
+    if (this.rogueTyrantTimer > 0) {
+      this.rogueTyrantTimer -= delta
+      if (this.rogueTyrantTimer <= 0) {
+        this.rogueTyrantTimer = 0
+        this.spawnEnemy('tyrant')
+      }
+    }
+    if (this.hordeRemaining <= 0) return
+    if (this.enemies.length >= scaleMaxActive(getMaxActiveZombies(this.graphicsQuality), this.coopPlayers)) return
+    this.hordeTimer -= delta
+    if (this.hordeTimer > 0) return
+    this.hordeTimer = RARE_EVENT.hordeInterval
+    this.hordeRemaining -= 1
+    this.spawnEnemy('runner')
   }
 
   // --- Mappe che cambiano, sinergie, cassa maledetta (piano gameplay G2) ---------------------
@@ -3805,6 +3972,7 @@ export class Game implements TouchTarget {
       }
       case 'wave':
         this.applyRemoteWave(message.wave, message.event ?? null)
+        if (isRareEventId(message.rare)) this.startRareEvent(message.rare)
         return
       case 'kill': {
         const index = this.enemies.findIndex((candidate) => candidate.netId === message.enemy)
@@ -3861,6 +4029,9 @@ export class Game implements TouchTarget {
         if (door) this.setDoorLocked(door, message.locked)
         return
       }
+      case 'cover':
+        this.destroyCover(message.id)
+        return
       case 'bounty':
         this.applyRemoteBounty(message)
         return

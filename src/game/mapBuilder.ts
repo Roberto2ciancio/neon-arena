@@ -2,6 +2,7 @@ import { DEFAULT_THEME } from './maps'
 import type { MapTheme } from './maps'
 import * as THREE from 'three'
 import { addLightShafts, createEmbers, EMBER_HEIGHT } from './atmosphere'
+import { COVER } from './enemyTactics'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import type { CollisionObstacle } from './collision'
@@ -26,6 +27,8 @@ export interface BuiltMap {
   weather: THREE.Points | null
   /** Braci che fluttuano (null sulle mappe con pioggia o spore). */
   embers: THREE.Points | null
+  /** Coperture basse abbattibili dagli zombie: istanza e matrice originale per ripristinarle. */
+  covers: Map<string, { mesh: THREE.InstancedMesh; index: number; matrix: THREE.Matrix4 }>
   theme: MapTheme
 }
 
@@ -219,6 +222,7 @@ export function buildMap(map: MapDefinition): BuiltMap {
   }
   const boxGeometry = new THREE.BoxGeometry(1, 1, 1)
   const transform = new THREE.Object3D()
+  const covers: BuiltMap['covers'] = new Map()
   for (const style of ['cover', 'wall', 'container'] as const) {
     const definitions = map.obstacles.filter((definition) => definition.style === style)
     if (definitions.length === 0) continue
@@ -230,6 +234,7 @@ export function buildMap(map: MapDefinition): BuiltMap {
       transform.scale.set(definition.width, definition.height, definition.depth)
       transform.updateMatrix()
       instances.setMatrixAt(index, transform.matrix)
+      if (style === 'cover' && definition.height <= COVER.maxHeight) covers.set(definition.id, { mesh: instances, index, matrix: transform.matrix.clone() })
       if (style === 'container') instances.setColorAt(index, new THREE.Color(CONTAINER_COLORS[index % CONTAINER_COLORS.length]!))
     })
     instances.instanceMatrix.needsUpdate = true
@@ -380,5 +385,5 @@ export function buildMap(map: MapDefinition): BuiltMap {
     group.add(embers)
   }
 
-  return { group, obstacles, doors, ambient, weather, embers, theme }
+  return { group, obstacles, doors, ambient, weather, embers, covers, theme }
 }
