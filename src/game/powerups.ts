@@ -34,7 +34,7 @@ export const INSTA_KILL_BOSS_MULTIPLIER = 4
  * `active` esclude i bonus già a terra o in corso per evitare doppioni.
  */
 export function rollPowerUp(kind: EnemyKind, random: () => number, active: ReadonlySet<PowerUpId> = new Set(), luck = 1): PowerUpId | null {
-  const guaranteed = kind === 'brute'
+  const guaranteed = kind === 'brute' || kind === 'tyrant'
   if (!guaranteed && random() >= POWER_UP_DROP_CHANCE * luck) return null
   const pool = POWER_UP_ORDER.filter((id) => !active.has(id))
   if (pool.length === 0) return null

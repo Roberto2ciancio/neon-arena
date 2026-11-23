@@ -82,6 +82,10 @@ export interface MapDefinition {
   doors: readonly MapDoorDefinition[]
   buildings: readonly BuildingDefinition[]
   stations: readonly StationDefinition[]
+  /** Zona di estrazione dell'evacuazione finale (spazio aperto, verificato da un test). */
+  extraction: { x: number; z: number }
+  /** Generatore da riattivare (solo alcune mappe). */
+  generator?: { x: number; z: number }
 }
 
 export type PurchasableWeapon = Exclude<WeaponId, 'ar-07' | 'p-12'>
@@ -196,6 +200,8 @@ export const STATION_13: MapDefinition = {
   arenaLimit: 34,
   playerSpawn: { x: 0, z: 6 },
   enemySpawnRadius: 33,
+  extraction: { x: -28, z: -20 },
+  generator: { x: -18, z: -18 },
   buildings: STATION_BUILDINGS,
   obstacles: [
     { id: 'gate-west-wing', x: -4.5, z: 2, width: 6, height: 2.6, depth: 0.5, style: 'wall' },
@@ -261,6 +267,7 @@ const DEPOT_BUILDINGS: BuildingDefinition[] = [
 
 export const DEPOT_06: MapDefinition = {
   id: 'depot-06',
+  extraction: { x: -28, z: -12 },
   name: 'Deposito 06',
   // Tramonto industriale: luce arancio radente e polvere sospesa.
   theme: {
@@ -337,6 +344,7 @@ const DISTRICT_BUILDINGS: BuildingDefinition[] = [
 
 export const DISTRICT_ZERO: MapDefinition = {
   id: 'district-zero',
+  extraction: { x: -38, z: 4 },
   name: 'Distretto Zero',
   // Notte al neon magenta con pioggia.
   theme: {
@@ -410,6 +418,7 @@ const PORT_BUILDINGS: BuildingDefinition[] = [
 
 export const PORT_09: MapDefinition = {
   id: 'port-09',
+  extraction: { x: -32, z: -20 },
   name: 'Porto 09',
   // Nebbia marina fitta e pioviggine: si vede poco lontano.
   theme: {
@@ -475,6 +484,7 @@ const LAB_BUILDINGS: BuildingDefinition[] = [
 
 export const LAB_21: MapDefinition = {
   id: 'lab-21',
+  extraction: { x: -32, z: 22 },
   name: 'Laboratorio 21',
   // Bagliore tossico verde e spore nell'aria.
   theme: {

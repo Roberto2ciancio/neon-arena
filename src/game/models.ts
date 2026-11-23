@@ -133,9 +133,9 @@ export function createEnemyModel(kind: EnemyKind, color: number, appearance: 'zo
   const group = new THREE.Group()
   const details: THREE.Object3D[] = []
   const soldier = appearance === 'soldier'
-  const height = kind === 'brute' ? 2.65 : kind === 'armored' || kind === 'shielder' ? 2.05 : kind === 'crawler' ? 1.05 : kind === 'runner' ? 1.75 : kind === 'leaper' ? 1.6 : kind === 'bloater' || kind === 'stalker' ? 1.95 : 1.85
+  const height = kind === 'tyrant' ? 3 : kind === 'brute' ? 2.65 : kind === 'armored' || kind === 'shielder' ? 2.05 : kind === 'crawler' ? 1.05 : kind === 'runner' ? 1.75 : kind === 'leaper' ? 1.6 : kind === 'bloater' || kind === 'stalker' ? 1.95 : 1.85
   const scale = height / 1.8
-  const width = (kind === 'armored' || kind === 'shielder' ? 0.95 : kind === 'brute' ? 1.05 : kind === 'bloater' ? 1.2 : kind === 'runner' || kind === 'stalker' ? 0.52 : kind === 'leaper' ? 0.6 : 0.66) * scale
+  const width = (kind === 'armored' || kind === 'shielder' ? 0.95 : kind === 'brute' ? 1.05 : kind === 'tyrant' ? 1.2 : kind === 'bloater' ? 1.2 : kind === 'runner' || kind === 'stalker' ? 0.52 : kind === 'leaper' ? 0.6 : 0.66) * scale
   const skinColor = new THREE.Color(soldier ? 0x8b6b57 : 0x727768).lerp(new THREE.Color(color), soldier ? 0 : kind === 'stalker' ? 0.75 : 0.28)
   const skin = new THREE.MeshStandardMaterial({ color: 0xffffff, map: getOrganicTexture(skinColor.getHex()), roughness: 0.8 })
   const clothesColor = soldier ? outfit?.suit ?? 0x1d252b : kind === 'runner' ? 0x39262a : 0x252a2c
@@ -247,10 +247,10 @@ export function createEnemyModel(kind: EnemyKind, color: number, appearance: 'zo
   rightLeg.position.x *= -1
   group.add(rightLeg)
 
-  const armGeometry = new THREE.CapsuleGeometry((kind === 'brute' ? 0.15 : 0.1) * scale, 0.58 * scale, 5, 10)
+  const armGeometry = new THREE.CapsuleGeometry((kind === 'brute' || kind === 'tyrant' ? 0.15 : 0.1) * scale, 0.58 * scale, 5, 10)
   const leftArm = new THREE.Mesh(armGeometry, soldier ? clothes : skin)
   leftArm.position.set(-(width / 2 + 0.12 * scale), 1.05 * scale, -0.08)
-  const shoulder = new THREE.Mesh(new THREE.SphereGeometry((kind === 'brute' ? 0.23 : 0.16) * scale, 12, 10), soldier ? clothes : skin)
+  const shoulder = new THREE.Mesh(new THREE.SphereGeometry((kind === 'brute' || kind === 'tyrant' ? 0.23 : 0.16) * scale, 12, 10), soldier ? clothes : skin)
   shoulder.position.y = 0.3 * scale
   leftArm.add(shoulder)
   const hand = new THREE.Mesh(new THREE.SphereGeometry(0.12 * scale, 12, 8), soldier ? clothes : skin)
@@ -360,6 +360,27 @@ export function createEnemyModel(kind: EnemyKind, color: number, appearance: 'zo
     const hammerHead = new THREE.Mesh(new RoundedBoxGeometry(0.65, 0.3, 0.35, 3, 0.05), armor)
     hammerHead.position.y = -0.65
     hammer.add(hammerHead)
+  } else if (kind === 'tyrant') {
+    // Sacca acida sulla spalla sinistra (il punto debole) e corna ricurve.
+    weakPoint = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 12), glow)
+    weakPoint.scale.set(1, 0.85, 1)
+    weakPoint.position.set(-0.42 * scale, 1.5 * scale, -0.05 * scale)
+    group.add(weakPoint)
+    for (const side of [-1, 1]) {
+      const horn = new THREE.Mesh(new THREE.ConeGeometry(0.07 * scale, 0.42 * scale, 8), armor)
+      horn.position.set(side * 0.13 * scale, 0.16 * scale, 0)
+      horn.rotation.z = -side * 0.7
+      horn.rotation.x = 0.4
+      head.add(horn)
+      details.push(horn)
+    }
+    for (let index = 0; index < 4; index += 1) {
+      const plate = new THREE.Mesh(new RoundedBoxGeometry(0.34, 0.12, 0.22, 2, 0.03), armor)
+      plate.position.set(0.18 * scale, (1.15 + index * 0.13) * scale, 0.22 * scale)
+      plate.rotation.y = 0.3
+      group.add(plate)
+      details.push(plate)
+    }
   } else {
     weakPoint = new THREE.Mesh(new THREE.SphereGeometry(0.24 * scale, 12, 10), glow)
     weakPoint.position.copy(head.position)

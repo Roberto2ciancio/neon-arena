@@ -151,6 +151,22 @@ kbd { display: inline-block; color: #aab4cb; font-family: 'Chakra Petch', sans-s
 .equipment-hud span { color: #8a93ad; font-family: 'Chakra Petch', sans-serif; font-size: 8px; letter-spacing: 0.12em; }
 .equipment-hud strong { color: var(--cyan); font-family: 'Chakra Petch', sans-serif; font-size: 10px; font-weight: 500; }
 .equipment-hud strong.cooldown { color: #ffd166; }
+.objective-hud { position: absolute; z-index: 4; top: 132px; left: 50%; width: min(360px, 70vw); transform: translateX(-50%); padding: 8px 12px; border: 1px solid var(--objective, #ffd166); background: rgba(8, 12, 24, 0.78); text-align: center; pointer-events: none; font-family: 'Chakra Petch', sans-serif; letter-spacing: 0.12em; }
+.objective-hud.hidden { display: none; }
+.objective-hud strong { display: block; color: var(--objective, #ffd166); font-size: 11px; font-weight: 600; }
+.objective-hud span { display: block; margin-top: 2px; color: #c9cfdf; font-size: 9px; }
+.objective-track { height: 3px; margin-top: 6px; background: rgba(255, 255, 255, 0.12); }
+.objective-track i { display: block; height: 100%; background: var(--objective, #ffd166); transform-origin: left; transform: scaleX(var(--progress, 0)); }
+.objective-hud.no-progress .objective-track { display: none; }
+.boss-bar { position: absolute; z-index: 4; top: 86px; left: 50%; width: min(460px, 70vw); transform: translateX(-50%); pointer-events: none; }
+.boss-bar.hidden { display: none; }
+.boss-bar > span { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; font-family: 'Chakra Petch', sans-serif; letter-spacing: 0.14em; }
+.boss-bar strong { color: #ff6b6b; font-size: 12px; font-weight: 600; }
+.boss-bar small { color: #c9cfdf; font-size: 9px; }
+.boss-track { position: relative; height: 8px; border: 1px solid rgba(255, 107, 107, 0.55); background: rgba(8, 12, 24, 0.8); }
+.boss-track i { position: absolute; inset: 0; background: linear-gradient(90deg, #b8304a, #ff6b6b); transform-origin: left; transform: scaleX(var(--boss, 1)); transition: transform 0.15s linear; }
+.boss-track b { position: absolute; top: -2px; bottom: -2px; width: 2px; background: rgba(255, 255, 255, 0.6); }
+.boss-bar.exposed .boss-track i { background: linear-gradient(90deg, #ffb347, #ffe08a); }
 .equipment-hud > .mobility-hud { position: relative; overflow: hidden; }
 .equipment-hud > .mobility-hud.hidden { display: none; }
 .mobility-hud i { position: absolute; left: 0; bottom: 0; height: 2px; width: 100%; background: var(--cyan); transform-origin: left; transform: scaleX(var(--progress, 1)); transition: transform 0.1s linear; }

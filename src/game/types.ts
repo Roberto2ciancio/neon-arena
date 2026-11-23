@@ -1,6 +1,6 @@
 export type GameState = 'menu' | 'playing' | 'paused' | 'gameover' | 'victory'
 
-export type EnemyKind = 'walker' | 'runner' | 'armored' | 'brute' | 'crawler' | 'spitter' | 'screamer' | 'leaper' | 'bloater' | 'stalker' | 'shielder'
+export type EnemyKind = 'walker' | 'runner' | 'armored' | 'brute' | 'crawler' | 'spitter' | 'screamer' | 'leaper' | 'bloater' | 'stalker' | 'shielder' | 'tyrant'
 export type HitZone = 'body' | 'head' | 'legs' | 'generator' | 'core' | 'spine' | 'throat' | 'back' | 'belly'
 
 export interface PlayerStats {
@@ -90,6 +90,10 @@ export interface HudData {
   enemiesRemaining: number
   /** Letale (G), tattico (Q) e gadget (T) con il tempo di ricarica residuo. */
   equipment: { key: string; name: string; cooldown: number }[]
+  /** Obiettivo in corso: generatore o evacuazione, con l'avanzamento 0–1 quando serve. */
+  objective?: { title: string; detail: string; progress?: number; color: number }
+  /** Boss in campo (il primo vivo): barra della vita con le soglie delle fasi. */
+  boss?: { name: string; health: number; phase: number; exposed: boolean }
   /** Modulo di mobilità (solo Zombie). */
   mobility?: { key: string; name: string; charges: number; maxCharges: number; progress: number; cooldown: number; fuel?: number; active: boolean; /** Si attiva con il tasto (scatto, schianto, rampino). */ usesKey: boolean }
   /** Arma bianca impugnata. */

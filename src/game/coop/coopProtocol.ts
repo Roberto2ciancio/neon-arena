@@ -13,7 +13,7 @@ export const COOP_PROTOCOL_VERSION = 1
 export const MAX_COOP_CLIENT_BYTES = 2048
 export const MAX_COOP_HOST_BYTES = 65536
 
-export const ENEMY_KINDS: readonly EnemyKind[] = ['walker', 'runner', 'armored', 'brute', 'crawler', 'spitter', 'screamer', 'leaper', 'bloater', 'stalker', 'shielder']
+export const ENEMY_KINDS: readonly EnemyKind[] = ['walker', 'runner', 'armored', 'brute', 'crawler', 'spitter', 'screamer', 'leaper', 'bloater', 'stalker', 'shielder', 'tyrant']
 const STATUSES: readonly CoopPlayerStatus[] = ['alive', 'down', 'dead']
 
 export type Vec3 = [number, number, number]
@@ -49,6 +49,10 @@ export const ENEMY_FLAG_RISING = 2
 export const ENEMY_FLAG_ATTACK = 4
 /** Zombie dorato dell'evento omonimo. */
 export const ENEMY_FLAG_GOLDEN = 8
+/** Boss con il nucleo scoperto (colpibile anche dai compagni). */
+export const ENEMY_FLAG_EXPOSED = 16
+/** Bruto che carica il colpo a terra: i compagni disegnano l'onda d'urto. */
+export const ENEMY_FLAG_SLAM = 32
 
 export type CoopClientMessage =
   | { t: 'hello'; v: number; name: string; cosmetics: Cosmetics }
@@ -57,17 +61,19 @@ export type CoopClientMessage =
   | { t: 'hit'; enemy: number; damage: number; precision: boolean }
   | { t: 'door'; id: string }
   | { t: 'revive'; target: string }
+  /** Richiesta di avviare il generatore (decide l'host). */
+  | { t: 'gen' }
 
 export type CoopHostMessage =
   | { t: 'welcome'; v: number; id: string; hostId: string }
   | { t: 'lobby'; players: CoopLobbyPlayer[]; mapId: string; hostId: string }
   | { t: 'start'; mapId: string; players: CoopLobbyPlayer[] }
-  | { t: 'world'; wave: number; waveBreak: number; remaining: number; enemies: PackedEnemy[]; players: CoopPlayerState[] }
+  | { t: 'world'; wave: number; waveBreak: number; remaining: number; enemies: PackedEnemy[]; players: CoopPlayerState[]; /** Obiettivi: [stato generatore 0–2, avvio 0–1, integrità 0–1, evacuazione -1 o 0–1]. */ obj?: [number, number, number, number] }
   | { t: 'shot'; by: string; from: Vec3; to: Vec3 }
   | { t: 'wave'; wave: number; event?: WaveEventId | null }
   | { t: 'kill'; enemy: number; by: string; kind: EnemyKind; pos: Vec3; score: number; xp: number; shards: number; precision: boolean; credits?: number; gore?: number; dir?: [number, number]; fall?: number; impulse?: number }
   | { t: 'damage'; target: string; amount: number }
-  | { t: 'acid'; pos: Vec3; vel: Vec3 }
+  | { t: 'acid'; pos: Vec3; vel: Vec3; /** Macigno del Tiranno: `vel` è la velocità completa, con gravità. */ boulder?: boolean }
   | { t: 'power-spawn'; id: number; power: PowerUpId; pos: Vec3 }
   | { t: 'power-take'; id: number; power: PowerUpId; by: string }
   | { t: 'door'; id: string }
@@ -131,6 +137,8 @@ export function parseCoopClientMessage(raw: unknown): CoopClientMessage | null {
       return isShortString(data.id, 64) ? { t: 'door', id: data.id } : null
     case 'revive':
       return isShortString(data.target, 64) ? { t: 'revive', target: data.target } : null
+    case 'gen':
+      return { t: 'gen' }
     default:
       return null
   }

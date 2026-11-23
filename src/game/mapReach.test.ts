@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { getMapStructures, createNavigation } from './mapGeometry'
+import { createNavigation, createStaticSolids, getMapStructures } from './mapGeometry'
+import { EVACUATION } from './objectives'
 import { MAPS } from './maps'
 
 /**
@@ -25,6 +26,20 @@ describe('mappe senza rifugi irraggiungibili', () => {
         expect(point, `${area.id} senza punti calpestabili`).toBeDefined()
         expect(navigation.findPath(start, point!).length, `${area.id} irraggiungibile`).toBeGreaterThan(0)
       }
+    })
+  }
+})
+
+describe('obiettivi delle mappe in spazio libero', () => {
+  for (const map of MAPS) {
+    it(`${map.name}: zona di estrazione${map.generator ? ' e generatore' : ''} sul terreno e senza ostacoli`, () => {
+      const solids = createStaticSolids(map)
+      const navigation = createNavigation(map)
+      const free = (x: number, z: number, radius: number) => solids.every(({ box }) => box.min.y > 3 || x + radius < box.min.x || x - radius > box.max.x || z + radius < box.min.z || z - radius > box.max.z)
+      expect(free(map.extraction.x, map.extraction.z, EVACUATION.radius)).toBe(true)
+      expect(navigation.areaHeightOf({ x: map.extraction.x, y: 0, z: map.extraction.z })).toBe(0)
+      expect(Math.max(Math.abs(map.extraction.x), Math.abs(map.extraction.z)) + EVACUATION.radius).toBeLessThan(map.arenaLimit)
+      if (map.generator) expect(free(map.generator.x, map.generator.z, 1.6)).toBe(true)
     })
   }
 })

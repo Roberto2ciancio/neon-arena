@@ -254,6 +254,41 @@ function renderCoopHud(coop: HudData['coop']): void {
   }))
 }
 
+let objectiveKey = ''
+
+/** Obiettivo in corso (generatore o evacuazione) sotto la barra del boss. */
+function renderObjective(objective: HudData['objective']): void {
+  const box = hudEl('objective-hud')
+  box.classList.toggle('hidden', !objective || currentState !== 'playing')
+  if (!objective) return
+  const progress = objective.progress === undefined ? -1 : Math.round(objective.progress * 100) / 100
+  const key = `${objective.title}|${objective.detail}|${progress}|${objective.color}`
+  if (key === objectiveKey) return
+  objectiveKey = key
+  setText(hudEl('objective-title'), objective.title)
+  setText(hudEl('objective-detail'), objective.detail)
+  box.classList.toggle('no-progress', progress < 0)
+  box.style.setProperty('--objective', `#${objective.color.toString(16).padStart(6, '0')}`)
+  box.style.setProperty('--progress', String(Math.max(0, progress)))
+}
+
+let bossShare = -1
+
+/** Barra del boss in alto: vita, fase e nucleo scoperto. */
+function renderBossBar(boss: HudData['boss']): void {
+  const bar = hudEl('boss-bar')
+  bar.classList.toggle('hidden', !boss || currentState !== 'playing')
+  if (!boss) return
+  setText(hudEl('boss-name'), boss.name)
+  setText(hudEl('boss-phase'), boss.exposed ? 'NUCLEO SCOPERTO' : `FASE ${boss.phase}`)
+  bar.classList.toggle('exposed', boss.exposed)
+  const share = Math.round(boss.health * 200) / 200
+  if (share !== bossShare) {
+    bossShare = share
+    bar.style.setProperty('--boss', String(share))
+  }
+}
+
 let mobilityProgress = -1
 
 /** Modulo di mobilità: cariche, ricarica o serbatoio del propulsore. */
@@ -398,6 +433,8 @@ function updateHud(data: HudData): void {
     status.classList.toggle('cooldown', entry.cooldown > 0)
   })
   renderMobilityHud(data.mobility)
+  renderBossBar(data.boss)
+  renderObjective(data.objective)
   const doorPrompt = hudEl('door-prompt')
   doorPrompt.classList.toggle('hidden', !data.interaction || currentState !== 'playing')
   doorPrompt.classList.toggle('denied', data.interaction?.denied ?? false)

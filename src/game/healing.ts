@@ -17,7 +17,7 @@ export const REGEN_CAP_SHARE = 0.5
  * sotto la soglia di vita bassa; il Bruto ne lascia sempre uno.
  */
 export function getMedkitDropChance(kind: EnemyKind, healthShare: number): number {
-  if (kind === 'brute') return 1
+  if (kind === 'brute' || kind === 'tyrant') return 1
   const base = 0.025
   return healthShare < LOW_HEALTH_SHARE ? base * 3 : healthShare < 0.7 ? base * 1.6 : base
 }

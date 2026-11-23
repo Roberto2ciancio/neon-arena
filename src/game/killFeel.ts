@@ -22,7 +22,7 @@ const ARMS = [PART_LEFT_ARM, PART_RIGHT_ARM]
 const LEGS = [PART_LEFT_LEG, PART_RIGHT_LEG]
 
 /** Tipi con una forma diversa dall'umanoide: il Bruto resta intero, è il boss. */
-const NO_DISMEMBER: readonly EnemyKind[] = ['brute']
+const NO_DISMEMBER: readonly EnemyKind[] = ['brute', 'tyrant']
 
 export interface DismemberInput {
   cause: KillCause
@@ -151,7 +151,7 @@ export const EXECUTION_CREDITS = 3
 export const EXECUTION_HINT_RANGE = 7
 
 export function isExecutable(kind: EnemyKind, health: number, maxHealth: number, stunned: boolean): boolean {
-  if (kind === 'brute' || health <= 0) return false
+  if (kind === 'brute' || kind === 'tyrant' || health <= 0) return false
   return stunned || health <= maxHealth * EXECUTION_HEALTH_SHARE
 }
 

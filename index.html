@@ -64,6 +64,15 @@
         <canvas id="minimap" width="180" height="180" aria-label="Minimappa tattica"></canvas>
         <div id="ally-markers" class="ally-markers" aria-hidden="true"></div>
       </div>
+      <div id="objective-hud" class="objective-hud hidden" aria-live="polite">
+        <strong id="objective-title">OBIETTIVO</strong>
+        <span id="objective-detail"></span>
+        <div class="objective-track"><i id="objective-fill"></i></div>
+      </div>
+      <div id="boss-bar" class="boss-bar hidden" aria-live="polite">
+        <span><strong id="boss-name">BRUTO</strong><small id="boss-phase">FASE 1</small></span>
+        <div class="boss-track"><i id="boss-fill"></i><b style="left: 33.3%"></b><b style="left: 66.6%"></b></div>
+      </div>
       <div id="equipment-hud" class="equipment-hud hidden" aria-label="Equipaggiamenti">
         <div><kbd>G</kbd><span id="lethal-name">GRANATA</span><strong id="grenade-status">PRONTA</strong></div>
         <div><kbd>Q</kbd><span id="tactical-name">FLASHBANG</span><strong id="tactical-status">PRONTA</strong></div>

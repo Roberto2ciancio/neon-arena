@@ -23,7 +23,13 @@ import type { CoopSession } from './coop/CoopSession'
 import { COOP_HOST_ID } from './coop/CoopSession'
 import { BLEED_OUT_SECONDS, getCoopScaling, isTeamWiped, MAX_COOP_HIT_DAMAGE, respawnAtWave, REVIVE_HEALTH_SHARE, REVIVE_RANGE, REVIVE_SECONDS, scaleMaxActive } from './coop/coopRules'
 import type { CoopPlayerStatus } from './coop/coopRules'
-import { ENEMY_FLAG_ATTACK, ENEMY_FLAG_ELITE, ENEMY_FLAG_GOLDEN, ENEMY_FLAG_RISING, packEnemy, unpackEnemy } from './coop/coopProtocol'
+import { ENEMY_FLAG_ATTACK, ENEMY_FLAG_ELITE, ENEMY_FLAG_EXPOSED, ENEMY_FLAG_GOLDEN, ENEMY_FLAG_RISING, ENEMY_FLAG_SLAM, packEnemy, unpackEnemy } from './coop/coopProtocol'
+import { createBeacon, createGeneratorModel, setGeneratorLook } from './objectiveModels'
+import { canStartGenerator, createGenerator, EVACUATION, GENERATOR, getPoweredCost, isInsideExtraction, startGenerator, tickEvacuation, tickGenerator } from './objectives'
+import type { GeneratorState, GeneratorStatus } from './objectives'
+import { DOOR_BREACH_RANGE, distanceToDoor, getDoorHealth, getDoorHitDamage } from './doorBreach'
+import { BRUTE_PHASES, getBossPhase, getLobVelocity, getShockwaveRadius, getTyrantSummons, GROUND_SLAM, isHitByShockwave, PHASE_CHANGE_EXPOSED, shouldSpawnTyrant, TYRANT } from './bosses'
+import type { BossPhase } from './bosses'
 import type { CoopClientMessage, CoopHostMessage, CoopLobbyPlayer, CoopPlayerState, Vec3 } from './coop/coopProtocol'
 import { gunshotProfileForRemote } from './coop/coopAudio'
 import { getLowHealthWarning, getMedkitDropChance, getPassiveRegen, MEDKIT_PICKUP_HEAL, MEDKIT_PICKUP_LIFETIME } from './healing'
@@ -70,7 +76,7 @@ import { applyUpgrade, createBaseStats, FIRST_LEVEL_XP, getNextLevelXp, getUpgra
 import { WEAPONS } from './weapons'
 import type { WeaponId } from './weapons'
 import { BURN_DURATION, CHAIN_LIGHTNING_RADIUS, getBurnDamagePerSecond, getChainLightningDamage, getChainTargetCount, getHeadshotExplosionDamage, HEADSHOT_EXPLOSION_RADIUS } from './specialEffects'
-import { BLOATER_BLAST, ENEMY_FIRST_WAVE, ENEMY_INTEL, FINAL_WAVE, getEliteChance, getMaxActiveZombies, getMeleeDamage, getPrewarmCount, getSpawnPool, PATH_BUDGET_PER_FRAME, getWaveSpawnCount, getZombieColor, getZombieStats, SHIELD_FRONT_REDUCTION, WAVE_BREAK_SECONDS } from './zombies'
+import { BLOATER_BLAST, ENEMY_FIRST_WAVE, ENEMY_INTEL, FINAL_WAVE, getEliteChance, isBoss, getMaxActiveZombies, getMeleeDamage, getPrewarmCount, getSpawnPool, PATH_BUDGET_PER_FRAME, getWaveSpawnCount, getZombieColor, getZombieStats, SHIELD_FRONT_REDUCTION, WAVE_BREAK_SECONDS } from './zombies'
 import { INSTA_KILL_BOSS_MULTIPLIER, POWER_UP_LIFETIME, POWER_UPS, rollPowerUp, SHOCKWAVE_RADIUS } from './powerups'
 import type { PowerUpId } from './powerups'
 import type { EnemyKind, GameEvents, GameState, HitZone, HudData, MetaBonuses, RunResult } from './types'
@@ -138,6 +144,13 @@ interface Enemy {
   armorHealth: number
   chargeTimer: number
   coreExposedTimer: number
+  /** Porta chiusa che lo zombie sta andando ad abbattere (giocatore irraggiungibile altrimenti). */
+  breachDoor: Door | null
+  /** Boss: fase attuale (1–3) e caricamento del colpo a terra o del lancio. */
+  bossPhase: BossPhase
+  slamWindup: number
+  slamCooldown: number
+  summonCooldown: number
   burnTimer: number
   burnDamagePerSecond: number
   burnTick: number
@@ -169,6 +182,17 @@ interface Projectile {
   damage: number
   life: number
   radius: number
+  /** Macigno del Tiranno: cade in parabola ed esplode in un'area. */
+  gravity?: number
+  blast?: number
+}
+
+interface Shockwave {
+  origin: THREE.Vector3
+  elapsed: number
+  damage: number
+  /** Giocatori già colpiti da questo anello (null = locale). */
+  hit: Set<string | null>
 }
 
 interface Pickup {
@@ -214,10 +238,14 @@ interface Station {
 type Interaction =
   | { kind: 'door'; door: Door }
   | { kind: 'station'; station: Station }
+  | { kind: 'generator' }
 
 interface Door extends BuiltDoor {
   open: boolean
   progress: number
+  /** Resistenza agli zombie che la sfondano (si ripara a ogni ondata). */
+  breachHealth: number
+  breachWarned: boolean
 }
 
 interface HitscanHit {
@@ -273,6 +301,16 @@ export class Game implements TouchTarget {
   private readonly introducedKinds = new Set<EnemyKind>()
   private readonly dyingEnemies: DyingEnemy[] = []
   private readonly projectiles: Projectile[] = []
+  private readonly shockwaves: Shockwave[] = []
+  // --- Obiettivi ---
+  private generator: GeneratorStatus = createGenerator()
+  private generatorDamage = 0
+  /** Corrente tornata: postazioni scontate. */
+  private powered = false
+  /** Avanzamento dell'evacuazione finale (-1 = non iniziata). */
+  private evacuation = -1
+  private readonly generatorModel = createGeneratorModel()
+  private readonly beacon = createBeacon()
   private readonly pickups: Pickup[] = []
   private readonly particles: Particle[] = []
   private readonly particlePool: Particle[] = []
@@ -281,7 +319,7 @@ export class Game implements TouchTarget {
   private map: MapDefinition = STATION_13
   private mapContent = buildMap(this.map)
   private obstacles = this.mapContent.obstacles
-  private doors: Door[] = this.mapContent.doors.map((door) => ({ ...door, open: false, progress: 0 }))
+  private doors: Door[] = this.mapContent.doors.map((door) => ({ ...door, open: false, progress: 0, breachHealth: getDoorHealth(1), breachWarned: false }))
   private navigation: NavigationGraph = createNavigation(this.map)
   private stations: Station[] = []
   private shardsCollected = 0
@@ -529,7 +567,7 @@ export class Game implements TouchTarget {
       },
       stunTarget: (target, seconds) => {
         const enemy = this.targetOwners.get(target)
-        if (enemy) enemy.stunTimer = Math.max(enemy.stunTimer, enemy.kind === 'brute' ? seconds * 0.4 : seconds)
+        if (enemy) enemy.stunTimer = Math.max(enemy.stunTimer, isBoss(enemy.kind) ? seconds * 0.4 : seconds)
       },
       slowTarget: (target, seconds) => {
         const enemy = this.targetOwners.get(target)
@@ -596,7 +634,7 @@ export class Game implements TouchTarget {
     this.scene.fog = new THREE.FogExp2(theme.fog, theme.fogDensity)
     this.mapContent = buildMap(map)
     this.obstacles = this.mapContent.obstacles
-    this.doors = this.mapContent.doors.map((door) => ({ ...door, open: false, progress: 0 }))
+    this.doors = this.mapContent.doors.map((door) => ({ ...door, open: false, progress: 0, breachHealth: getDoorHealth(1), breachWarned: false }))
     this.navigation = createNavigation(map)
     this.scene.add(this.mapContent.group)
     this.buildStations()
@@ -630,7 +668,7 @@ export class Game implements TouchTarget {
       const weaponId = rolled[station.definition.id] as PurchasableWeapon | undefined
       if (!weaponId) continue
       station.weapon = weaponId
-      station.cost = getFieldWeaponCost(STATION_COSTS[weaponId], tier)
+      station.cost = getPoweredCost(getFieldWeaponCost(STATION_COSTS[weaponId], tier), this.powered)
       setStationLabel(station.model, 'weapon', `${WEAPONS[weaponId].shortName} ${FIELD_TIERS[tier].name}`, `${CREDIT_SYMBOL} ${station.cost}`)
     }
   }
@@ -639,6 +677,7 @@ export class Game implements TouchTarget {
     if (loadout) this.loadout = loadout
     this.clearEntities()
     this.setMap(map)
+    this.resetObjectives()
     this.prewarmEnemies()
     this.introducedKinds.clear()
     this.introducedKinds.add('walker')
@@ -695,6 +734,8 @@ export class Game implements TouchTarget {
     for (const door of this.doors) {
       door.open = false
       door.progress = 0
+      door.breachHealth = getDoorHealth(1)
+      door.breachWarned = false
       door.group.position.y = 0
       if (!this.obstacles.includes(door.obstacle)) this.obstacles.push(door.obstacle)
     }
@@ -926,6 +967,11 @@ export class Game implements TouchTarget {
     if (this.coopRole === 'host') this.coop?.broadcast({ t: 'wave', wave: this.wave, event: this.waveEvent })
     this.waveBreak = 0
     this.waveActive = true
+    for (const door of this.doors) {
+      if (door.open) continue
+      door.breachHealth = getDoorHealth(this.wave)
+      door.breachWarned = false
+    }
     this.events.onWave(this.wave, this.waveEventInfo())
   }
 
@@ -934,7 +980,7 @@ export class Game implements TouchTarget {
    * apparizione di un tipo nuovo (es. l'Ombra all'ondata 7) non provoca un blocco del frame.
    */
   private prewarmEnemies(): void {
-    const kinds: EnemyKind[] = [...(Object.keys(ENEMY_FIRST_WAVE) as EnemyKind[]), 'brute']
+    const kinds: EnemyKind[] = [...(Object.keys(ENEMY_FIRST_WAVE) as EnemyKind[]), 'brute', 'tyrant']
     const created: EnemyModel[] = []
     for (const kind of kinds) {
       const pool = this.enemyPool.get(kind) ?? []
@@ -958,10 +1004,16 @@ export class Game implements TouchTarget {
       this.scene.add(model.group)
     })
     const restoreGore = this.gore.prewarm(this.camera.position, forward)
+    // Anche la colonna dell'evacuazione: compare solo alla fine della run.
+    const beaconVisible = this.beacon.visible
+    this.beacon.visible = true
+    this.beacon.position.copy(this.camera.position).addScaledVector(forward, 8).setY(0)
     this.renderer.compile(this.scene, this.camera)
     this.renderer.shadowMap.needsUpdate = true
     this.pipeline.render()
     restoreGore()
+    this.beacon.visible = beaconVisible
+    this.beacon.position.set(this.map.extraction.x, 0, this.map.extraction.z)
     for (const model of created) {
       this.scene.remove(model.group)
       model.group.position.set(0, 0, 0)
@@ -969,6 +1021,16 @@ export class Game implements TouchTarget {
   }
 
   private updateSpawning(delta: number): void {
+    if (this.evacuation >= 0) {
+      // Evacuazione: zombie in arrivo continuo finché l'elicottero non parte.
+      if (this.enemies.length >= scaleMaxActive(getMaxActiveZombies(this.graphicsQuality), this.coopPlayers)) return
+      this.spawnTimer -= delta
+      if (this.spawnTimer <= 0) {
+        this.spawnEnemy(this.randomEnemyKind())
+        this.spawnTimer = EVACUATION.spawnInterval * getCoopScaling(this.coopPlayers).spawnInterval
+      }
+      return
+    }
     if (this.goldenPending > 0) {
       this.goldenPending -= delta
       if (this.goldenPending <= 0) this.spawnEnemy('runner', undefined, true)
@@ -980,7 +1042,7 @@ export class Game implements TouchTarget {
       if (this.spawnTimer <= 0) {
         const bossWave = this.wave % 5 === 0
         const extraBoss = this.wave >= 10 && this.spawnQueue === Math.floor(getWaveSpawnCount(this.wave) * getCoopScaling(this.coopPlayers).spawnCount / 2)
-        const kind = bossWave && (this.spawnQueue === 1 || extraBoss) ? 'brute' : this.randomEnemyKind()
+        const kind = bossWave && (this.spawnQueue === 1 || extraBoss) ? (this.spawnQueue === 1 && shouldSpawnTyrant(this.map.id, this.wave) ? 'tyrant' : 'brute') : this.randomEnemyKind()
         this.spawnEnemy(kind)
         this.spawnQueue -= 1
         this.spawnTimer = Math.max(0.12, (0.75 - this.wave * 0.035) * getCoopScaling(this.coopPlayers).spawnInterval)
@@ -992,8 +1054,7 @@ export class Game implements TouchTarget {
       this.waveActive = false
       this.endWaveEvent()
       if (this.wave >= FINAL_WAVE) {
-        if (this.coopRole === 'host') this.coop?.broadcast({ t: 'end', wave: this.wave, won: true })
-        this.finishRun(true)
+        this.beginEvacuation()
         return
       }
       this.waveBreak = WAVE_BREAK_SECONDS
@@ -1030,14 +1091,14 @@ export class Game implements TouchTarget {
     return (pool[Math.floor(Math.random() * pool.length)] ?? candidates[0] ?? new THREE.Vector3(0, 0, -this.map.enemySpawnRadius)).clone()
   }
 
-  private spawnEnemy(kind: EnemyKind, replica?: { id: number; elite: boolean; position: THREE.Vector3; rising: boolean; golden?: boolean }, golden = false): void {
+  private spawnEnemy(kind: EnemyKind, replica?: { id: number; elite: boolean; position: THREE.Vector3; rising: boolean; golden?: boolean }, golden = false): Enemy {
     const scaling = getCoopScaling(this.coopPlayers)
     const mods = this.waveMods
     const isGolden = replica ? replica.golden === true : golden
-    const elite = !isGolden && (replica ? replica.elite : kind !== 'brute' && Math.random() < getEliteChance(this.wave) + scaling.eliteBonus + mods.eliteBonus)
+    const elite = !isGolden && (replica ? replica.elite : !isBoss(kind) && Math.random() < getEliteChance(this.wave) + scaling.eliteBonus + mods.eliteBonus)
     const baseStats = getZombieStats(kind, this.wave, elite)
     // Il Bruto non cambia taglia con i Giganti: è già il boss.
-    const eventScale = kind === 'brute' ? 1 : mods.scale
+    const eventScale = isBoss(kind) ? 1 : mods.scale
     const stats = {
       ...baseStats,
       health: baseStats.health * scaling.health * mods.health * (isGolden ? GOLDEN_HEALTH_MULTIPLIER : 1),
@@ -1049,7 +1110,7 @@ export class Game implements TouchTarget {
     if (!this.introducedKinds.has(kind)) {
       this.introducedKinds.add(kind)
       const color = getZombieColor(kind)
-      this.events.onNotice?.(`NUOVO NEMICO // ${getZombieStats(kind, 1).name.toUpperCase()}`, ENEMY_INTEL[kind], kind === 'brute' ? 0xff6b6b : color)
+      this.events.onNotice?.(`NUOVO NEMICO // ${getZombieStats(kind, 1).name.toUpperCase()}`, ENEMY_INTEL[kind], isBoss(kind) ? 0xff6b6b : color)
     }
     const pooled = this.enemyPool.get(kind)?.pop()
     const model = pooled ?? createEnemyModel(kind, getZombieColor(kind))
@@ -1124,6 +1185,11 @@ export class Game implements TouchTarget {
       armorHealth: kind === 'armored' ? 85 * (1 + (this.wave - 1) * 0.05) : 0,
       chargeTimer: 0,
       coreExposedTimer: 0,
+      breachDoor: null,
+      bossPhase: 1,
+      slamWindup: 0,
+      slamCooldown: 2,
+      summonCooldown: 4,
       burnTimer: 0,
       burnDamagePerSecond: 0,
       burnTick: 0,
@@ -1134,6 +1200,7 @@ export class Game implements TouchTarget {
     }
     this.targetOwners.set(target, enemy)
     this.enemies.push(enemy)
+    return enemy
   }
 
   private updatePlayer(delta: number): void {
@@ -1267,7 +1334,7 @@ export class Game implements TouchTarget {
       }
       enemy.hitFlash = 0.12
       enemy.flinch = 1
-      enemy.knockback.addScaledVector(forward, enemy.kind === 'brute' ? 1 : 4)
+      enemy.knockback.addScaledVector(forward, isBoss(enemy.kind) ? 1 : 4)
       this.spawnBlood(enemy.model.body.getWorldPosition(new THREE.Vector3()), forward, enemy.kind, 8)
       hit = true
     }
@@ -1334,12 +1401,12 @@ export class Game implements TouchTarget {
         const hasWeakPoint = enemy.kind === 'armored' || enemy.kind === 'crawler'
           || enemy.kind === 'spitter' || enemy.kind === 'screamer'
           || enemy.kind === 'bloater' || enemy.kind === 'shielder' || enemy.kind === 'leaper'
-          || (enemy.kind === 'brute' && enemy.coreExposedTimer > 0)
+          || (isBoss(enemy.kind) && enemy.coreExposedTimer > 0)
         if (hasWeakPoint) {
           zones.push({
             point: ray.intersectSphere(new THREE.Sphere(
               enemy.model.weakPoint.getWorldPosition(new THREE.Vector3()),
-              enemy.kind === 'brute' ? 0.36 : 0.3,
+              isBoss(enemy.kind) ? 0.36 : 0.3,
             ), new THREE.Vector3()),
             zone: getWeakPointZone(enemy.kind),
           })
@@ -1401,7 +1468,7 @@ export class Game implements TouchTarget {
         if (enemy.armorHealth === 0) this.spawnBurst(hit.point, 0xffc36b, 14)
       } else if (hit.zone === 'head') multiplier = 1.4
     }
-    if (enemy.kind === 'brute') {
+    if (isBoss(enemy.kind)) {
       if (hit.zone === 'core' && enemy.coreExposedTimer > 0) multiplier = 3
       else multiplier = hit.zone === 'head' ? 0.65 : 0.3
     }
@@ -1431,9 +1498,9 @@ export class Game implements TouchTarget {
     this.spawnBlood(hit.point, enemy.lastHitDir, enemy.kind, hit.zone === 'head' ? 7 : 3)
     if (this.damageNumbers) this.emitDamageNumber(hit.point, damage, healthBefore > 0 && enemy.health <= 0 ? 'kill' : precisionZone ? 'head' : 'body')
     // Reazione al colpo: sobbalzo e piccola spinta all'indietro.
-    enemy.flinch = Math.min(1, enemy.flinch + (enemy.kind === 'brute' ? 0.25 : 0.7))
+    enemy.flinch = Math.min(1, enemy.flinch + (isBoss(enemy.kind) ? 0.25 : 0.7))
     const push = hit.point.clone().sub(this.camera.position).setY(0)
-    if (push.lengthSq() > 0) enemy.knockback.addScaledVector(push.normalize(), enemy.kind === 'brute' ? 0.4 : 1.6)
+    if (push.lengthSq() > 0) enemy.knockback.addScaledVector(push.normalize(), isBoss(enemy.kind) ? 0.4 : 1.6)
     if (this.stats.incendiary > 0) {
       enemy.burnTimer = BURN_DURATION
       enemy.burnDamagePerSecond = getBurnDamagePerSecond(this.stats.incendiary, this.stats.damage)
@@ -1549,15 +1616,21 @@ export class Game implements TouchTarget {
       best = { kind: 'station', station }
       bestDistance = horizontal
     }
+    const generator = this.map.generator
+    if (generator && canStartGenerator(this.generator, this.wave) && this.player.y < 1) {
+      const horizontal = Math.hypot(generator.x - this.player.x, generator.z - this.player.z)
+      if (horizontal < GENERATOR.interactRange && horizontal < bestDistance) best = { kind: 'generator' }
+    }
     return best
   }
 
   private describeInteraction(interaction: Interaction): { label: string; cost: number } {
     if (interaction.kind === 'door') return { label: 'APRI PORTA', cost: interaction.door.definition.cost }
+    if (interaction.kind === 'generator') return { label: `AVVIA IL GENERATORE // DIFENDILO ${GENERATOR.defendSeconds} s`, cost: 0 }
     const { definition } = interaction.station
-    if (definition.kind === 'medkit') return { label: 'KIT MEDICO // CURA COMPLETA', cost: definition.cost }
-    if (definition.kind === 'ammo') return { label: 'RIFORNIMENTO MUNIZIONI', cost: definition.cost }
-    if (definition.kind === 'box') return { label: 'CASSA MISTERIOSA // ARMA A SORPRESA', cost: definition.cost }
+    if (definition.kind === 'medkit') return { label: 'KIT MEDICO // CURA COMPLETA', cost: getPoweredCost(definition.cost, this.powered) }
+    if (definition.kind === 'ammo') return { label: 'RIFORNIMENTO MUNIZIONI', cost: getPoweredCost(definition.cost, this.powered) }
+    if (definition.kind === 'box') return { label: 'CASSA MISTERIOSA // ARMA A SORPRESA', cost: getPoweredCost(definition.cost, this.powered) }
     const station = interaction.station
     const weaponId = station.weapon!
     const name = `${WEAPONS[weaponId].shortName} ${FIELD_TIERS[getFieldTier(Math.max(1, this.wave))].name}`
@@ -1576,6 +1649,11 @@ export class Game implements TouchTarget {
       this.doorDeniedTimer = 1.4
       this.audio.play('damage')
       this.emitHud()
+      return
+    }
+    if (interaction.kind === 'generator') {
+      if (this.coopRole === 'client') this.coop?.send({ t: 'gen' })
+      else this.beginGenerator()
       return
     }
     if (interaction.kind === 'door') {
@@ -1613,6 +1691,38 @@ export class Game implements TouchTarget {
     }
     this.audio.play('upgrade')
     this.emitHud()
+  }
+
+  /** Porta chiusa vicina ai primi punti del percorso: quella da sfondare. */
+  private findBlockingDoor(path: readonly NavPoint[]): Door | null {
+    for (const point of path.slice(0, 3)) {
+      for (const door of this.doors) {
+        if (!door.open && this.doorDistance(door, point.x, point.z) < 2.2) return door
+      }
+    }
+    return null
+  }
+
+  private doorDistance(door: Door, x: number, z: number): number {
+    const { min, max } = door.obstacle.box
+    return distanceToDoor(x, z, { minX: min.x, maxX: max.x, minZ: min.z, maxZ: max.z })
+  }
+
+  private hitDoor(door: Door, damage: number): void {
+    const box = door.obstacle.box
+    const center = new THREE.Vector3((box.min.x + box.max.x) / 2, 1.2, (box.min.z + box.max.z) / 2)
+    door.breachHealth -= damage
+    this.audio.playAt('meleeHit', center, this.player, this.yaw)
+    this.spawnBurst(center, 0xffb657, 3)
+    if (!door.breachWarned) {
+      door.breachWarned = true
+      this.events.onNotice?.('PORTA SOTTO ATTACCO', 'Gli zombie stanno sfondando una porta chiusa per raggiungerti.', 0xffb657)
+    }
+    if (door.breachHealth > 0) return
+    this.openDoor(door)
+    this.effects.explosion(center, 1.6, 0xffb657, box.min.y)
+    this.events.onNotice?.('PORTA SFONDATA', 'La porta è caduta: ora è aperta per tutti.', 0xff6b6b)
+    if (this.coopRole === 'host') this.coop?.broadcast({ t: 'door', id: door.definition.id })
   }
 
   private openDoor(door: Door): void {
@@ -1698,7 +1808,7 @@ export class Game implements TouchTarget {
       const eliteGlow = enemy.golden ? 1.3 + Math.sin(this.elapsed * 8) * 0.4 : enemy.elite ? 0.55 + Math.sin(this.elapsed * 5 + enemy.phase) * 0.25 : 0
       enemy.model.body.material.emissive.setHex(enemy.hitFlash > 0 ? 0x882233 : enemy.burnTimer > 0 ? 0x8a2f09 : enemy.golden ? 0xb88a00 : enemy.elite ? 0x7a5200 : 0x000000)
       enemy.model.body.material.emissiveIntensity = enemy.hitFlash > 0 ? 1.8 : enemy.burnTimer > 0 ? 1.2 : eliteGlow
-      if (enemy.kind === 'brute') {
+      if (isBoss(enemy.kind)) {
         enemy.model.weakPoint.material.emissiveIntensity = enemy.coreExposedTimer > 0 ? 3 : 0.12
       }
 
@@ -1753,6 +1863,15 @@ export class Game implements TouchTarget {
       if (enemy.pathTimer <= 0 && this.pathBudget > 0 && !(this.navigation.isOnStairs(enemy.body.position) && enemy.path.length > 0)) {
         this.pathBudget -= 1
         enemy.path = this.navigation.findPath(enemy.body.position, targetPoint, (doorId) => this.doors.some((door) => door.definition.id === doorId && door.open))
+        enemy.breachDoor = null
+        // Nessun percorso con le porte aperte: si passa da una porta chiusa e la si abbatte.
+        if (enemy.path.length === 0 && this.navigation.areaOf(enemy.body.position) !== this.navigation.areaOf(targetPoint)) {
+          const forced = this.navigation.findPath(enemy.body.position, targetPoint)
+          if (forced.length > 0) {
+            enemy.path = forced
+            enemy.breachDoor = this.findBlockingDoor(forced)
+          }
+        }
         enemy.pathTimer = 0.45 + Math.random() * 0.2
       }
       advanceWaypoints(enemy.body.position, enemy.path)
@@ -1812,24 +1931,82 @@ export class Game implements TouchTarget {
           this.audio.playAt('enemyShoot', enemy.model.group.position, this.player, this.yaw)
         }
       }
+      if (isBoss(enemy.kind)) {
+        // Cambio di fase: ruggito e nucleo scoperto per qualche secondo.
+        const phase = getBossPhase(enemy.health, enemy.maxHealth)
+        if (phase > enemy.bossPhase) {
+          enemy.bossPhase = phase
+          enemy.coreExposedTimer = PHASE_CHANGE_EXPOSED
+          enemy.chargeTimer = 0
+          enemy.slamWindup = 0
+          charging = false
+          this.effects.pulse(enemy.body.position, 0xff6b6b, 4)
+          this.audio.playAt('groanBig', enemy.body.position, this.player, this.yaw)
+          const name = getZombieStats(enemy.kind, 1).name.toUpperCase()
+          this.events.onNotice?.(phase === 2 ? `${name} // FASE 2` : `${name} INFURIATO`, phase === 2
+            ? (enemy.kind === 'brute' ? 'Ora colpisce il terreno: salta l’onda d’urto.' : 'Ora richiama gli Striscianti.')
+            : 'Più veloce e aggressivo, ma il nucleo resta scoperto meno a lungo.', 0xff6b6b)
+        }
+      }
       if (enemy.kind === 'brute') {
-        if (charging) {
+        const rules = BRUTE_PHASES[enemy.bossPhase]
+        enemy.slamCooldown -= delta
+        if (enemy.slamWindup > 0) {
+          enemy.slamWindup -= delta
+          movement.set(0, 0, 0)
+          if (enemy.slamWindup <= 0) this.startShockwave(enemy.body.position, enemy.damage * GROUND_SLAM.damageShare)
+        } else if (charging) {
           enemy.chargeTimer -= delta
           movement.copy(enemy.chargeDirection)
           if (enemy.chargeTimer <= 0) {
-            enemy.coreExposedTimer = 1.8
+            enemy.coreExposedTimer = rules.coreExposed
             charging = false
           }
+        } else if (rules.groundSlam && enemy.coreExposedTimer <= 0 && enemy.slamCooldown <= 0 && distance < GROUND_SLAM.triggerRange && sameLevel) {
+          enemy.slamWindup = GROUND_SLAM.windup
+          enemy.slamCooldown = GROUND_SLAM.cooldown
+          movement.set(0, 0, 0)
+          this.audio.playAt('acidCharge', enemy.body.position, this.player, this.yaw)
         } else if (enemy.coreExposedTimer <= 0 && enemy.specialCooldown <= 0 && distance < 10 && distance > 2.4 && sameLevel && !followingPath) {
           enemy.chargeTimer = 0.8
           enemy.chargeDirection.copy(direction)
-          enemy.specialCooldown = 4.5
+          enemy.specialCooldown = rules.chargeCooldown
           charging = true
           movement.copy(direction)
         }
         if (enemy.coreExposedTimer > 0) movement.set(0, 0, 0)
       }
+      if (enemy.kind === 'tyrant') {
+        enemy.summonCooldown -= delta
+        if (enemy.slamWindup > 0) {
+          // Caricamento del lancio: si ferma e alza il macigno.
+          enemy.slamWindup -= delta
+          movement.set(0, 0, 0)
+          if (enemy.slamWindup <= 0) {
+            this.throwBoulder(enemy, victim.position)
+            enemy.coreExposedTimer = TYRANT.coreExposed
+          }
+        } else if (enemy.specialCooldown <= 0 && distance > 4 && distance < 30) {
+          enemy.slamWindup = 0.8
+          enemy.specialCooldown = TYRANT.boulderCooldown * (enemy.bossPhase === 3 ? 0.7 : 1)
+        }
+        const summons = getTyrantSummons(enemy.bossPhase)
+        if (summons > 0 && enemy.summonCooldown <= 0) {
+          enemy.summonCooldown = TYRANT.summonCooldown
+          this.summonCrawlers(enemy, summons)
+        }
+        if (enemy.coreExposedTimer > 0) movement.multiplyScalar(0.25)
+      }
 
+      const breach = enemy.breachDoor
+      if (breach && !breach.open && this.doorDistance(breach, enemy.body.position.x, enemy.body.position.z) < DOOR_BREACH_RANGE + enemy.radius) {
+        movement.set(0, 0, 0)
+        if (enemy.attackCooldown <= 0) {
+          enemy.attackAnim = 1
+          enemy.attackCooldown = enemy.attackInterval
+          this.hitDoor(breach, getDoorHitDamage(enemy.damage, isBoss(enemy.kind)))
+        }
+      } else if (breach?.open) enemy.breachDoor = null
       if (enemy.kind === 'leaper' && enemy.body.grounded && enemy.specialCooldown <= 0 && distance > 4.5 && distance < 12 && sameLevel && !followingPath) {
         // Balzo verso il giocatore: può superare coperture basse.
         enemy.body.velocityY = 7.4
@@ -1854,7 +2031,8 @@ export class Game implements TouchTarget {
       }
       if (enemy.kind === 'bloater' && playerDistance < 1.8 && sameLevel) enemy.health = 0
       const speed = leaping ? 8.5 : enemy.speed * (enemy.slowTimer > 0 ? 0.45 : 1) * (enemy.buffTimer > 0 ? 1.3 : 1)
-        * (charging ? (enemy.kind === 'brute' ? 5.2 : 3.2) : 1)
+        * (charging ? (enemy.kind === 'brute' ? BRUTE_PHASES[enemy.bossPhase].chargeSpeed : 3.2) : 1)
+        * (enemy.kind === 'brute' ? BRUTE_PHASES[enemy.bossPhase].speed : 1)
       const bodyHeight = Math.min(enemy.model.height, 1.9)
       const steering = movement.lengthSq() > 0 ? steerBody(enemy.body.position, movement, enemy.radius, bodyHeight, this.obstacles) : movement
       const flinchSlow = 1 - enemy.flinch * 0.6
@@ -1877,7 +2055,11 @@ export class Game implements TouchTarget {
         enemy.model.leftArm.rotation.x = -1.05 + walk * 0.18
         enemy.model.rightArm.rotation.x = -1.05 - walk * 0.18
         enemy.model.group.rotation.z = Math.sin(this.elapsed * 2.5 + enemy.phase) * 0.06
-      } else if (enemy.kind === 'brute' && charging) {
+      } else if (isBoss(enemy.kind) && enemy.slamWindup > 0) {
+        // Braccia alzate: colpo a terra (Bruto) o macigno pronto al lancio (Tiranno).
+        enemy.model.leftArm.rotation.x = -2.9
+        enemy.model.rightArm.rotation.x = -2.9
+      } else if (isBoss(enemy.kind) && charging) {
         enemy.model.leftArm.rotation.x = -1.3
         enemy.model.rightArm.rotation.x = -1.3
       } else if (enemy.kind === 'crawler') {
@@ -1898,7 +2080,7 @@ export class Game implements TouchTarget {
         enemy.model.rightArm.rotation.x = -1.1 - swing * 1.6
       }
       // Chi sale su casse o coperture basse non è più al sicuro: gli zombie colpiscono verso l'alto.
-      const verticalReach = enemy.kind === 'brute' ? 2.6 : 1.9
+      const verticalReach = isBoss(enemy.kind) ? 2.6 : 1.9
       const canStrike = sameLevel ? playerDistance < enemy.radius + 0.65 : verticalGap > 0 && verticalGap < verticalReach && playerDistance < enemy.radius + 0.9
       if (canStrike && enemy.attackCooldown <= 0) {
         enemy.attackAnim = 1
@@ -1906,7 +2088,7 @@ export class Game implements TouchTarget {
         enemy.attackCooldown = enemy.attackInterval * (enemy.buffTimer > 0 ? 0.75 : 1)
         if (charging) {
           enemy.chargeTimer = 0
-          enemy.coreExposedTimer = 1.8
+          enemy.coreExposedTimer = BRUTE_PHASES[enemy.bossPhase].coreExposed
           charging = false
         }
       }
@@ -1938,6 +2120,7 @@ export class Game implements TouchTarget {
       const projectile = this.projectiles[index]
       if (!projectile) continue
       projectile.life -= delta
+      if (projectile.gravity) projectile.velocity.y -= projectile.gravity * delta
       const previousPosition = this.frameVectors.projectilePrevious.copy(projectile.mesh.position)
       const travelDistance = projectile.velocity.length() * delta
       const travelDirection = this.frameVectors.projectileDirection.copy(projectile.velocity).normalize()
@@ -1945,6 +2128,7 @@ export class Game implements TouchTarget {
       if (wallDistance !== null) {
         const impact = previousPosition.addScaledVector(travelDirection, wallDistance)
         this.spawnBurst(impact, 0x8cff62, 3)
+        if (projectile.blast) this.boulderBlast(impact, projectile)
         this.spawnHazard(impact)
         this.removeProjectile(index)
         continue
@@ -1954,6 +2138,7 @@ export class Game implements TouchTarget {
       const limit = this.map.arenaLimit + 2
       const floor = getGroundHeight(projectile.mesh.position.x, projectile.mesh.position.z, projectile.mesh.position.y, 0.1, this.obstacles)
       if (projectile.life <= 0 || projectile.mesh.position.y <= floor || Math.abs(projectile.mesh.position.x) > limit || Math.abs(projectile.mesh.position.z) > limit) {
+        if (projectile.blast) this.boulderBlast(projectile.mesh.position, projectile)
         this.spawnHazard(projectile.mesh.position)
         this.removeProjectile(index)
         continue
@@ -1962,6 +2147,11 @@ export class Game implements TouchTarget {
       const dz = projectile.mesh.position.z - this.player.z
       const withinHeight = projectile.mesh.position.y > this.player.y - 0.2 && projectile.mesh.position.y < this.player.y + this.controller.height + 0.2
       if (withinHeight && dx * dx + dz * dz < (projectile.radius + 0.45) ** 2) {
+        if (projectile.blast) {
+          this.boulderBlast(projectile.mesh.position, projectile)
+          this.removeProjectile(index)
+          continue
+        }
         this.damagePlayer(projectile.damage)
         this.spawnHazard(projectile.mesh.position)
         this.removeProjectile(index)
@@ -2043,7 +2233,7 @@ export class Game implements TouchTarget {
     const candidates = this.enemies.filter((enemy) => enemy.health > 0 && enemy.spawnTimer <= 0 && enemy.body.position.distanceTo(this.player) < 22)
     const enemy = candidates[Math.floor(Math.random() * candidates.length)]
     if (!enemy) return
-    this.audio.playAt(enemy.kind === 'brute' || enemy.kind === 'bloater' ? 'groanBig' : 'groan', enemy.body.position, this.player, this.yaw)
+    this.audio.playAt(isBoss(enemy.kind) || enemy.kind === 'bloater' ? 'groanBig' : 'groan', enemy.body.position, this.player, this.yaw)
   }
 
   /** Vero se lo scudo dello Scudiero è rivolto verso il punto indicato. */
@@ -2082,7 +2272,7 @@ export class Game implements TouchTarget {
     const position = enemy.model.group.position.clone()
     if (enemy.kind === 'bloater') this.explodeBloater(position)
     const score = enemy.score * this.wave * this.lootMultiplier * this.waveMods.score
-    const shards = enemy.kind === 'brute' ? 8 : Math.random() < 0.26 ? 1 : 0
+    const shards = isBoss(enemy.kind) ? 8 : Math.random() < 0.26 ? 1 : 0
     const killer = enemy.lastHitBy
     const active = new Set<PowerUpId>([...this.activePowerUps.keys(), ...this.powerPickups.map((pickup) => pickup.id)])
     const dropped = rollPowerUp(enemy.kind, Math.random, active, this.stats.luck)
@@ -2104,7 +2294,7 @@ export class Game implements TouchTarget {
       const variant = enemy.lastCause === 'execution' ? 'execution' : (goreMask & PART_HEAD) !== 0 || enemy.lastZone === 'head' ? 'headshot' : 'kill'
       if (enemy.lastCause === 'explosion') this.feats.explosiveKills += 1
       this.rewardKill(enemy.kind, position, score, enemy.xp, shards, enemy.elite, enemy.golden ? GOLDEN_CREDITS : 0, variant)
-      this.requestHitStop({ boss: enemy.kind === 'brute', lethalHeadshot: enemy.lastZone === 'head', execution: enemy.lastCause === 'execution' })
+      this.requestHitStop({ boss: isBoss(enemy.kind), lethalHeadshot: enemy.lastZone === 'head', execution: enemy.lastCause === 'execution' })
     } else if (enemy.golden) this.shareGoldenCredits()
     this.advanceBounty()
     this.enemies.splice(index, 1)
@@ -2135,10 +2325,10 @@ export class Game implements TouchTarget {
     const bloodColor = getBloodColor(kind, this.goreLevel)
     const chest = position.clone().setY(position.y + model.height * 0.6)
     if (bloodColor === null) {
-      this.spawnBurst(chest, getZombieColor(kind), kind === 'brute' ? 28 : 12)
+      this.spawnBurst(chest, getZombieColor(kind), isBoss(kind) ? 28 : 12)
     } else {
-      this.spawnBlood(chest, dir, kind, kind === 'brute' ? 26 : 12)
-      this.gore.splat(position, position.y, kind === 'brute' ? 2.1 : 0.7 + Math.random() * 0.5, bloodColor)
+      this.spawnBlood(chest, dir, kind, isBoss(kind) ? 26 : 12)
+      this.gore.splat(position, position.y, isBoss(kind) ? 2.1 : 0.7 + Math.random() * 0.5, bloodColor)
     }
     if (this.goreLevel === 'full' && goreMask !== 0) {
       const parts: [number, THREE.Object3D][] = [[PART_HEAD, model.head], [PART_LEFT_ARM, model.leftArm], [PART_RIGHT_ARM, model.rightArm], [PART_LEFT_LEG, model.leftLeg], [PART_RIGHT_LEG, model.rightLeg]]
@@ -2259,7 +2449,7 @@ export class Game implements TouchTarget {
   /** Colpo letale: uccide gli zombie comuni e quadruplica il danno sul Bruto. */
   private scaleDamage(enemy: Enemy, damage: number): number {
     if (!this.activePowerUps.has('insta-kill')) return damage
-    return enemy.kind === 'brute' ? damage * INSTA_KILL_BOSS_MULTIPLIER : Math.max(damage, enemy.health + 1)
+    return isBoss(enemy.kind) ? damage * INSTA_KILL_BOSS_MULTIPLIER : Math.max(damage, enemy.health + 1)
   }
 
   private spawnPowerPickup(position: THREE.Vector3, id: PowerUpId, netId?: number): void {
@@ -2333,7 +2523,7 @@ export class Game implements TouchTarget {
       // L'onda d'urto elimina gli zombie: in co-op lo decide l'host.
       if (this.coopRole !== 'client') {
         for (const enemy of this.enemies) {
-          if (enemy.kind === 'brute' || enemy.health <= 0) continue
+          if (isBoss(enemy.kind) || enemy.health <= 0) continue
           if (enemy.body.position.distanceTo(origin) <= SHOCKWAVE_RADIUS) enemy.health = 0
         }
         this.killDestroyedEnemies()
@@ -2615,6 +2805,200 @@ export class Game implements TouchTarget {
     else this.finishRun(false)
   }
 
+  // --- Obiettivi -----------------------------------------------------------------------------
+  private resetObjectives(): void {
+    this.generator = createGenerator()
+    this.generatorDamage = 0
+    this.powered = false
+    this.evacuation = -1
+    const generator = this.map.generator
+    this.generatorModel.visible = generator !== undefined
+    if (generator) this.generatorModel.position.set(generator.x, 0, generator.z)
+    setGeneratorLook(this.generatorModel, 'off', 0)
+    if (!this.generatorModel.parent) this.scene.add(this.generatorModel)
+    this.beacon.position.set(this.map.extraction.x, 0, this.map.extraction.z)
+    this.beacon.visible = false
+    if (!this.beacon.parent) this.scene.add(this.beacon)
+  }
+
+  /** Host o partita in solitaria: avvio del generatore (anche su richiesta di un compagno). */
+  private beginGenerator(): void {
+    if (!this.map.generator || !canStartGenerator(this.generator, this.wave)) return
+    this.generator = startGenerator(this.generator, this.wave)
+    this.generatorDamage = 0
+    this.audio.playAt('powerUp', this.generatorModel.position, this.player, this.yaw)
+    this.events.onNotice?.('GENERATORE IN AVVIO', `Difendilo per ${GENERATOR.defendSeconds} secondi: gli zombie vicini proveranno a distruggerlo.`, 0xffd166)
+  }
+
+  private beginEvacuation(): void {
+    this.evacuation = 0
+    this.waveActive = false
+    this.spawnTimer = 2
+    this.beacon.visible = true
+    this.events.onNotice?.('EVACUAZIONE', `L'elicottero sta arrivando: resta nella zona di estrazione per ${EVACUATION.holdSeconds} secondi.`, 0x58f5e5)
+    this.audio.play('powerUp')
+  }
+
+  private updateObjectives(delta: number): void {
+    const generator = this.map.generator
+    if (generator) {
+      setGeneratorLook(this.generatorModel, this.generator.state, this.elapsed)
+      if (this.coopRole !== 'client') {
+        const result = tickGenerator(this.generator, delta, this.generatorDamage, this.wave)
+        this.generatorDamage = 0
+        this.generator = result.status
+        if (result.event === 'started') this.onGeneratorStarted()
+        if (result.event === 'failed') this.onGeneratorFailed()
+      }
+    }
+    if (this.evacuation < 0) return
+    this.beacon.rotation.y += delta * 0.8
+    if (this.coopRole === 'client') return
+    const point = this.map.extraction
+    const inside = (this.coopStatus === 'alive' && isInsideExtraction(this.player.x, this.player.z, point))
+      || this.teammates.all.some((mate) => mate.status === 'alive' && isInsideExtraction(mate.feet.x, mate.feet.z, point))
+    this.evacuation = tickEvacuation(this.evacuation, delta, inside)
+    if (this.evacuation >= 1) {
+      if (this.coopRole === 'host') this.coop?.broadcast({ t: 'end', wave: this.wave, won: true })
+      this.finishRun(true)
+    }
+  }
+
+  private onGeneratorStarted(): void {
+    this.powered = true
+    this.shards += GENERATOR.credits
+    this.rotateStations(this.wave)
+    this.effects.pulse(this.generatorModel.position, 0xffd166, 5)
+    this.audio.play('powerUp')
+    this.events.onNotice?.('CORRENTE RIPRISTINATA', `Postazioni scontate del ${Math.round(GENERATOR.discount * 100)}% per il resto della run e +${GENERATOR.credits} crediti.`, 0xffd166)
+  }
+
+  private onGeneratorFailed(): void {
+    this.effects.explosion(this.generatorModel.position.clone().setY(1), 2.4, 0xff8a4a, 0)
+    this.audio.playAt('explosion', this.generatorModel.position, this.player, this.yaw)
+    this.events.onNotice?.('GENERATORE DISTRUTTO', 'Gli zombie l’hanno messo fuori uso: potrai ripararlo dall’ondata successiva.', 0xff6b6b)
+  }
+
+  /** Client co-op: stato degli obiettivi deciso dall'host. */
+  private applyRemoteObjectives([state, progress, health, evacuation]: [number, number, number, number]): void {
+    const next: GeneratorState = state === 2 ? 'on' : state === 1 ? 'starting' : 'off'
+    const previous = this.generator.state
+    this.generator = { ...this.generator, state: next, progress, health: health * GENERATOR.health }
+    if (next === 'starting' && previous !== 'starting') this.events.onNotice?.('GENERATORE IN AVVIO', `Difendilo per ${GENERATOR.defendSeconds} secondi.`, 0xffd166)
+    if (next === 'on' && previous !== 'on') this.onGeneratorStarted()
+    if (next === 'off' && previous === 'starting') this.onGeneratorFailed()
+    if (evacuation >= 0 && this.evacuation < 0) this.beginEvacuation()
+    this.evacuation = evacuation
+  }
+
+  private hudObjective(): HudData['objective'] {
+    if (this.evacuation >= 0) {
+      const point = this.map.extraction
+      const distance = Math.hypot(point.x - this.player.x, point.z - this.player.z)
+      const inside = distance <= EVACUATION.radius
+      return { title: 'EVACUAZIONE', detail: inside ? 'Resta nella zona: l’elicottero sta atterrando' : `Raggiungi la zona di estrazione // ${Math.round(distance)} m`, progress: this.evacuation, color: 0x58f5e5 }
+    }
+    if (!this.map.generator) return undefined
+    if (this.generator.state === 'starting') {
+      return { title: 'DIFENDI IL GENERATORE', detail: `Integrità ${Math.round((this.generator.health / GENERATOR.health) * 100)}%`, progress: this.generator.progress, color: 0xffd166 }
+    }
+    if (this.generator.state === 'off') {
+      return this.wave >= this.generator.retryWave
+        ? { title: 'OBIETTIVO', detail: `Avvia il generatore (E): postazioni scontate del ${Math.round(GENERATOR.discount * 100)}%`, color: 0xffd166 }
+        : { title: 'GENERATORE GUASTO', detail: `Riparabile dall’ondata ${this.generator.retryWave}`, color: 0x8a93ad }
+    }
+    return undefined
+  }
+
+
+  // --- Boss ---------------------------------------------------------------------------------
+  /** Colpo a terra del Bruto: anello che si allarga; chi è a terra nella fascia viene colpito. */
+  private startShockwave(origin: THREE.Vector3, damage: number): void {
+    this.effects.shockwave(origin, 0xff6b4a, GROUND_SLAM.maxRadius, GROUND_SLAM.duration)
+    this.effects.explosion(origin.clone().setY(origin.y + 0.2), 2.2, 0xff8a4a, origin.y)
+    this.audio.playAt('slam', origin, this.player, this.yaw)
+    if (origin.distanceTo(this.player) < GROUND_SLAM.maxRadius + 4) this.cameraShake = Math.max(this.cameraShake, 0.3)
+    this.shockwaves.push({ origin: origin.clone(), elapsed: 0, damage, hit: new Set() })
+  }
+
+  private updateShockwaves(delta: number): void {
+    for (let index = this.shockwaves.length - 1; index >= 0; index -= 1) {
+      const wave = this.shockwaves[index]!
+      wave.elapsed += delta
+      const radius = getShockwaveRadius(wave.elapsed)
+      if (wave.damage > 0) {
+        const local = Math.hypot(this.player.x - wave.origin.x, this.player.z - wave.origin.z)
+        if (!wave.hit.has(null) && this.coopStatus === 'alive' && isHitByShockwave(local, radius, this.controller.body.grounded, this.player.y - wave.origin.y)) {
+          wave.hit.add(null)
+          this.damagePlayer(wave.damage)
+          const push = this.player.clone().sub(wave.origin).setY(0)
+          if (push.lengthSq() > 0.0001) this.controller.velocity.addScaledVector(push.normalize(), 7)
+        }
+        if (this.coopRole === 'host') {
+          for (const mate of this.teammates.all) {
+            if (mate.status !== 'alive' || wave.hit.has(mate.id)) continue
+            const distance = Math.hypot(mate.feet.x - wave.origin.x, mate.feet.z - wave.origin.z)
+            // I compagni non dichiarano se sono in aria: conta la quota dei piedi.
+            if (isHitByShockwave(distance, radius, mate.feet.y - wave.origin.y < 0.4, mate.feet.y - wave.origin.y)) {
+              wave.hit.add(mate.id)
+              this.hitPlayer(mate.id, wave.damage)
+            }
+          }
+        }
+      }
+      if (wave.elapsed >= GROUND_SLAM.duration) this.shockwaves.splice(index, 1)
+    }
+  }
+
+  /** Il Tiranno lancia un macigno acido in parabola verso il bersaglio. */
+  private throwBoulder(enemy: Enemy, target: THREE.Vector3): void {
+    const mesh = new THREE.Mesh(this.acidGeometry, this.acidMaterial)
+    mesh.scale.setScalar(2.4)
+    mesh.position.copy(enemy.model.group.position)
+    mesh.position.y += enemy.model.height * 0.95
+    // Mira un po' davanti al bersaglio se si muove (solo il giocatore locale ha una velocità nota).
+    const aim = target.clone()
+    if (target === this.player) aim.addScaledVector(this.controller.velocity.clone().setY(0), 0.35)
+    const lob = getLobVelocity(aim.x - mesh.position.x, aim.y + 0.3 - mesh.position.y, aim.z - mesh.position.z, TYRANT.boulderSpeed, GRAVITY)
+    const velocity = new THREE.Vector3(lob.x, lob.y, lob.z)
+    this.scene.add(mesh)
+    this.projectiles.push({ mesh, velocity, damage: enemy.damage * TYRANT.boulderDamageShare, life: 5, radius: 0.6, gravity: GRAVITY, blast: TYRANT.boulderRadius })
+    if (this.coopRole === 'host') this.coop?.broadcast({ t: 'acid', pos: toVec3(mesh.position), vel: toVec3(velocity), boulder: true })
+    this.audio.playAt('enemyShoot', enemy.model.group.position, this.player, this.yaw)
+  }
+
+  /** Esplosione del macigno: danno ai giocatori nel raggio (decrescente) e pozza acida. */
+  private boulderBlast(position: THREE.Vector3, projectile: Projectile): void {
+    const radius = projectile.blast ?? 0
+    this.effects.explosion(position.clone(), radius, 0x8cff62, getGroundHeight(position.x, position.z, position.y + 0.3, 0.3, this.obstacles))
+    this.audio.playAt('explosion', position, this.player, this.yaw)
+    if (projectile.damage <= 0) return
+    const local = position.distanceTo(this.player.clone().setY(this.player.y + 0.9))
+    if (local < radius) this.damagePlayer(projectile.damage * Math.max(0.35, 1 - local / radius))
+    if (this.coopRole === 'host') {
+      for (const mate of this.teammates.all) {
+        const distance = position.distanceTo(mate.feet.clone().setY(mate.feet.y + 0.9))
+        if (mate.status === 'alive' && distance < radius) this.hitPlayer(mate.id, projectile.damage * Math.max(0.35, 1 - distance / radius))
+      }
+    }
+  }
+
+  /** Il Tiranno richiama Striscianti che emergono attorno a lui (contano nell'ondata). */
+  private summonCrawlers(boss: Enemy, count: number): void {
+    const free = scaleMaxActive(getMaxActiveZombies(this.graphicsQuality), this.coopPlayers) + 4 - this.enemies.length
+    const total = Math.min(count, Math.max(0, free))
+    for (let index = 0; index < total; index += 1) {
+      const angle = (index / Math.max(1, total)) * Math.PI * 2 + Math.random() * 0.5
+      const crawler = this.spawnEnemy('crawler')
+      crawler.body.position.set(boss.body.position.x + Math.cos(angle) * 2.6, boss.body.position.y, boss.body.position.z + Math.sin(angle) * 2.6)
+      resolveBodyCollisions(crawler.body.position, crawler.radius, 1, this.obstacles)
+    }
+    if (total > 0) {
+      this.effects.pulse(boss.body.position, getZombieColor('tyrant'), 3.5)
+      this.audio.playAt('groanBig', boss.body.position, this.player, this.yaw)
+    }
+  }
+
   private removeProjectile(index: number): void {
     const projectile = this.projectiles[index]
     if (!projectile) return
@@ -2658,6 +3042,7 @@ export class Game implements TouchTarget {
     this.enemies.length = 0
     this.dyingEnemies.length = 0
     this.projectiles.length = 0
+    this.shockwaves.length = 0
     this.pickups.length = 0
     this.particles.length = 0
     this.tracers.length = 0
@@ -2707,6 +3092,15 @@ export class Game implements TouchTarget {
         }
       }
     }
+    // Il generatore in avvio attira gli zombie vicini: va difeso.
+    if (this.generator.state === 'starting' && this.map.generator) {
+      const feet = this.generatorModel.position
+      const value = score(feet)
+      if (value < GENERATOR.aggroRange && value < bestScore) {
+        bestScore = value
+        best = { position: feet, id: null, generator: true }
+      }
+    }
     // Una torretta vicina attira gli zombie più del giocatore lontano: la attaccano finché non esplode.
     for (const turret of this.equipment.attackableTurrets()) {
       const value = score(turret.position)
@@ -2719,7 +3113,8 @@ export class Game implements TouchTarget {
   }
 
   private hitVictim(victim: Victim, amount: number): void {
-    if (victim.turret) victim.turret.damage(amount)
+    if (victim.generator) this.generatorDamage += amount
+    else if (victim.turret) victim.turret.damage(amount)
     else this.hitPlayer(victim.id, amount)
   }
 
@@ -2826,13 +3221,15 @@ export class Game implements TouchTarget {
     const enemies = this.enemies.filter((enemy) => enemy.health > 0).map((enemy) => packEnemy(
       enemy.netId, enemy.kind, enemy.body.position.x, enemy.body.position.y, enemy.body.position.z, enemy.model.group.rotation.y,
       enemy.health / enemy.maxHealth,
-      (enemy.elite ? ENEMY_FLAG_ELITE : 0) | (enemy.spawnTimer > 0 ? ENEMY_FLAG_RISING : 0) | (enemy.attackAnim > 0 ? ENEMY_FLAG_ATTACK : 0) | (enemy.golden ? ENEMY_FLAG_GOLDEN : 0),
+      (enemy.elite ? ENEMY_FLAG_ELITE : 0) | (enemy.spawnTimer > 0 ? ENEMY_FLAG_RISING : 0) | (enemy.attackAnim > 0 ? ENEMY_FLAG_ATTACK : 0) | (enemy.golden ? ENEMY_FLAG_GOLDEN : 0)
+        | (enemy.coreExposedTimer > 0 ? ENEMY_FLAG_EXPOSED : 0) | (enemy.kind === 'brute' && enemy.slamWindup > 0 ? ENEMY_FLAG_SLAM : 0),
     ))
     const players: CoopPlayerState[] = [
       this.localPlayerState(COOP_HOST_ID),
       ...this.teammates.all.map((mate) => ({ id: mate.id, x: round2(mate.target.x), y: round2(mate.target.y), z: round2(mate.target.z), yaw: round2(mate.targetYaw), pitch: 0, crouch: mate.crouch, health: Math.round(mate.health), status: mate.status, kills: this.teammateKills.get(mate.id) ?? 0 })),
     ]
-    this.coop?.broadcast({ t: 'world', wave: this.wave, waveBreak: round2(this.waveBreak), remaining: this.enemies.length + this.spawnQueue, enemies, players })
+    const generatorState = this.generator.state === 'off' ? 0 : this.generator.state === 'starting' ? 1 : 2
+    this.coop?.broadcast({ t: 'world', wave: this.wave, waveBreak: round2(this.waveBreak), remaining: this.enemies.length + this.spawnQueue, enemies, players, obj: [generatorState, round2(this.generator.progress), round2(this.generator.health / GENERATOR.health), round2(this.evacuation)] })
   }
 
   private applyRevive(target: string, by: string): void {
@@ -2882,6 +3279,9 @@ export class Game implements TouchTarget {
         this.coop?.broadcast({ t: 'door', id: message.id })
         return
       }
+      case 'gen':
+        this.beginGenerator()
+        return
       case 'revive':
         this.applyRevive(message.target, peerId)
         return
@@ -2913,6 +3313,11 @@ export class Game implements TouchTarget {
           enemy.netYaw = data.yaw
           enemy.health = Math.max(1, data.healthShare * enemy.maxHealth)
           if ((data.flags & ENEMY_FLAG_ATTACK) !== 0 && enemy.attackAnim <= 0) enemy.attackAnim = 1
+          enemy.coreExposedTimer = (data.flags & ENEMY_FLAG_EXPOSED) !== 0 ? Math.max(enemy.coreExposedTimer, 0.2) : 0
+          const slamming = (data.flags & ENEMY_FLAG_SLAM) !== 0
+          // Fine del caricamento visto dall'host: l'anello parte (solo grafica, il danno lo decide l'host).
+          if (!slamming && enemy.slamWindup > 0) this.startShockwave(enemy.body.position, 0)
+          enemy.slamWindup = slamming ? GROUND_SLAM.windup : 0
         }
         // Zombie spariti senza messaggio di uccisione (es. fuori sincronia): si rimuovono.
         for (let index = this.enemies.length - 1; index >= 0; index -= 1) {
@@ -2922,6 +3327,7 @@ export class Game implements TouchTarget {
           this.releaseEnemyModel(enemy.kind, enemy.model)
         }
         for (const player of message.players) if (player.id !== localId) this.teammates.applyState(player)
+        if (message.obj) this.applyRemoteObjectives(message.obj)
         return
       }
       case 'wave':
@@ -2954,7 +3360,12 @@ export class Game implements TouchTarget {
         mesh.position.set(...message.pos)
         this.scene.add(mesh)
         // Solo effetto visivo: il danno ai giocatori lo calcola l'host.
-        this.projectiles.push({ mesh, velocity: new THREE.Vector3(...message.vel).multiplyScalar(7.5), damage: 0, life: 4, radius: 0.25 })
+        if (message.boulder) {
+          mesh.scale.setScalar(2.4)
+          this.projectiles.push({ mesh, velocity: new THREE.Vector3(...message.vel), damage: 0, life: 5, radius: 0.6, gravity: GRAVITY, blast: TYRANT.boulderRadius })
+        } else {
+          this.projectiles.push({ mesh, velocity: new THREE.Vector3(...message.vel).multiplyScalar(7.5), damage: 0, life: 4, radius: 0.25 })
+        }
         return
       }
       case 'power-spawn':
@@ -3084,6 +3495,12 @@ export class Game implements TouchTarget {
         name: EQUIPMENT[this.loadout[slot]].name,
         cooldown: this.cooldowns[slot],
       })),
+      objective: this.hudObjective(),
+      boss: (() => {
+        const boss = this.enemies.find((enemy) => isBoss(enemy.kind) && enemy.health > 0 && enemy.spawnTimer <= 0)
+        if (!boss) return undefined
+        return { name: getZombieStats(boss.kind, 1).name.toUpperCase(), health: Math.max(0, boss.health / boss.maxHealth), phase: getBossPhase(boss.health, boss.maxHealth), exposed: boss.coreExposedTimer > 0 }
+      })(),
       mobility: this.mobility ? {
         key: MOBILITY_KEY_LABEL,
         name: MOBILITY[this.mobility.id].name,
@@ -3134,7 +3551,10 @@ export class Game implements TouchTarget {
     this.updateStations(delta)
     this.updateEquipment(delta)
     if (this.state !== 'playing') return
+    this.updateObjectives(delta)
+    if (this.state !== 'playing') return
     this.updateProjectiles(delta)
+    this.updateShockwaves(delta)
     this.updateHazards(delta)
     if (this.state !== 'playing') return
     this.updatePickups(delta)
@@ -3340,10 +3760,10 @@ export class Game implements TouchTarget {
       this.dealDamage(enemy, this.scaleDamage(enemy, damage * this.executionBonus(enemy)))
       this.recordHit(enemy, 'explosion', null, null, origin)
       const push = enemy.body.position.clone().sub(origin).setY(0)
-      if (push.lengthSq() > 0.0001) enemy.knockback.addScaledVector(push.normalize(), enemy.kind === 'brute' ? 2 : 9)
+      if (push.lengthSq() > 0.0001) enemy.knockback.addScaledVector(push.normalize(), isBoss(enemy.kind) ? 2 : 9)
       enemy.hitFlash = 0.12
       enemy.flinch = 1
-      enemy.stunTimer = Math.max(enemy.stunTimer, enemy.kind === 'brute' ? 0.2 : 0.6)
+      enemy.stunTimer = Math.max(enemy.stunTimer, isBoss(enemy.kind) ? 0.2 : 0.6)
     }
   }
 
@@ -3741,6 +4161,8 @@ interface Victim {
   position: THREE.Vector3
   id: string | null
   turret?: { position: THREE.Vector3; damage: (amount: number) => void }
+  /** Il generatore in avvio: gli zombie vicini lo attaccano. */
+  generator?: boolean
 }
 
 /** Distanza (pesata) entro cui una torretta attira gli zombie più del giocatore. */

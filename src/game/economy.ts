@@ -10,7 +10,7 @@ export const CREDIT_SYMBOL = '⬢'
 export const SHARD_SYMBOL = '◆'
 
 const KILL_CREDITS: Record<EnemyKind, number> = {
-  walker: 1, runner: 1, crawler: 1, leaper: 2, spitter: 2, bloater: 2, stalker: 2, screamer: 3, armored: 3, shielder: 3, brute: 12,
+  walker: 1, runner: 1, crawler: 1, leaper: 2, spitter: 2, bloater: 2, stalker: 2, screamer: 3, armored: 3, shielder: 3, brute: 12, tyrant: 18,
 }
 
 /** Crediti per uccisione: i nemici più duri valgono di più, le élite il doppio. */
@@ -25,5 +25,5 @@ export function getRunShards(wave: number, kills: number, won: boolean): number 
 
 /** Esperienza dell'arma per un'uccisione in Zombie: più alta per élite e Bruto. */
 export function getWeaponKillXp(kind: EnemyKind, elite: boolean, base: number): number {
-  return Math.round(base * (kind === 'brute' ? 5 : elite ? 2 : 1))
+  return Math.round(base * (kind === 'brute' || kind === 'tyrant' ? 5 : elite ? 2 : 1))
 }

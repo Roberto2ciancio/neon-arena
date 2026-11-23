@@ -167,6 +167,15 @@ export class CombatEffects {
   }
 
   /** Anello che si espande a terra: schieramento della torretta, raccolta, acquisto. */
+  /** Anello a terra che si allarga fino a `radius` in `duration` secondi (onda d'urto del Bruto). */
+  shockwave(position: THREE.Vector3, color: number, radius: number, duration: number): void {
+    const ring = new THREE.Mesh(this.ring, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }))
+    ring.rotation.x = -Math.PI / 2
+    ring.position.copy(position).setY(position.y + 0.08)
+    ring.scale.setScalar(0.001)
+    this.add(ring, { life: duration, growth: radius, baseScale: 0, fade: 'late' })
+  }
+
   pulse(position: THREE.Vector3, color: number, radius = 1.6): void {
     const ring = new THREE.Mesh(this.ring, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }))
     ring.rotation.x = -Math.PI / 2

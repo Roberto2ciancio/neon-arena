@@ -885,6 +885,117 @@ test('il modulo di mobilità scelto in armeria funziona in partita (scatto)', as
   expect(errors).toEqual([])
 })
 
+test('obiettivi: generatore di Stazione 13 ed evacuazione finale', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  await page.addInitScript(() => window.localStorage.setItem('neon-arena:graphics:v1', 'low'))
+  await page.goto('/')
+  await page.locator('[data-map="station-13"]').click()
+  await page.getByRole('button', { name: 'INIZIA RUN' }).click()
+  await expect(page.locator('#app')).toHaveAttribute('data-state', 'playing')
+  // Prima della terza ondata il generatore è guasto.
+  await expect(page.locator('#objective-title')).toHaveText('GENERATORE GUASTO')
+  await page.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    game.clearEntities()
+    game.spawnQueue = 0
+    game.wave = 3
+    game.activePowerUps.set('barrier', 999)
+    const { x, z } = game.map.generator
+    game.debugPlace(x + 1.6, 0, z, 0, 0)
+  })
+  await expect(page.locator('#door-prompt-text')).toContainText('AVVIA IL GENERATORE')
+  await page.keyboard.press('KeyE')
+  await expect(page.locator('#objective-title')).toHaveText('DIFENDI IL GENERATORE')
+  const before = await page.evaluate(() => (window as any).__neonArena.game.shards)
+  // Avvio quasi completato: il tempo di gioco in headless scorre più lento dell'orologio.
+  await page.evaluate(() => { const game = (window as any).__neonArena.game; game.generator = { ...game.generator, progress: 0.99 } })
+  await expect.poll(() => page.evaluate(() => (window as any).__neonArena.game.powered)).toBe(true)
+  expect(await page.evaluate(() => (window as any).__neonArena.game.shards)).toBeGreaterThan(before)
+
+  // Fine dell'ultima ondata: parte l'evacuazione, si vince restando nella zona.
+  await page.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    game.clearEntities()
+    game.wave = 15
+    game.spawnQueue = 0
+    game.waveActive = true
+  })
+  await expect(page.locator('#objective-title')).toHaveText('EVACUAZIONE')
+  await expect(page.locator('#objective-detail')).toContainText('Raggiungi la zona')
+  await page.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    const { x, z } = game.map.extraction
+    game.debugPlace(x, 0, z, 0, 0)
+    game.evacuation = 0.98
+  })
+  await expect(page.locator('#app')).toHaveAttribute('data-state', 'victory', { timeout: 10000 })
+  expect(errors).toEqual([])
+})
+
+test('boss: il Bruto cambia fase, il Tiranno lancia macigni e gli zombie sfondano le porte', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  await page.addInitScript(() => window.localStorage.setItem('neon-arena:graphics:v1', 'low'))
+  await page.goto('/')
+  await page.locator('[data-map="district-zero"]').click()
+  await page.getByRole('button', { name: 'INIZIA RUN' }).click()
+  await expect(page.locator('#app')).toHaveAttribute('data-state', 'playing')
+  await page.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    game.clearEntities()
+    game.spawnQueue = 0
+    game.activePowerUps.set('barrier', 999)
+    game.debugPlace(0, 0, 12, 0, 0)
+    const brute = game.spawnEnemy('brute')
+    brute.body.position.set(0, 0, 4)
+    brute.spawnTimer = 0
+    brute.health = brute.maxHealth * 0.6
+  })
+  await expect(page.locator('#boss-name')).toHaveText('BRUTO')
+  await expect(page.locator('#boss-phase')).toHaveText(/FASE 2|NUCLEO SCOPERTO/)
+  // Il Tiranno, ferito, lancia un macigno e richiama gli Striscianti.
+  await page.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    game.clearEntities()
+    game.debugPlace(0, 0, 12, 0, 0)
+    const tyrant = game.spawnEnemy('tyrant')
+    tyrant.body.position.set(0, 0, 2)
+    tyrant.spawnTimer = 0
+    tyrant.specialCooldown = 0
+    tyrant.summonCooldown = 0
+    tyrant.health = tyrant.maxHealth * 0.5
+  })
+  await expect(page.locator('#boss-name')).toHaveText('TIRANNO')
+  await expect.poll(() => page.evaluate(() => (window as any).__neonArena.game.enemies.filter((enemy: any) => enemy.kind === 'crawler').length)).toBeGreaterThan(0)
+  await expect.poll(() => page.evaluate(() => (window as any).__neonArena.game.projectiles.length), { timeout: 8000 }).toBeGreaterThan(0)
+
+  // Chiusi negli uffici (porta a pagamento ancora chiusa): lo zombie abbatte la porta.
+  const door = await page.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    game.clearEntities()
+    const office = game.doors.find((candidate: any) => candidate.definition.id === 'offices-door')
+    const box = office.obstacle.box
+    const cx = (box.min.x + box.max.x) / 2
+    const cz = (box.min.z + box.max.z) / 2
+    for (const [dx, dz] of [[2.5, 0], [-2.5, 0], [0, 2.5], [0, -2.5]]) {
+      const inside = { x: cx + dx, y: 0, z: cz + dz }
+      if (game.navigation.areaOf(inside) === 'ground') continue
+      game.debugPlace(inside.x, 0, inside.z, 0, 0)
+      const zombie = game.spawnEnemy('walker')
+      zombie.body.position.set(cx - dx * 3, 0, cz - dz * 3)
+      zombie.spawnTimer = 0
+      // Porta già malridotta: il tempo di gioco in headless è lento.
+      office.breachHealth = 30
+      return office.definition.id
+    }
+    return null
+  })
+  expect(door).toBe('offices-door')
+  await expect.poll(() => page.evaluate(() => (window as any).__neonArena.game.doors.find((candidate: any) => candidate.definition.id === 'offices-door').open), { timeout: 20000 }).toBe(true)
+  expect(errors).toEqual([])
+})
+
 test('la classifica globale mostra schede, K/D con partite e profilo pubblico', async ({ page }) => {
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))

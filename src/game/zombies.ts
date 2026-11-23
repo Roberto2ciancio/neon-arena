@@ -30,6 +30,12 @@ const BASE_STATS: Record<EnemyKind, ZombieStats> = {
   bloater: { name: 'Gonfio', health: 140, speed: 1.25, damage: 10, radius: 0.75, score: 260, xp: 50, attackInterval: 1.3 },
   stalker: { name: 'Ombra', health: 70, speed: 3.2, damage: 16, radius: 0.48, score: 320, xp: 64, attackInterval: 0.7 },
   shielder: { name: 'Scudiero', health: 150, speed: 1.5, damage: 18, radius: 0.7, score: 340, xp: 66, attackInterval: 1.1 },
+  tyrant: { name: 'Tiranno', health: 1050, speed: 1.35, damage: 34, radius: 1.15, score: 2600, xp: 300, attackInterval: 1.35 },
+}
+
+/** Boss: niente élite, niente smembramento, ricompense e scalatura dedicate. */
+export function isBoss(kind: EnemyKind): boolean {
+  return kind === 'brute' || kind === 'tyrant'
 }
 
 export function getWaveSpawnCount(wave: number): number {
@@ -49,7 +55,7 @@ export function getZombieStats(kind: EnemyKind, wave: number, elite = false): Zo
   const healthScale = HEALTH_GROWTH ** (normalizedWave - 1)
   const damageScale = 1 + (normalizedWave - 1) * 0.08
   const speedScale = Math.min(SPEED_SCALE_CAP, 1 + (normalizedWave - 1) * 0.028)
-  const bossScale = kind === 'brute' ? 1 + (normalizedWave / 5 - 1) * 0.35 : 1
+  const bossScale = isBoss(kind) ? 1 + (normalizedWave / 5 - 1) * 0.35 : 1
   const eliteScale = elite ? { health: 1.6, speed: 1.15, damage: 1.25, reward: 2 } : { health: 1, speed: 1, damage: 1, reward: 1 }
 
   return {
@@ -75,11 +81,12 @@ export function getZombieColor(kind: EnemyKind): number {
     case 'bloater': return 0x9ea84a
     case 'stalker': return 0x3b3f4a
     case 'shielder': return 0x8a7a64
+    case 'tyrant': return 0x5d7a3a
   }
 }
 
 /** Ondata in cui ogni tipo di zombie entra in gioco (il Bruto è il boss delle ondate multiple di 5). */
-export const ENEMY_FIRST_WAVE: Record<Exclude<EnemyKind, 'brute'>, number> = {
+export const ENEMY_FIRST_WAVE: Record<Exclude<EnemyKind, 'brute' | 'tyrant'>, number> = {
   walker: 1,
   runner: 2,
   armored: 3,
@@ -95,7 +102,7 @@ export const ENEMY_FIRST_WAVE: Record<Exclude<EnemyKind, 'brute'>, number> = {
 /** Composizione pesata dell'ondata: i tipi nuovi si aggiungono e quelli vecchi pesano sempre meno. */
 export function getSpawnPool(wave: number): EnemyKind[] {
   const pool: EnemyKind[] = []
-  for (const [kind, first] of Object.entries(ENEMY_FIRST_WAVE) as [Exclude<EnemyKind, 'brute'>, number][]) {
+  for (const [kind, first] of Object.entries(ENEMY_FIRST_WAVE) as [Exclude<EnemyKind, 'brute' | 'tyrant'>, number][]) {
     if (wave < first) continue
     const weight = kind === 'walker' ? Math.max(1, 4 - Math.floor(wave / 4)) : wave - first < 2 ? 1 : 2
     for (let index = 0; index < weight; index += 1) pool.push(kind)
@@ -133,7 +140,7 @@ export const PATH_BUDGET_PER_FRAME = 6
 
 /** Modelli preparati a inizio partita per ogni tipo, così le prime apparizioni non bloccano il frame. */
 export function getPrewarmCount(kind: EnemyKind): number {
-  return kind === 'brute' ? 1 : 2
+  return isBoss(kind) ? 1 : 2
 }
 
 /** Avviso mostrato la prima volta che un tipo di zombie compare in una run: come affrontarlo. */
@@ -149,4 +156,5 @@ export const ENEMY_INTEL: Record<EnemyKind, string> = {
   bloater: 'Esplode in acido: abbattilo a distanza, ferisce anche gli altri zombie.',
   stalker: 'Quasi invisibile da lontano: ascolta i passi e tieniti le spalle coperte.',
   shielder: 'Lo scudo blocca i colpi frontali: aggiralo e colpisci il generatore sulla schiena.',
+  tyrant: 'Lancia macigni acidi e richiama Striscianti: spostati di lato e colpisci la sacca sulla spalla dopo ogni lancio.',
 }
