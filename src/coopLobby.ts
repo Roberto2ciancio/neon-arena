@@ -1,3 +1,5 @@
+import { GAME_MODE_IDS, GAME_MODES, isGameMode } from './game/gameModes'
+import type { GameMode } from './game/gameModes'
 import type { Cosmetics } from './game/cosmetics'
 import { CoopSession, CoopSessionError } from './game/coop/CoopSession'
 import { COOP_ERROR_MESSAGES } from './game/coop/coopProtocol'
@@ -12,7 +14,7 @@ interface CoopLobbyOptions {
   getCosmetics: () => Cosmetics
   getMapId: () => string
   /** La partita parte per tutti i giocatori della stanza. */
-  onStart: (session: CoopSession, mapId: string, players: CoopLobbyPlayer[]) => void
+  onStart: (session: CoopSession, mapId: string, players: CoopLobbyPlayer[], mode: GameMode) => void
   /** L'host ha chiuso la stanza o la connessione è caduta. */
   onClosed: () => void
   /** Stanza aperta o chiusa: il menu nasconde la partita in solitaria e blocca la mappa agli ospiti. */
@@ -39,8 +41,11 @@ export class CoopLobby {
       if (event.key === 'Enter') void this.join()
     })
     byId('coop-leave').addEventListener('click', () => this.leave())
+    const modeSelect = byId<HTMLSelectElement>('coop-mode')
+    modeSelect.replaceChildren(...GAME_MODE_IDS.filter((id) => GAME_MODES[id].coop).map((id) => new Option(GAME_MODES[id].name, id)))
     byId('coop-start').addEventListener('click', () => {
-      if (this.session?.isHost) this.session.start()
+      // La modalità la sceglie l'host e arriva a tutti nel messaggio d'avvio.
+      if (this.session?.isHost) this.session.start(modeSelect.value)
     })
     this.render()
   }
@@ -116,7 +121,7 @@ export class CoopLobby {
     this.session = session
     session.onHost((message) => {
       if (message.t === 'lobby') this.render()
-      if (message.t === 'start') this.options.onStart(session, message.mapId, message.players)
+      if (message.t === 'start') this.options.onStart(session, message.mapId, message.players, isGameMode(message.mode) ? message.mode : 'classic')
     })
     session.onClose((code: CoopErrorCode) => {
       this.session = null
@@ -160,6 +165,7 @@ export class CoopLobby {
       : `1/${MAX_COOP_PLAYERS} GIOCATORI // IN ATTESA DEGLI AMICI`
     const start = byId<HTMLButtonElement>('coop-start')
     start.classList.toggle('hidden', !session.isHost)
+    byId('coop-mode').parentElement!.classList.toggle('hidden', !session.isHost)
     start.disabled = this.busy
   }
 }

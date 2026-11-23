@@ -32,6 +32,8 @@ import { chooseSupplyReward, getSupplyCredits, shouldDropSupplyCrate, SUPPLY_CRA
 import type { SupplyReward } from './waveBreak'
 import { getRewardMultiplier, getRunModifierEffects, RUN_MODIFIERS } from './runModifiers'
 import { createSeededRandom } from './dailyRun'
+import { allowsRevive, DEFEND, getDefendHealth, getSurvivalWave, LAST_STAND, repairGenerator, SURVIVAL } from './gameModes'
+import type { GameMode } from './gameModes'
 import type { RunModifierEffects, RunModifierId } from './runModifiers'
 import { canBeRevived, COVER, ESCORT, getCoverHealth, getEscortPoint, isRareEventId, pickRevivals, RARE_EVENT, RARE_EVENTS, rollRareEvent } from './enemyTactics'
 import type { Corpse, RareEventId } from './enemyTactics'
@@ -386,6 +388,11 @@ export class Game implements TouchTarget {
   private dailyKey: string | null = null
   /** Registrazioni della storia ancora da raccogliere in questa run. */
   private lorePickups: { id: string; group: THREE.Group }[] = []
+  /** Modalità della partita e loro stato (Sopravvivi: secondi; Difendi: integrità del generatore). */
+  private mode: GameMode = 'classic'
+  private modeTime = 0
+  private defendHealth = 0
+  private defendMax = 1
   private random: () => number = Math.random
   private hordeRemaining = 0
   private hordeTimer = 0
@@ -796,10 +803,13 @@ export class Game implements TouchTarget {
     this.runModifiers = this.coop ? [] : [...(options.modifiers ?? [])]
     this.runEffects = getRunModifierEffects(this.runModifiers)
     this.dailyKey = !this.coop && options.daily ? options.daily.key : null
+    this.mode = options.mode ?? 'classic'
+    this.modeTime = 0
     this.random = this.dailyKey && options.daily ? createSeededRandom(options.daily.seed) : Math.random
     this.clearEntities()
     this.setMap(map)
     this.resetObjectives()
+    this.setupMode()
     this.spawnLore(options.foundLore ?? [])
     this.prewarmEnemies()
     this.introducedKinds.clear()
@@ -884,13 +894,13 @@ export class Game implements TouchTarget {
    * Avvia una partita Zombie cooperativa. L'host simula zombie, ondate e bonus; i compagni
    * ricevono lo stato del mondo e inviano posizione e colpi.
    */
-  startCoop(session: CoopSession, mapId: string, players: readonly CoopLobbyPlayer[], bonuses: MetaBonuses, loadout?: ResolvedLoadout, foundLore: readonly string[] = []): void {
+  startCoop(session: CoopSession, mapId: string, players: readonly CoopLobbyPlayer[], bonuses: MetaBonuses, loadout?: ResolvedLoadout, foundLore: readonly string[] = [], mode: GameMode = 'classic'): void {
     this.detachCoop()
     this.coop = session
     this.coopPlayers = Math.max(1, players.length)
     this.teammateKills.clear()
     const map = MAPS.find((candidate) => candidate.id === mapId) ?? STATION_13
-    this.start(bonuses, map, loadout, { foundLore })
+    this.start(bonuses, map, loadout, { foundLore, mode })
     this.teammates.sync(players, session.localId, map.playerSpawn)
     if (session.isHost) {
       this.coopUnsubscribe.push(session.onClient((peerId, message) => this.handleCoopClient(peerId, message)))
@@ -1076,6 +1086,7 @@ export class Game implements TouchTarget {
       modifiers: [...this.runModifiers],
       rewardMultiplier: getRewardMultiplier(this.runModifiers),
       ...(this.dailyKey ? { dailyKey: this.dailyKey } : {}),
+      ...(this.mode !== 'classic' ? { mode: this.mode } : {}),
     }
   }
 
@@ -1215,6 +1226,18 @@ export class Game implements TouchTarget {
       this.waveActive = false
       this.endWaveEvent()
       this.endWaveChanges()
+      if (this.mode === 'defend') {
+        this.defendHealth = repairGenerator(this.defendHealth, this.defendMax)
+        if (this.wave >= DEFEND.waves) {
+          this.winMode('GENERATORE SALVO', `Hai difeso il generatore per ${DEFEND.waves} ondate.`)
+          return
+        }
+      }
+      if (this.mode === 'survival') {
+        // Nessuna pausa: la prossima ondata arriva subito (e comunque ogni 30 secondi).
+        this.nextWave()
+        return
+      }
       if (this.wave >= FINAL_WAVE) {
         this.beginEvacuation()
         return
@@ -1909,7 +1932,7 @@ export class Game implements TouchTarget {
       best = { kind: 'station', station }
       bestDistance = horizontal
     }
-    const generator = this.map.generator
+    const generator = this.mode === 'classic' ? this.map.generator : undefined
     if (generator && canStartGenerator(this.generator, this.wave) && this.player.y < 1) {
       const horizontal = Math.hypot(generator.x - this.player.x, generator.z - this.player.z)
       if (horizontal < GENERATOR.interactRange && horizontal < bestDistance) best = { kind: 'generator' }
@@ -3187,6 +3210,50 @@ export class Game implements TouchTarget {
     for (const door of this.doors) door.locked = false
   }
 
+  // --- Modalità alternative (piano gameplay G7) ----------------------------------------------
+  private setupMode(): void {
+    this.defendMax = getDefendHealth(this.coopPlayers)
+    this.defendHealth = this.mode === 'defend' ? this.defendMax : 0
+    if (this.mode !== 'defend') return
+    // Il generatore da difendere sta nella zona aperta dell'estrazione (o al suo posto sulla mappa).
+    const point = this.map.generator ?? this.map.extraction
+    this.generatorModel.position.set(point.x, 0, point.z)
+    this.generatorModel.visible = true
+    setGeneratorLook(this.generatorModel, 'on', 0)
+  }
+
+  private updateMode(delta: number): void {
+    if (this.mode === 'defend') {
+      setGeneratorLook(this.generatorModel, this.defendHealth / this.defendMax < 0.3 ? 'starting' : 'on', this.elapsed)
+      if (this.coopRole === 'client') return
+      if (this.generatorDamage > 0) {
+        this.defendHealth -= this.generatorDamage
+        this.generatorDamage = 0
+        if (this.defendHealth <= 0) {
+          this.defendHealth = 0
+          this.effects.explosion(this.generatorModel.position.clone().setY(1), 3, 0xff8a4a, 0)
+          this.events.onNotice?.('GENERATORE DISTRUTTO', 'Gli zombie hanno abbattuto il generatore.', 0xff6b6b)
+          if (this.coopRole === 'host') this.coop?.broadcast({ t: 'end', wave: this.wave, won: false })
+          this.finishRun(false)
+        }
+      }
+      return
+    }
+    if (this.mode !== 'survival' || this.coopRole === 'client') return
+    this.modeTime += delta
+    if (this.modeTime >= SURVIVAL.duration) {
+      this.winMode('SOPRAVVISSUTO', 'Cinque minuti senza pause: ce l’hai fatta.')
+      return
+    }
+    if (getSurvivalWave(this.modeTime) > this.wave) this.nextWave()
+  }
+
+  private winMode(title: string, text: string): void {
+    this.events.onNotice?.(title, text, 0x58f5e5)
+    if (this.coopRole === 'host') this.coop?.broadcast({ t: 'end', wave: this.wave, won: true })
+    this.finishRun(true)
+  }
+
   // --- Storia a frammenti (piano gameplay G6) ------------------------------------------------
   private spawnLore(found: readonly string[]): void {
     for (const pickup of this.lorePickups) {
@@ -3492,10 +3559,12 @@ export class Game implements TouchTarget {
   }
 
   private updateObjectives(delta: number): void {
+    this.updateMode(delta)
+    if (this.state !== 'playing') return
     this.updateLore()
     this.updateSupplyCrate(delta)
     this.updateToxicCloud(delta)
-    const generator = this.map.generator
+    const generator = this.mode === 'classic' ? this.map.generator : undefined
     if (generator) {
       setGeneratorLook(this.generatorModel, this.generator.state, this.elapsed)
       if (this.coopRole !== 'client') {
@@ -3551,6 +3620,13 @@ export class Game implements TouchTarget {
   }
 
   private hudObjective(): HudData['objective'] {
+    if (this.mode === 'survival') {
+      const remaining = Math.max(0, Math.ceil(SURVIVAL.duration - this.modeTime))
+      return { title: 'SOPRAVVIVI', detail: `${Math.floor(remaining / 60)}:${String(remaining % 60).padStart(2, '0')} // ondata ${this.wave}`, progress: Math.min(1, this.modeTime / SURVIVAL.duration), color: 0xff6b6b }
+    }
+    if (this.mode === 'defend') {
+      return { title: 'DIFENDI IL GENERATORE', detail: `Ondata ${this.wave}/${DEFEND.waves} // integrità ${Math.max(0, Math.round((this.defendHealth / this.defendMax) * 100))}%`, progress: Math.max(0, this.defendHealth / this.defendMax), color: 0xffd166 }
+    }
     if (this.evacuation >= 0) {
       const point = this.map.extraction
       const distance = Math.hypot(point.x - this.player.x, point.z - this.player.z)
@@ -3795,6 +3871,7 @@ export class Game implements TouchTarget {
 
   /** Compagno a terra abbastanza vicino da essere rianimato. */
   private findRevivable(): { id: string; name: string } | null {
+    if (!allowsRevive(this.mode)) return null
     if (!this.coop) return null
     const mate = this.teammates.all.find((candidate) => candidate.status === 'down' && candidate.feet.distanceTo(this.player) < REVIVE_RANGE)
     return mate ? { id: mate.id, name: mate.name } : null
@@ -3813,6 +3890,15 @@ export class Game implements TouchTarget {
           bestScore = value
           best = { position: mate.feet, id: mate.id }
         }
+      }
+    }
+    // Difendi il generatore: lo puntano anche da lontano, più volentieri del giocatore.
+    if (this.mode === 'defend' && this.defendHealth > 0) {
+      const feet = this.generatorModel.position
+      const value = score(feet) * 0.75
+      if (value < DEFEND.aggroRange && value < bestScore) {
+        bestScore = value
+        best = { position: feet, id: null, generator: true }
       }
     }
     // Il generatore in avvio attira gli zombie vicini: va difeso.
@@ -3883,6 +3969,15 @@ export class Game implements TouchTarget {
   /** Inizio ondata: chi era eliminato rientra con vita piena. */
   private onCoopWave(): void {
     if (!this.coop) return
+    // Ultimo in piedi: chi è caduto non rientra; chi resta da solo guadagna di più.
+    if (!allowsRevive(this.mode)) {
+      const alone = this.coopStatus === 'alive' && this.teammates.all.every((mate) => mate.status !== 'alive')
+      if (alone && this.teammates.all.length > 0 && this.wave > 1) {
+        this.shards += LAST_STAND.soloBonusPerWave
+        this.events.onNotice?.('ULTIMO IN PIEDI', `Sei rimasto solo: +${LAST_STAND.soloBonusPerWave} crediti per ogni ondata.`, 0xffd166)
+      }
+      return
+    }
     if (respawnAtWave(this.coopStatus) === 'alive' && this.coopStatus === 'dead') {
       this.controller.reset(this.map.playerSpawn.x, 0, this.map.playerSpawn.z)
       this.standUp(1)
@@ -3954,7 +4049,8 @@ export class Game implements TouchTarget {
       ...this.teammates.all.map((mate) => ({ id: mate.id, x: round2(mate.target.x), y: round2(mate.target.y), z: round2(mate.target.z), yaw: round2(mate.targetYaw), pitch: 0, crouch: mate.crouch, health: Math.round(mate.health), status: mate.status, kills: this.teammateKills.get(mate.id) ?? 0 })),
     ]
     const generatorState = this.generator.state === 'off' ? 0 : this.generator.state === 'starting' ? 1 : 2
-    this.coop?.broadcast({ t: 'world', wave: this.wave, waveBreak: round2(this.waveBreak), remaining: this.enemies.length + this.spawnQueue, enemies, players, obj: [generatorState, round2(this.generator.progress), round2(this.generator.health / GENERATOR.health), round2(this.evacuation), ...(this.toxicCloud ? [round2(this.toxicCloud.x), round2(this.toxicCloud.z)] : [])] })
+    const md = this.mode === 'classic' ? undefined : [round2(this.modeTime), round2(this.defendHealth / this.defendMax)]
+    this.coop?.broadcast({ t: 'world', wave: this.wave, waveBreak: round2(this.waveBreak), remaining: this.enemies.length + this.spawnQueue, enemies, players, obj: [generatorState, round2(this.generator.progress), round2(this.generator.health / GENERATOR.health), round2(this.evacuation), ...(this.toxicCloud ? [round2(this.toxicCloud.x), round2(this.toxicCloud.z)] : [])], ...(md ? { md } : {}) })
   }
 
   private applyRevive(target: string, by: string): void {
@@ -4057,6 +4153,10 @@ export class Game implements TouchTarget {
         }
         for (const player of message.players) if (player.id !== localId) this.teammates.applyState(player)
         if (message.obj) this.applyRemoteObjectives(message.obj)
+        if (message.md && message.md.length >= 2) {
+          this.modeTime = message.md[0] ?? this.modeTime
+          this.defendHealth = (message.md[1] ?? 1) * this.defendMax
+        }
         return
       }
       case 'wave':
@@ -4907,6 +5007,7 @@ export interface RunOptions {
   daily?: { key: string; seed: number }
   /** Registrazioni già trovate: non ricompaiono sulla mappa. */
   foundLore?: readonly string[]
+  mode?: GameMode
 }
 
 interface Victim {

@@ -175,7 +175,8 @@ function measure(item: ActiveChallenge, event: ChallengeEvent): number {
     case 'combo': return run?.bestCombo ?? 0
     case 'runs': return run ? 1 : 0
     case 'coop': return run && (run.players ?? 1) > 1 ? 1 : 0
-    case 'victory': return run?.won ? 1 : 0
+    // Solo la vittoria della modalità classica (15 ondate ed evacuazione).
+    case 'victory': return run?.won && (!run.mode || run.mode === 'classic') ? 1 : 0
     case 'map-kills': return run && run.mapId === item.param ? run.kills : 0
     case 'category-kills': {
       if (!run?.weaponKills) return 0

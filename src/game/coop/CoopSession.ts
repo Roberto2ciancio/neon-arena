@@ -153,10 +153,10 @@ export class CoopSession {
   }
 
   /** Host: avvia la partita per tutti. */
-  start(): boolean {
+  start(mode = 'classic'): boolean {
     if (!this.isHost) return false
     this.started = true
-    const message: CoopHostMessage = { t: 'start', mapId: this.currentMapId, players: this.lobby }
+    const message: CoopHostMessage = { t: 'start', mapId: this.currentMapId, players: this.lobby, mode }
     this.broadcast(message)
     this.dispatchLater(message)
     return true

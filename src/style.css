@@ -151,6 +151,11 @@ kbd { display: inline-block; color: #aab4cb; font-family: 'Chakra Petch', sans-s
 .equipment-hud span { color: #8a93ad; font-family: 'Chakra Petch', sans-serif; font-size: 8px; letter-spacing: 0.12em; }
 .equipment-hud strong { color: var(--cyan); font-family: 'Chakra Petch', sans-serif; font-size: 10px; font-weight: 500; }
 .equipment-hud strong.cooldown { color: #ffd166; }
+.game-modes { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.game-mode { padding: 7px 10px; border: 1px solid var(--line); background: rgba(8, 12, 24, 0.6); color: #c9cfdf; font: inherit; font-family: 'Chakra Petch', sans-serif; font-size: 10px; letter-spacing: 0.1em; cursor: pointer; }
+.game-mode[aria-checked="true"] { border-color: var(--cyan); color: var(--cyan); background: rgba(88, 245, 229, 0.08); }
+.coop-mode { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-family: 'Chakra Petch', sans-serif; font-size: 10px; letter-spacing: 0.1em; color: #8a93ad; }
+.coop-mode select { flex: 1; padding: 6px; background: rgba(8, 12, 24, 0.85); color: #dfe4f0; border: 1px solid var(--line); font: inherit; }
 .daily-run { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 10px; padding: 12px 14px; border: 1px solid rgba(255, 209, 102, 0.45); background: rgba(255, 209, 102, 0.06); }
 .daily-run div { display: grid; gap: 3px; }
 .daily-run strong { color: #ffd166; font-family: 'Chakra Petch', sans-serif; font-size: 12px; letter-spacing: 0.14em; }

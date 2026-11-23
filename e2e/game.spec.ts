@@ -1316,6 +1316,41 @@ test('storia a frammenti: una registrazione raccolta finisce nell’archivio', a
   expect(errors).toEqual([])
 })
 
+test('modalità alternative: Sopravvivi 5 minuti e Difendi il generatore', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  await page.addInitScript(() => window.localStorage.setItem('neon-arena:graphics:v1', 'low'))
+  await page.goto('/')
+  // Sopravvivi: una nuova ondata ogni 30 secondi, vittoria allo scadere.
+  await page.locator('[data-mode="survival"]').click()
+  await page.getByRole('button', { name: 'INIZIA RUN' }).click()
+  await expect(page.locator('#app')).toHaveAttribute('data-state', 'playing')
+  await expect(page.locator('#objective-title')).toHaveText('SOPRAVVIVI')
+  await page.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    game.activePowerUps.set('barrier', 999)
+    game.modeTime = 61
+  })
+  await expect.poll(() => page.evaluate(() => (window as any).__neonArena.game.wave)).toBeGreaterThanOrEqual(3)
+  await page.evaluate(() => { (window as any).__neonArena.game.modeTime = 299.8 })
+  await expect(page.locator('#app')).toHaveAttribute('data-state', 'victory')
+  await expect(page.locator('#gameover-message')).toContainText('SOPRAVVIVI 5 MINUTI: missione compiuta')
+  await page.getByRole('button', { name: /TORNA/ }).click()
+  // Difendi il generatore: se crolla la partita è persa.
+  await page.locator('[data-mode="defend"]').click()
+  await page.getByRole('button', { name: 'INIZIA RUN' }).click()
+  await expect(page.locator('#app')).toHaveAttribute('data-state', 'playing')
+  await expect(page.locator('#objective-title')).toHaveText('DIFENDI IL GENERATORE')
+  await page.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    game.defendHealth = 5
+    game.generatorDamage = 10
+  })
+  await expect(page.locator('#app')).toHaveAttribute('data-state', 'gameover')
+  await expect(page.locator('#gameover-message')).toContainText('DIFENDI IL GENERATORE: missione fallita')
+  expect(errors).toEqual([])
+})
+
 test('la classifica globale mostra schede, K/D con partite e profilo pubblico', async ({ page }) => {
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))

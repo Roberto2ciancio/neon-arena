@@ -38,6 +38,8 @@ import type { CosmeticOption } from './game/cosmetics'
 import { EQUIPMENT } from './game/equipment'
 import { JETPACK_FUEL, MOBILITY } from './game/mobility'
 import { LORE, loadFoundLore, saveFoundLore } from './game/lore'
+import { GAME_MODE_IDS, GAME_MODES, isGameMode, isRanked } from './game/gameModes'
+import type { GameMode } from './game/gameModes'
 import { createDailyRun, getUtcDayKey, loadDailyBest, recordDailyScore } from './game/dailyRun'
 import { getRewardMultiplier, loadRunModifiers, MAX_RUN_MODIFIERS, RUN_MODIFIER_IDS, RUN_MODIFIERS, saveRunModifiers, toggleRunModifier } from './game/runModifiers'
 import { CHALLENGE_REWARDS, describeChallenge, getChallengeRewards, loadChallenges, recordChallengeEvent, refreshChallenges, saveChallenges } from './game/challenges'
@@ -638,6 +640,8 @@ async function initializeCloud(): Promise<void> {
 /** Classifica online: solo per gli account, con validazione lato server. Da ospite resta locale. */
 async function submitOnlineRun(result: RunResult): Promise<void> {
   if (!cloud) return
+  // Le modalità alternative non si confrontano con le run a 15 ondate.
+  if (isGameMode(result.mode) && !isRanked(result.mode)) return
   const account = await accountPanel?.accountCredentials()
   if (!account) {
     byId('cloud-status').textContent = 'OSPITE // ACCEDI PER LA CLASSIFICA ONLINE'
@@ -873,9 +877,12 @@ function completeRun(result: RunResult): void {
   renderDailyRun()
   // Le carte della run moltiplicano l'esperienza (i frammenti li moltiplica già la partita).
   const xp = Math.round((result.kills * XP_REWARDS.zombieKill + Math.max(0, result.wave - 1) * XP_REWARDS.wave + XP_REWARDS.runComplete) * (result.rewardMultiplier ?? 1)) + challengeOutcome.xp
-  byId('gameover-message').textContent = (result.won
-    ? 'Hai superato tutte le 15 ondate. Bonus vittoria: 8 frammenti.'
-    : `L’orda ti ha sopraffatto all’ondata ${result.wave} di 15.`) + ((result.bestCombo ?? 0) >= 2 ? ` Combo migliore: ×${result.bestCombo}.` : '') + formatMedals(result.medals) + (result.dailyKey ? (dailyRecord ? ' Run del giorno: nuovo record di oggi!' : ' Run del giorno completata.') : '') + ((result.rewardMultiplier ?? 1) > 1 ? ` Carte della run: frammenti ed esperienza ×${(result.rewardMultiplier ?? 1).toLocaleString('it-IT')}.` : '') + challengeOutcome.text + grantXp(xp) + grantWeaponXp(result.weaponXp ?? {})
+  const modeName = isGameMode(result.mode) && result.mode !== 'classic' ? GAME_MODES[result.mode].name : null
+  byId('gameover-message').textContent = (modeName
+    ? `${modeName}: ${result.won ? 'missione compiuta' : 'missione fallita'} all’ondata ${result.wave}. Le modalità alternative non entrano nella classifica online.`
+    : result.won
+      ? 'Hai superato tutte le 15 ondate. Bonus vittoria: 8 frammenti.'
+      : `L’orda ti ha sopraffatto all’ondata ${result.wave} di 15.`) + ((result.bestCombo ?? 0) >= 2 ? ` Combo migliore: ×${result.bestCombo}.` : '') + formatMedals(result.medals) + (result.dailyKey ? (dailyRecord ? ' Run del giorno: nuovo record di oggi!' : ' Run del giorno completata.') : '') + ((result.rewardMultiplier ?? 1) > 1 ? ` Carte della run: frammenti ed esperienza ×${(result.rewardMultiplier ?? 1).toLocaleString('it-IT')}.` : '') + challengeOutcome.text + grantXp(xp) + grantWeaponXp(result.weaponXp ?? {})
   byId('gameover-title').textContent += result.score > previousBest && result.score > 0 ? ' // NUOVO RECORD' : ''
   renderMenu()
 }
@@ -1080,6 +1087,42 @@ function flashDamage(): void {
   damageFlashTimer = window.setTimeout(() => damageFlash.classList.remove('active'), 90)
 }
 
+// --- Modalità in solitaria ------------------------------------------------------------------
+const MODE_STORAGE_KEY = 'neon-arena:solo-mode:v1'
+let soloMode: GameMode = (() => {
+  try {
+    const saved = window.localStorage.getItem(MODE_STORAGE_KEY)
+    return isGameMode(saved) && GAME_MODES[saved].solo ? saved : 'classic'
+  } catch {
+    return 'classic'
+  }
+})()
+
+function renderGameModes(): void {
+  const group = byId('game-modes')
+  group.replaceChildren()
+  for (const id of GAME_MODE_IDS.filter((mode) => GAME_MODES[mode].solo)) {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = 'game-mode'
+    button.dataset.mode = id
+    button.setAttribute('role', 'radio')
+    button.setAttribute('aria-checked', String(id === soloMode))
+    button.title = GAME_MODES[id].description
+    button.textContent = GAME_MODES[id].name
+    button.addEventListener('click', () => {
+      soloMode = id
+      try {
+        window.localStorage.setItem(MODE_STORAGE_KEY, id)
+      } catch {
+        // Storage non disponibile: la scelta vale per la sessione.
+      }
+      renderGameModes()
+    })
+    group.append(button)
+  }
+}
+
 // --- Carte della run ------------------------------------------------------------------------
 let runCards = loadRunModifiers(window.localStorage)
 
@@ -1180,7 +1223,7 @@ function startRun(): void {
     // Squadra: si torna alla stanza; l'host può avviare una nuova partita.
     game.returnToMenu()
     coopLobby.backToLobby()
-  } else game.start(getMetaBonuses(progress), selectedMap, currentLoadout(), { modifiers: runCards, foundLore })
+  } else game.start(getMetaBonuses(progress), selectedMap, currentLoadout(), { modifiers: runCards, foundLore, mode: soloMode })
 }
 
 const coopLobby = new CoopLobby({
@@ -1188,9 +1231,9 @@ const coopLobby = new CoopLobby({
   getName: () => identity.callsign,
   getCosmetics: () => armory.cosmetics,
   getMapId: () => selectedMap.id,
-  onStart: (coopSession, mapId, players) => {
+  onStart: (coopSession, mapId, players, mode) => {
     closeDrawer()
-    game.startCoop(coopSession, mapId, players, getMetaBonuses(progress), currentLoadout('zombies'), foundLore)
+    game.startCoop(coopSession, mapId, players, getMetaBonuses(progress), currentLoadout('zombies'), foundLore, mode)
   },
   onClosed: () => {
     if (game.isCoop) game.returnToMenu()
@@ -1395,6 +1438,7 @@ document.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((button) => 
     byId('coop-lobby').classList.toggle('hidden', selectedMode === 'tct')
     byId('start-button').classList.toggle('hidden', selectedMode === 'tct')
     byId('run-cards').classList.toggle('hidden', selectedMode === 'tct')
+    byId('game-modes').classList.toggle('hidden', selectedMode === 'tct')
     byId('daily-run').classList.toggle('hidden', selectedMode === 'tct')
     byId('abandon-button').textContent = selectedMode === 'tct' ? 'ESCI DALLA PARTITA' : 'TERMINA RUN'
     if (selectedMode === 'tct') document.querySelector<HTMLButtonElement>('[data-map="depot-06"]')?.click()
@@ -1546,6 +1590,7 @@ byId<HTMLButtonElement>('pause-settings-button').addEventListener('click', () =>
 renderMenu()
 renderChallengesBadge()
 renderRunCards()
+renderGameModes()
 renderDailyRun()
 renderArchiveBadge()
 byId<HTMLButtonElement>('daily-run-start').addEventListener('click', startDailyRun)

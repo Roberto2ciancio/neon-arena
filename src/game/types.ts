@@ -161,6 +161,8 @@ export interface RunResult {
   rewardMultiplier?: number
   /** Data UTC della run del giorno (assente nelle run normali). */
   dailyKey?: string
+  /** Modalità (assente o 'classic' per le run normali): le altre non vanno in classifica online. */
+  mode?: string
 }
 
 export interface LeaderboardEntry {
