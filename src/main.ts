@@ -37,6 +37,7 @@ import { CAMOS, COSMETIC_CATALOG } from './game/cosmetics'
 import type { CosmeticOption } from './game/cosmetics'
 import { EQUIPMENT } from './game/equipment'
 import { JETPACK_FUEL, MOBILITY } from './game/mobility'
+import { getRewardMultiplier, loadRunModifiers, MAX_RUN_MODIFIERS, RUN_MODIFIER_IDS, RUN_MODIFIERS, saveRunModifiers, toggleRunModifier } from './game/runModifiers'
 import { CHALLENGE_REWARDS, describeChallenge, getChallengeRewards, loadChallenges, recordChallengeEvent, refreshChallenges, saveChallenges } from './game/challenges'
 import type { ActiveChallenge, ChallengeEvent, ChallengeSet } from './game/challenges'
 import { MELEE_WEAPONS } from './game/weapons'
@@ -859,10 +860,11 @@ function completeRun(result: RunResult): void {
   byId('result-shards').textContent = `+${result.shards}`
   byId('gameover-title').textContent = result.won ? 'STAZIONE SICURA' : 'RUN TERMINATA'
   const challengeOutcome = advanceChallenges({ zombie: result })
-  const xp = result.kills * XP_REWARDS.zombieKill + Math.max(0, result.wave - 1) * XP_REWARDS.wave + XP_REWARDS.runComplete + challengeOutcome.xp
+  // Le carte della run moltiplicano l'esperienza (i frammenti li moltiplica già la partita).
+  const xp = Math.round((result.kills * XP_REWARDS.zombieKill + Math.max(0, result.wave - 1) * XP_REWARDS.wave + XP_REWARDS.runComplete) * (result.rewardMultiplier ?? 1)) + challengeOutcome.xp
   byId('gameover-message').textContent = (result.won
     ? 'Hai superato tutte le 15 ondate. Bonus vittoria: 8 frammenti.'
-    : `L’orda ti ha sopraffatto all’ondata ${result.wave} di 15.`) + ((result.bestCombo ?? 0) >= 2 ? ` Combo migliore: ×${result.bestCombo}.` : '') + formatMedals(result.medals) + challengeOutcome.text + grantXp(xp) + grantWeaponXp(result.weaponXp ?? {})
+    : `L’orda ti ha sopraffatto all’ondata ${result.wave} di 15.`) + ((result.bestCombo ?? 0) >= 2 ? ` Combo migliore: ×${result.bestCombo}.` : '') + formatMedals(result.medals) + ((result.rewardMultiplier ?? 1) > 1 ? ` Carte della run: frammenti ed esperienza ×${(result.rewardMultiplier ?? 1).toLocaleString('it-IT')}.` : '') + challengeOutcome.text + grantXp(xp) + grantWeaponXp(result.weaponXp ?? {})
   byId('gameover-title').textContent += result.score > previousBest && result.score > 0 ? ' // NUOVO RECORD' : ''
   renderMenu()
 }
@@ -1067,13 +1069,47 @@ function flashDamage(): void {
   damageFlashTimer = window.setTimeout(() => damageFlash.classList.remove('active'), 90)
 }
 
+// --- Carte della run ------------------------------------------------------------------------
+let runCards = loadRunModifiers(window.localStorage)
+
+function renderRunCards(): void {
+  const list = byId('run-cards-list')
+  list.replaceChildren()
+  for (const id of RUN_MODIFIER_IDS) {
+    const card = RUN_MODIFIERS[id]
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = 'run-card'
+    button.dataset.card = id
+    const selected = runCards.includes(id)
+    button.setAttribute('aria-pressed', String(selected))
+    button.disabled = !selected && runCards.length >= MAX_RUN_MODIFIERS
+    const title = document.createElement('strong')
+    title.textContent = `${card.icon} ${card.name}`
+    const text = document.createElement('small')
+    text.textContent = card.description
+    const reward = document.createElement('b')
+    reward.textContent = `×${card.reward.toLocaleString('it-IT')}`
+    button.append(title, text, reward)
+    button.addEventListener('click', () => {
+      runCards = toggleRunModifier(runCards, id)
+      saveRunModifiers(window.localStorage, runCards)
+      renderRunCards()
+    })
+    list.append(button)
+  }
+  byId('run-cards-summary').textContent = runCards.length > 0
+    ? `${runCards.length} ${runCards.length === 1 ? 'carta' : 'carte'} · frammenti ed esperienza ×${getRewardMultiplier(runCards).toLocaleString('it-IT')}`
+    : 'Facoltative: più difficile, più frammenti ed esperienza'
+}
+
 function startRun(): void {
   if (selectedMode === 'tct') returnToLobby()
   else if (coopLobby.active) {
     // Squadra: si torna alla stanza; l'host può avviare una nuova partita.
     game.returnToMenu()
     coopLobby.backToLobby()
-  } else game.start(getMetaBonuses(progress), selectedMap, currentLoadout())
+  } else game.start(getMetaBonuses(progress), selectedMap, currentLoadout(), { modifiers: runCards })
 }
 
 const coopLobby = new CoopLobby({
@@ -1287,6 +1323,7 @@ document.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((button) => 
     byId('tct-lobby').classList.toggle('hidden', selectedMode !== 'tct')
     byId('coop-lobby').classList.toggle('hidden', selectedMode === 'tct')
     byId('start-button').classList.toggle('hidden', selectedMode === 'tct')
+    byId('run-cards').classList.toggle('hidden', selectedMode === 'tct')
     byId('abandon-button').textContent = selectedMode === 'tct' ? 'ESCI DALLA PARTITA' : 'TERMINA RUN'
     if (selectedMode === 'tct') document.querySelector<HTMLButtonElement>('[data-map="depot-06"]')?.click()
     else leaveRoom()
@@ -1436,6 +1473,7 @@ byId<HTMLButtonElement>('pause-settings-button').addEventListener('click', () =>
 
 renderMenu()
 renderChallengesBadge()
+renderRunCards()
 renderProfile()
 void initializeCloud()
 void accountPanel.initialize()

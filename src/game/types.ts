@@ -156,6 +156,9 @@ export interface RunResult {
   bestCombo?: number
   /** Medaglie ottenute nella run (combo, serie di colpi alla testa, esplosivi, esecuzioni). */
   medals?: { name: string; tier: 'bronze' | 'silver' | 'gold'; value: number }[]
+  /** Carte della run scelte e moltiplicatore di frammenti ed esperienza (già applicato ai frammenti). */
+  modifiers?: string[]
+  rewardMultiplier?: number
 }
 
 export interface LeaderboardEntry {

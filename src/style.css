@@ -151,6 +151,13 @@ kbd { display: inline-block; color: #aab4cb; font-family: 'Chakra Petch', sans-s
 .equipment-hud span { color: #8a93ad; font-family: 'Chakra Petch', sans-serif; font-size: 8px; letter-spacing: 0.12em; }
 .equipment-hud strong { color: var(--cyan); font-family: 'Chakra Petch', sans-serif; font-size: 10px; font-weight: 500; }
 .equipment-hud strong.cooldown { color: #ffd166; }
+.run-cards-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; margin-top: 10px; }
+.run-card { display: grid; gap: 3px; padding: 9px 10px; border: 1px solid var(--line); background: rgba(8, 12, 24, 0.6); color: #dfe4f0; text-align: left; cursor: pointer; font: inherit; }
+.run-card strong { font-family: 'Chakra Petch', sans-serif; font-size: 11px; letter-spacing: 0.1em; }
+.run-card small { color: #8a93ad; font-size: 10px; line-height: 1.35; }
+.run-card b { color: #ffd166; font-family: 'Chakra Petch', sans-serif; font-size: 10px; font-weight: 500; }
+.run-card[aria-pressed="true"] { border-color: #ffd166; background: rgba(255, 209, 102, 0.1); }
+.run-card:disabled { opacity: 0.45; cursor: not-allowed; }
 .challenges-panel { display: grid; gap: 18px; }
 .challenge-group h3 { display: flex; justify-content: space-between; margin: 0 0 8px; color: var(--cyan); font-family: 'Chakra Petch', sans-serif; font-size: 11px; letter-spacing: 0.14em; }
 .challenge-group h3 small { color: #8a93ad; font-weight: 400; }

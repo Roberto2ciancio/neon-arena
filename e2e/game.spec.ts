@@ -1230,6 +1230,36 @@ test('nemici e situazioni: copertura abbattuta, Urlatore che rianima, evento rar
   expect(errors).toEqual([])
 })
 
+test('carte della run: scelte nel menu, cambiano le regole e moltiplicano le ricompense', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  await page.addInitScript(() => window.localStorage.setItem('neon-arena:graphics:v1', 'low'))
+  await page.goto('/')
+  await page.locator('#run-cards summary').click()
+  await page.locator('[data-card="one-hit"]').click()
+  await page.locator('[data-card="no-shop"]').click()
+  await expect(page.locator('#run-cards-summary')).toContainText('×3')
+  await page.getByRole('button', { name: 'INIZIA RUN' }).click()
+  await expect(page.locator('#app')).toHaveAttribute('data-state', 'playing')
+  // Niente acquisti: accanto alla cassa misteriosa non compare l'acquisto.
+  await page.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    game.clearEntities()
+    game.spawnQueue = 5
+    game.spawnTimer = 999
+    const station = game.stations.find((candidate: any) => candidate.definition.kind === 'box')
+    game.shards = 500
+    game.debugPlace(station.definition.x + 1, station.definition.y, station.definition.z, 0, 0)
+  })
+  await page.waitForTimeout(300)
+  await expect(page.locator('#door-prompt')).toBeHidden()
+  // Un colpo e sei a terra: un graffio basta.
+  await page.evaluate(() => (window as any).__neonArena.game.damagePlayer(1))
+  await expect(page.locator('#app')).toHaveAttribute('data-state', 'gameover')
+  await expect(page.locator('#gameover-message')).toContainText('Carte della run: frammenti ed esperienza ×3')
+  expect(errors).toEqual([])
+})
+
 test('la classifica globale mostra schede, K/D con partite e profilo pubblico', async ({ page }) => {
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))

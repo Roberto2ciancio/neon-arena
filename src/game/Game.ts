@@ -29,6 +29,8 @@ import type { MinibossId } from './minibosses'
 import { createBeacon, createGeneratorModel, createSupplyCrate, createToxicCloud, setGeneratorLook } from './objectiveModels'
 import { chooseSupplyReward, getSupplyCredits, shouldDropSupplyCrate, SUPPLY_CRATE, SUPPLY_LABELS } from './waveBreak'
 import type { SupplyReward } from './waveBreak'
+import { getRewardMultiplier, getRunModifierEffects, RUN_MODIFIERS } from './runModifiers'
+import type { RunModifierEffects, RunModifierId } from './runModifiers'
 import { canBeRevived, COVER, ESCORT, getCoverHealth, getEscortPoint, isRareEventId, pickRevivals, RARE_EVENT, RARE_EVENTS, rollRareEvent } from './enemyTactics'
 import type { Corpse, RareEventId } from './enemyTactics'
 import { CURSED_BOX, hasToxicCloud, isBoxCursed, isInsideToxicCloud, shouldLockDoor, DOOR_LOCK, stepToxicCloud, TOXIC_CLOUD } from './mapHazards'
@@ -375,6 +377,9 @@ export class Game implements TouchTarget {
   private reviveNoticeShown = false
   /** Evento raro della run (deciso all'inizio) e stato dell'orda o del Tiranno in arrivo. */
   private rareEvent: { id: RareEventId; wave: number } | null = null
+  /** Carte della run (solo partite in solitaria) e loro effetti. */
+  private runModifiers: RunModifierId[] = []
+  private runEffects: RunModifierEffects = getRunModifierEffects([])
   private hordeRemaining = 0
   private hordeTimer = 0
   private rogueTyrantTimer = 0
@@ -769,10 +774,20 @@ export class Game implements TouchTarget {
       if (station.definition.kind !== 'box') continue
       setStationLabel(station.model, 'box', this.cursedBox ? 'CASSA MALEDETTA' : 'CASSA MISTERIOSA', `${CREDIT_SYMBOL} ${getPoweredCost(station.definition.cost, this.powered)}`)
     }
+    // Carte della run: le postazioni non disponibili lo dicono invece di non rispondere.
+    for (const station of this.stations) {
+      if (!this.isStationAllowed(station)) setStationLabel(station.model, station.definition.kind, 'POSTAZIONE SPENTA', 'CARTA DELLA RUN')
+      else if (station.definition.kind === 'ammo' || station.definition.kind === 'medkit') {
+        setStationLabel(station.model, station.definition.kind, station.definition.kind === 'ammo' ? 'MUNIZIONI' : 'KIT MEDICO', `${CREDIT_SYMBOL} ${getPoweredCost(station.definition.cost, this.powered)}`)
+      }
+    }
   }
 
-  start(bonuses: MetaBonuses, map: MapDefinition = STATION_13, loadout?: ResolvedLoadout): void {
+  start(bonuses: MetaBonuses, map: MapDefinition = STATION_13, loadout?: ResolvedLoadout, options: RunOptions = {}): void {
     if (loadout) this.loadout = loadout
+    // Le carte valgono solo in solitaria (in squadra tutti giocano con le stesse regole).
+    this.runModifiers = this.coop ? [] : [...(options.modifiers ?? [])]
+    this.runEffects = getRunModifierEffects(this.runModifiers)
     this.clearEntities()
     this.setMap(map)
     this.resetObjectives()
@@ -786,6 +801,7 @@ export class Game implements TouchTarget {
     this.nextEnemyId = 1
     this.nextPowerId = 1
     this.stats = createBaseStats(bonuses)
+    this.stats.maxHealth = Math.max(1, Math.round(this.stats.maxHealth * this.runEffects.maxHealth))
     this.setupMobility()
     this.runSeed = Math.floor(Math.random() * 1000)
     this.health = this.stats.maxHealth
@@ -814,7 +830,8 @@ export class Game implements TouchTarget {
     this.weaponKills.clear()
     this.chosenUpgrades.clear()
     this.elapsed = 0
-    this.weapons.configure(this.loadout)
+    // Solo pistole: la pistola prende anche il posto dell'arma principale.
+    this.weapons.configure(this.runEffects.pistolsOnly ? { ...this.loadout, primary: this.loadout.secondary } : this.loadout)
     this.equipment.clear()
     this.decoy = null
     this.radarTimer = 0
@@ -846,6 +863,9 @@ export class Game implements TouchTarget {
     this.audio.resume()
     this.setState('playing')
     this.nextWave()
+    if (this.runModifiers.length > 0) {
+      this.events.onNotice?.(`CARTE // ×${getRewardMultiplier(this.runModifiers).toLocaleString('it-IT')} FRAMMENTI ED ESPERIENZA`, this.runModifiers.map((id) => RUN_MODIFIERS[id].name).join(' · '), 0xffd166)
+    }
     this.emitHud()
     this.requestMouse()
   }
@@ -1032,7 +1052,7 @@ export class Game implements TouchTarget {
       score: Math.floor(this.score),
       wave: this.wave,
       kills: this.kills,
-      shards: getRunShards(this.wave, this.kills, won),
+      shards: Math.round(getRunShards(this.wave, this.kills, won) * getRewardMultiplier(this.runModifiers)),
       time: Math.floor(this.elapsed),
       won,
       map: this.map.name,
@@ -1043,6 +1063,8 @@ export class Game implements TouchTarget {
       mapId: this.map.id,
       players: this.coopPlayers,
       weaponKills: Object.fromEntries(this.weaponKills),
+      modifiers: [...this.runModifiers],
+      rewardMultiplier: getRewardMultiplier(this.runModifiers),
     }
   }
 
@@ -1065,7 +1087,7 @@ export class Game implements TouchTarget {
     if (this.wave > 1 && (tier > previousTier || !this.waveEvent)) {
       this.events.onNotice?.(tier > previousTier ? `ARMI ${FIELD_TIERS[tier].name} DISPONIBILI` : 'POSTAZIONI AGGIORNATE', tier > previousTier ? 'Le postazioni ora vendono armi più potenti, a un prezzo più alto.' : 'Le armi in vendita sulla mappa sono cambiate: controlla le postazioni.', 0x8f6bff)
     }
-    this.spawnQueue = Math.max(1, Math.round(getWaveSpawnCount(this.wave) * getCoopScaling(this.coopPlayers).spawnCount * this.waveMods.spawnCount))
+    this.spawnQueue = Math.max(1, Math.round(getWaveSpawnCount(this.wave) * getCoopScaling(this.coopPlayers).spawnCount * this.waveMods.spawnCount * this.runEffects.spawnCount))
     this.spawnTimer = 0.65
     this.onCoopWave()
     const rare = this.rareEvent && this.rareEvent.wave === this.wave ? this.rareEvent.id : null
@@ -1228,12 +1250,12 @@ export class Game implements TouchTarget {
     const elite = !isGolden && (replica ? replica.elite : !isBoss(kind) && Math.random() < getEliteChance(this.wave) + scaling.eliteBonus + mods.eliteBonus)
     const baseStats = getZombieStats(kind, this.wave, elite)
     // Il Bruto non cambia taglia con i Giganti: è già il boss.
-    const eventScale = isBoss(kind) ? 1 : mods.scale
+    const eventScale = isBoss(kind) ? 1 : mods.scale * this.runEffects.zombieScale
     const stats = {
       ...baseStats,
-      health: baseStats.health * scaling.health * mods.health * (isGolden ? GOLDEN_HEALTH_MULTIPLIER : 1),
+      health: baseStats.health * scaling.health * mods.health * this.runEffects.zombieHealth * (isGolden ? GOLDEN_HEALTH_MULTIPLIER : 1),
       damage: baseStats.damage * scaling.damage * mods.damage * (isGolden ? 0.5 : 1),
-      speed: baseStats.speed * mods.speed * this.stats.zombieSpeed * (isGolden ? GOLDEN_SPEED_MULTIPLIER : 1),
+      speed: baseStats.speed * mods.speed * this.stats.zombieSpeed * this.runEffects.zombieSpeed * (isGolden ? GOLDEN_SPEED_MULTIPLIER : 1),
       radius: baseStats.radius * eventScale,
       score: baseStats.score * (isGolden ? 10 : 1),
     }
@@ -1870,6 +1892,7 @@ export class Game implements TouchTarget {
       bestDistance = this.player.distanceTo(door.group.position)
     }
     for (const station of this.stations) {
+      if (!this.isStationAllowed(station)) continue
       const horizontal = Math.hypot(station.definition.x - this.player.x, station.definition.z - this.player.z)
       if (horizontal > 1.9 || Math.abs(station.definition.y - this.player.y) > 1.2 || horizontal >= bestDistance) continue
       best = { kind: 'station', station }
@@ -1952,6 +1975,14 @@ export class Game implements TouchTarget {
     }
     this.audio.play('upgrade')
     this.emitHud()
+  }
+
+  /** Carte "Niente acquisti" e "Solo pistole": postazioni spente o limitate alle pistole. */
+  private isStationAllowed(station: Station): boolean {
+    if (this.runEffects.noShop) return false
+    if (!this.runEffects.pistolsOnly) return true
+    if (station.definition.kind === 'box') return false
+    return station.definition.kind !== 'weapon' || (station.weapon !== undefined && WEAPONS[station.weapon].slot === 'secondary')
   }
 
   /** Porta chiusa vicina ai primi punti del percorso: quella da sfondare. */
@@ -3098,6 +3129,8 @@ export class Game implements TouchTarget {
       this.events.onNotice?.('SECONDO RESPIRO', 'Sopravvissuto a un colpo letale: hai 2 secondi per metterti al sicuro.', 0xffd166)
       return
     }
+    // Carta "Un colpo e sei a terra": ogni colpo che supera lo scudo è fatale.
+    if (this.runEffects.oneHit) amount = Math.max(amount, this.health + this.stats.armor + 1)
     this.health = Math.max(0, this.health - Math.max(1, amount - this.stats.armor))
     this.hurtFlash = 1
     this.invulnerability = 0.32
@@ -4773,8 +4806,8 @@ export class Game implements TouchTarget {
 
   /** Blackout: luci e nebbia cambiano gradualmente; solo intensità e densità, mai il numero di luci. */
   private updateEventLighting(delta: number): void {
-    const light = this.waveMods.lightScale
-    const fog = this.waveMods.fogScale
+    const light = this.waveMods.lightScale * this.runEffects.lightScale
+    const fog = this.waveMods.fogScale * this.runEffects.fogScale
     if (Math.abs(this.lightScale - light) < 0.002 && Math.abs(this.fogScale - fog) < 0.002) return
     const blend = 1 - Math.exp(-delta * 1.6)
     const nextLight = Math.abs(this.lightScale - light) < 0.002 ? light : this.lightScale + (light - this.lightScale) * blend
@@ -4812,6 +4845,11 @@ function toVec3(vector: THREE.Vector3): Vec3 {
 }
 
 /** Bersaglio di uno zombie: un giocatore (null = locale) oppure una torretta. */
+/** Opzioni della run scelte nel menu (carte; in seguito run del giorno e modalità). */
+export interface RunOptions {
+  modifiers?: RunModifierId[]
+}
+
 interface Victim {
   position: THREE.Vector3
   id: string | null
