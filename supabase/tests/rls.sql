@@ -97,6 +97,19 @@ begin
       values (me, 'ME', 3000, 3, 20, 120, 6, 12, 1, 'district-zero', '{"ar-07": 15, "p-9": 5}');
     insert into rls_results values ('F: run completa valida', 'accettata');
   exception when others then insert into rls_results values ('F: run completa valida', 'RIFIUTATA (male): ' || sqlerrm); end;
+  -- G5: run del giorno, solo in solitaria e solo con la data di oggi o di ieri (UTC).
+  begin
+    insert into public.leaderboard (player_id, callsign, score, wave, kills, time_seconds, players, daily_key) values (me, 'ME', 100, 3, 5, 60, 2, (now() at time zone 'utc')::date);
+    insert into rls_results values ('G5: run del giorno in squadra', 'ACCETTATO (male)');
+  exception when others then insert into rls_results values ('G5: run del giorno in squadra', 'rifiutato: ' || sqlerrm); end;
+  begin
+    insert into public.leaderboard (player_id, callsign, score, wave, kills, time_seconds, daily_key) values (me, 'ME', 100, 3, 5, 60, (now() at time zone 'utc')::date - 5);
+    insert into rls_results values ('G5: run del giorno con data vecchia', 'ACCETTATO (male)');
+  exception when others then insert into rls_results values ('G5: run del giorno con data vecchia', 'rifiutato: ' || sqlerrm); end;
+  begin
+    insert into public.leaderboard (player_id, callsign, score, wave, kills, time_seconds, daily_key) values (me, 'ME', 2500, 3, 20, 120, (now() at time zone 'utc')::date);
+    insert into rls_results values ('G5: run del giorno valida', 'accettata');
+  exception when others then insert into rls_results values ('G5: run del giorno valida', 'RIFIUTATA (male): ' || sqlerrm); end;
   begin
     insert into public.tct_matches (player_id, kills, deaths, outcome, duration_seconds) values (other, 5, 2, 'win', 180);
     insert into rls_results values ('F: account inserisce partita TCT altrui', 'ACCETTATO (male)');

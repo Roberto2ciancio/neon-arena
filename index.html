@@ -211,6 +211,10 @@
             </div>
             <p id="coop-status" class="lobby-status" aria-live="polite">Facoltativo: in squadra gli zombie sono più numerosi e resistenti.</p>
           </details>
+          <section id="daily-run" class="daily-run" aria-labelledby="daily-run-title">
+            <div><strong id="daily-run-title">RUN DEL GIORNO</strong><span id="daily-run-detail">Uguale per tutti, cambia a mezzanotte (UTC)</span></div>
+            <button id="daily-run-start" class="secondary-button" type="button">GIOCA</button>
+          </section>
           <details id="run-cards" class="coop-lobby run-cards">
             <summary><strong>CARTE DELLA RUN</strong><span id="run-cards-summary">Facoltative: più difficile, più frammenti ed esperienza</span></summary>
             <div id="run-cards-list" class="run-cards-list" role="group" aria-label="Carte della run"></div>
@@ -265,6 +269,7 @@
                 <button type="button" role="tab" data-lb-tab="tct" aria-selected="false">TCT</button>
                 <button type="button" role="tab" data-lb-tab="weapons" aria-selected="false">ARMI</button>
                 <button type="button" role="tab" data-lb-tab="weekly" aria-selected="false">SETTIMANA</button>
+                <button type="button" role="tab" data-lb-tab="daily" aria-selected="false">OGGI</button>
               </div>
               <div class="lb-filters">
                 <label><span class="hud-label">CLASSIFICA</span><select id="lb-category"></select></label>

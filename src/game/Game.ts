@@ -30,6 +30,7 @@ import { createBeacon, createGeneratorModel, createSupplyCrate, createToxicCloud
 import { chooseSupplyReward, getSupplyCredits, shouldDropSupplyCrate, SUPPLY_CRATE, SUPPLY_LABELS } from './waveBreak'
 import type { SupplyReward } from './waveBreak'
 import { getRewardMultiplier, getRunModifierEffects, RUN_MODIFIERS } from './runModifiers'
+import { createSeededRandom } from './dailyRun'
 import type { RunModifierEffects, RunModifierId } from './runModifiers'
 import { canBeRevived, COVER, ESCORT, getCoverHealth, getEscortPoint, isRareEventId, pickRevivals, RARE_EVENT, RARE_EVENTS, rollRareEvent } from './enemyTactics'
 import type { Corpse, RareEventId } from './enemyTactics'
@@ -380,6 +381,9 @@ export class Game implements TouchTarget {
   /** Carte della run (solo partite in solitaria) e loro effetti. */
   private runModifiers: RunModifierId[] = []
   private runEffects: RunModifierEffects = getRunModifierEffects([])
+  /** Run del giorno: eventi, miniboss ed eventi rari dallo stesso seme per tutti. */
+  private dailyKey: string | null = null
+  private random: () => number = Math.random
   private hordeRemaining = 0
   private hordeTimer = 0
   private rogueTyrantTimer = 0
@@ -768,7 +772,7 @@ export class Game implements TouchTarget {
     // l'élite evocata esisterebbe solo da loro).
     if (this.cursedWave !== wave) {
       this.cursedWave = wave
-      this.cursedBox = this.coopRole !== 'client' && isBoxCursed(wave)
+      this.cursedBox = this.coopRole !== 'client' && isBoxCursed(wave, this.random)
     }
     for (const station of this.stations) {
       if (station.definition.kind !== 'box') continue
@@ -788,6 +792,8 @@ export class Game implements TouchTarget {
     // Le carte valgono solo in solitaria (in squadra tutti giocano con le stesse regole).
     this.runModifiers = this.coop ? [] : [...(options.modifiers ?? [])]
     this.runEffects = getRunModifierEffects(this.runModifiers)
+    this.dailyKey = !this.coop && options.daily ? options.daily.key : null
+    this.random = this.dailyKey && options.daily ? createSeededRandom(options.daily.seed) : Math.random
     this.clearEntities()
     this.setMap(map)
     this.resetObjectives()
@@ -803,7 +809,7 @@ export class Game implements TouchTarget {
     this.stats = createBaseStats(bonuses)
     this.stats.maxHealth = Math.max(1, Math.round(this.stats.maxHealth * this.runEffects.maxHealth))
     this.setupMobility()
-    this.runSeed = Math.floor(Math.random() * 1000)
+    this.runSeed = Math.floor(this.random() * 1000)
     this.health = this.stats.maxHealth
     this.score = 0
     this.wave = 0
@@ -1065,6 +1071,7 @@ export class Game implements TouchTarget {
       weaponKills: Object.fromEntries(this.weaponKills),
       modifiers: [...this.runModifiers],
       rewardMultiplier: getRewardMultiplier(this.runModifiers),
+      ...(this.dailyKey ? { dailyKey: this.dailyKey } : {}),
     }
   }
 
@@ -1082,7 +1089,7 @@ export class Game implements TouchTarget {
     const previousTier = getFieldTier(Math.max(1, this.wave - 1))
     this.rotateStations(this.wave)
     const tier = getFieldTier(this.wave)
-    this.startWaveEvent(rollWaveEvent(this.wave, this.usedWaveEvents, this.lastEventWave))
+    this.startWaveEvent(rollWaveEvent(this.wave, this.usedWaveEvents, this.lastEventWave, this.random))
     // Con un evento in corso il banner dell'ondata lo descrive: l'avviso generico sulle postazioni si salta.
     if (this.wave > 1 && (tier > previousTier || !this.waveEvent)) {
       this.events.onNotice?.(tier > previousTier ? `ARMI ${FIELD_TIERS[tier].name} DISPONIBILI` : 'POSTAZIONI AGGIORNATE', tier > previousTier ? 'Le postazioni ora vendono armi più potenti, a un prezzo più alto.' : 'Le armi in vendita sulla mappa sono cambiate: controlla le postazioni.', 0x8f6bff)
@@ -3170,7 +3177,7 @@ export class Game implements TouchTarget {
     this.corpses = []
     this.coverNoticeShown = false
     this.reviveNoticeShown = false
-    this.rareEvent = this.coopRole === 'client' ? null : rollRareEvent()
+    this.rareEvent = this.coopRole === 'client' ? null : rollRareEvent(this.random)
     this.hordeRemaining = 0
     this.rogueTyrantTimer = 0
     for (const door of this.doors) door.locked = false
@@ -3316,7 +3323,7 @@ export class Game implements TouchTarget {
       this.toxicCloudMesh.visible = true
       this.events.onNotice?.('NUBE TOSSICA', 'Una nube velenosa avanza lenta verso di te: tieniti in movimento.', 0x9dff4a)
     }
-    if (!shouldLockDoor(this.wave, FINAL_WAVE)) return
+    if (!shouldLockDoor(this.wave, FINAL_WAVE, this.random)) return
     const players = [this.player, ...this.teammates.all.filter((mate) => mate.status !== 'dead').map((mate) => mate.feet)]
     const candidates = this.doors.filter((door) => door.open && !door.locked && players.every((feet) => feet.distanceTo(door.group.position) > DOOR_LOCK.safeDistance))
     const door = candidates[Math.floor(Math.random() * candidates.length)]
@@ -3502,14 +3509,15 @@ export class Game implements TouchTarget {
       const inside = distance <= EVACUATION.radius
       return { title: 'EVACUAZIONE', detail: inside ? 'Resta nella zona: l’elicottero sta atterrando' : `Raggiungi la zona di estrazione // ${Math.round(distance)} m`, progress: this.evacuation, color: 0x58f5e5 }
     }
+    // Priorità: difesa del generatore, poi cassa della pausa, poi l'avviso sul generatore spento.
+    if (this.map.generator && this.generator.state === 'starting') {
+      return { title: 'DIFENDI IL GENERATORE', detail: `Integrità ${Math.round((this.generator.health / GENERATOR.health) * 100)}%`, progress: this.generator.progress, color: 0xffd166 }
+    }
     if (this.supplyReward && this.supplyCrate.visible) {
       const distance = Math.hypot(this.supplyCrate.position.x - this.player.x, this.supplyCrate.position.z - this.player.z)
       return { title: 'RIFORNIMENTO', detail: `${SUPPLY_LABELS[this.supplyReward]} prima della prossima ondata // ${Math.round(distance)} m`, progress: Math.max(0, this.waveBreak / (WAVE_BREAK_SECONDS + SUPPLY_CRATE.extraBreak)), color: 0x58f5e5 }
     }
     if (!this.map.generator) return undefined
-    if (this.generator.state === 'starting') {
-      return { title: 'DIFENDI IL GENERATORE', detail: `Integrità ${Math.round((this.generator.health / GENERATOR.health) * 100)}%`, progress: this.generator.progress, color: 0xffd166 }
-    }
     if (this.generator.state === 'off') {
       return this.wave >= this.generator.retryWave
         ? { title: 'OBIETTIVO', detail: `Avvia il generatore (E): postazioni scontate del ${Math.round(GENERATOR.discount * 100)}%`, color: 0xffd166 }
@@ -4845,9 +4853,10 @@ function toVec3(vector: THREE.Vector3): Vec3 {
 }
 
 /** Bersaglio di uno zombie: un giocatore (null = locale) oppure una torretta. */
-/** Opzioni della run scelte nel menu (carte; in seguito run del giorno e modalità). */
+/** Opzioni della run scelte nel menu: carte e run del giorno (seme uguale per tutti). */
 export interface RunOptions {
   modifiers?: RunModifierId[]
+  daily?: { key: string; seed: number }
 }
 
 interface Victim {

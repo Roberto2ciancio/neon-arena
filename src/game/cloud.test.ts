@@ -25,6 +25,27 @@ describe('Supabase cloud', () => {
     })
   })
 
+  it('la run del giorno invia la data solo in solitaria e se ben formata', async () => {
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(null, { status: 201 }))
+    const cloud = new SupabaseCloud('https://example.supabase.co', 'public-key', fetcher)
+    const base = { score: 500, wave: 3, kills: 10, shards: 2, time: 90, won: false }
+    await cloud.submitRun({ accessToken: 't', userId: 'u' }, 'ace', { ...base, players: 1, dailyKey: '2026-11-23' })
+    await cloud.submitRun({ accessToken: 't', userId: 'u' }, 'ace', { ...base, players: 2, dailyKey: '2026-11-23' })
+    await cloud.submitRun({ accessToken: 't', userId: 'u' }, 'ace', { ...base, players: 1, dailyKey: 'ieri' })
+    const bodies = fetcher.mock.calls.map(([, init]) => JSON.parse(String(init?.body)))
+    expect(bodies[0].daily_key).toBe('2026-11-23')
+    expect(bodies[1].daily_key).toBeUndefined()
+    expect(bodies[2].daily_key).toBeUndefined()
+  })
+
+  it('se il database rifiuta la run del giorno la reinvia come run normale', async () => {
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => new Response(null, { status: String(init?.body).includes('daily_key') ? 400 : 201 }))
+    const cloud = new SupabaseCloud('https://example.supabase.co', 'public-key', fetcher)
+    await cloud.submitRun({ accessToken: 't', userId: 'u' }, 'ace', { score: 500, wave: 3, kills: 10, shards: 2, time: 90, players: 1, dailyKey: '2026-11-23' })
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    expect(JSON.parse(String(fetcher.mock.calls[1]![1]?.body)).daily_key).toBeUndefined()
+  })
+
   it('invia la partita TCT con durata, mappa e armi', async () => {
     const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(null, { status: 201 }))
     const cloud = new SupabaseCloud('https://example.supabase.co', 'public-key', fetcher)

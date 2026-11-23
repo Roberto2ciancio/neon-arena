@@ -2,12 +2,13 @@
  * Categorie della classifica globale (Fase F) e formattazione dei valori. Le classifiche si
  * calcolano nel database (`get_leaderboard`): qui ci sono solo etichette, soglie e testi.
  */
-export type LeaderboardTab = 'zombie' | 'tct' | 'weapons' | 'weekly'
+export type LeaderboardTab = 'zombie' | 'tct' | 'weapons' | 'weekly' | 'daily'
 
 export type LeaderboardCategory =
   | 'score' | 'wave' | 'wins' | 'avg_wave' | 'kills' | 'combo' | 'precision' | 'playtime'
   | 'kd' | 'tct_kills' | 'tct_wins' | 'win_rate'
   | 'weapon'
+  | 'daily'
 
 export interface CategoryInfo {
   id: LeaderboardCategory
@@ -42,16 +43,19 @@ export const TCT_CATEGORIES: readonly CategoryInfo[] = [
 ]
 
 export const WEAPON_CATEGORY: CategoryInfo = { id: 'weapon', label: 'UCCISIONI CON L’ARMA', unit: 'count', minGames: 0, gamesLabel: 'PARTITE' }
+/** Run del giorno: miglior punteggio di oggi (giorno UTC) fra le run del giorno. */
+export const DAILY_CATEGORY: CategoryInfo = { id: 'daily', label: 'RUN DEL GIORNO', unit: 'points', minGames: 0, gamesLabel: 'RUN' }
 
 export function getTabCategories(tab: LeaderboardTab): readonly CategoryInfo[] {
   if (tab === 'tct') return TCT_CATEGORIES
   if (tab === 'weapons') return [WEAPON_CATEGORY]
+  if (tab === 'daily') return [DAILY_CATEGORY]
   // La settimanale usa le stesse classifiche Zombie sugli ultimi 7 giorni.
   return ZOMBIE_CATEGORIES
 }
 
 export function getCategory(id: string): CategoryInfo {
-  return [...ZOMBIE_CATEGORIES, ...TCT_CATEGORIES, WEAPON_CATEGORY].find((category) => category.id === id) ?? ZOMBIE_CATEGORIES[0]!
+  return [...ZOMBIE_CATEGORIES, ...TCT_CATEGORIES, WEAPON_CATEGORY, DAILY_CATEGORY].find((category) => category.id === id) ?? ZOMBIE_CATEGORIES[0]!
 }
 
 const integer = new Intl.NumberFormat('it-IT', { maximumFractionDigits: 0 })

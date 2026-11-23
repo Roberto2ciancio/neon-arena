@@ -143,24 +143,38 @@ export class SupabaseCloud {
   async submitRun(account: AccountToken, callsign: string, result: RunResult): Promise<void> {
     const kills = safeNumber(result.kills)
     const mapId = safeId(result.mapId)
-    await this.request('/rest/v1/leaderboard', {
+    const row = {
+      player_id: account.userId,
+      callsign: normalizeCallsign(callsign),
+      score: safeNumber(result.score),
+      wave: safeNumber(result.wave, 15),
+      kills,
+      time_seconds: safeNumber(result.time),
+      won: result.won === true,
+      best_combo: Math.min(kills, safeNumber(result.bestCombo)),
+      precision_hits: safeNumber(result.precisionHits),
+      players: Math.max(1, safeNumber(result.players ?? 1, 4)),
+      weapon_kills: sanitizeWeaponKills(result.weaponKills, kills),
+      ...(mapId ? { map: mapId } : {}),
+    }
+    // Run del giorno (solo in solitaria): il database accetta solo la data di oggi o di ieri.
+    const daily = result.dailyKey && /^\d{4}-\d{2}-\d{2}$/.test(result.dailyKey) && (result.players ?? 1) === 1 ? result.dailyKey : null
+    const send = (body: object) => this.request('/rest/v1/leaderboard', {
       method: 'POST',
       headers: { Prefer: 'return=minimal', Authorization: `Bearer ${account.accessToken}` },
-      body: JSON.stringify({
-        player_id: account.userId,
-        callsign: normalizeCallsign(callsign),
-        score: safeNumber(result.score),
-        wave: safeNumber(result.wave, 15),
-        kills,
-        time_seconds: safeNumber(result.time),
-        won: result.won === true,
-        best_combo: Math.min(kills, safeNumber(result.bestCombo)),
-        precision_hits: safeNumber(result.precisionHits),
-        players: Math.max(1, safeNumber(result.players ?? 1, 4)),
-        weapon_kills: sanitizeWeaponKills(result.weaponKills, kills),
-        ...(mapId ? { map: mapId } : {}),
-      }),
+      body: JSON.stringify(body),
     })
+    if (!daily) {
+      await send(row)
+      return
+    }
+    try {
+      await send({ ...row, daily_key: daily })
+    } catch {
+      // Database senza la colonna della run del giorno (migrazione non ancora applicata) o data
+      // rifiutata: la run entra comunque nella classifica normale.
+      await send(row)
+    }
   }
 
   /** Partita TCT dell'account (valori controllati dal database, vedi `validate_tct_match`). */

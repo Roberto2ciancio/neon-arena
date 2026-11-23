@@ -1260,6 +1260,35 @@ test('carte della run: scelte nel menu, cambiano le regole e moltiplicano le ric
   expect(errors).toEqual([])
 })
 
+test('run del giorno: mappa e carte uguali per tutti, record di oggi a fine run', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  await page.addInitScript(() => window.localStorage.setItem('neon-arena:graphics:v1', 'low'))
+  await page.goto('/')
+  await expect(page.locator('#daily-run-detail')).toContainText('·')
+  await page.locator('#daily-run-start').click()
+  await expect(page.locator('#app')).toHaveAttribute('data-state', 'playing')
+  const run = await page.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    return { daily: game.dailyKey, cards: game.runModifiers.length, map: game.map.id }
+  })
+  expect(run.daily).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+  expect(run.cards).toBeGreaterThan(0)
+  // Sconfitta: schermata di fine partita con il record di oggi e il pulsante "Nuova run".
+  await page.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    game.score = 1234
+    game.finishRun(false)
+  })
+  await expect(page.locator('#app')).toHaveAttribute('data-state', 'gameover')
+  await expect(page.locator('#gameover-message')).toContainText('Run del giorno: nuovo record di oggi')
+  // "Nuova run" ripropone la run del giorno, con la stessa mappa.
+  await page.locator('#restart-button').click()
+  await expect(page.locator('#app')).toHaveAttribute('data-state', 'playing')
+  expect(await page.evaluate(() => (window as any).__neonArena.game.map.id)).toBe(run.map)
+  expect(errors).toEqual([])
+})
+
 test('la classifica globale mostra schede, K/D con partite e profilo pubblico', async ({ page }) => {
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))

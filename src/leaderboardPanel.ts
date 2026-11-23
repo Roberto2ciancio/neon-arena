@@ -104,10 +104,10 @@ export class LeaderboardPanel {
     const category = byId<HTMLSelectElement>('lb-category')
     category.replaceChildren(...getTabCategories(this.tab).map((entry) => new Option(entry.label, entry.id)))
     category.value = this.category
-    category.parentElement!.classList.toggle('hidden', this.tab === 'weapons')
+    category.parentElement!.classList.toggle('hidden', this.tab === 'weapons' || this.tab === 'daily')
     byId('lb-weapon').parentElement!.classList.toggle('hidden', this.tab !== 'weapons')
-    byId('lb-mode').parentElement!.classList.toggle('hidden', this.tab === 'tct' || this.tab === 'weapons')
-    byId('lb-map').parentElement!.classList.toggle('hidden', this.tab === 'weapons')
+    byId('lb-mode').parentElement!.classList.toggle('hidden', this.tab === 'tct' || this.tab === 'weapons' || this.tab === 'daily')
+    byId('lb-map').parentElement!.classList.toggle('hidden', this.tab === 'weapons' || this.tab === 'daily')
   }
 
   private query() {
@@ -115,9 +115,9 @@ export class LeaderboardPanel {
     const mode = (byId<HTMLSelectElement>('lb-mode').value || null) as 'solo' | 'coop' | null
     const weapon = byId<HTMLSelectElement>('lb-weapon').value
     return {
-      category: this.tab === 'weapons' ? 'weapon' as const : this.category,
+      category: this.tab === 'weapons' ? 'weapon' as const : this.tab === 'daily' ? 'daily' as const : this.category,
       period: this.tab === 'weekly' ? 'week' as const : 'all' as const,
-      map: this.tab === 'weapons' ? null : map,
+      map: this.tab === 'weapons' || this.tab === 'daily' ? null : map,
       mode: this.tab === 'zombie' || this.tab === 'weekly' ? mode : null,
       weapon: this.tab === 'weapons' ? weapon : null,
     }
@@ -128,7 +128,7 @@ export class LeaderboardPanel {
     if (!cloud) return
     const query = this.query()
     const category = getCategory(query.category)
-    byId('lb-note').textContent = getMinGamesNote(category) ?? (this.tab === 'weekly' ? 'Run degli ultimi 7 giorni.' : '')
+    byId('lb-note').textContent = getMinGamesNote(category) ?? (this.tab === 'weekly' ? 'Run degli ultimi 7 giorni.' : this.tab === 'daily' ? 'Run del giorno di oggi (giorno UTC): stessa mappa, carte ed eventi per tutti.' : '')
     const request = ++this.requestId
     const status = byId('lb-status')
     status.textContent = 'CARICAMENTO...'

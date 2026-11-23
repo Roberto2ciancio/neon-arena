@@ -37,6 +37,7 @@ import { CAMOS, COSMETIC_CATALOG } from './game/cosmetics'
 import type { CosmeticOption } from './game/cosmetics'
 import { EQUIPMENT } from './game/equipment'
 import { JETPACK_FUEL, MOBILITY } from './game/mobility'
+import { createDailyRun, getUtcDayKey, loadDailyBest, recordDailyScore } from './game/dailyRun'
 import { getRewardMultiplier, loadRunModifiers, MAX_RUN_MODIFIERS, RUN_MODIFIER_IDS, RUN_MODIFIERS, saveRunModifiers, toggleRunModifier } from './game/runModifiers'
 import { CHALLENGE_REWARDS, describeChallenge, getChallengeRewards, loadChallenges, recordChallengeEvent, refreshChallenges, saveChallenges } from './game/challenges'
 import type { ActiveChallenge, ChallengeEvent, ChallengeSet } from './game/challenges'
@@ -860,11 +861,13 @@ function completeRun(result: RunResult): void {
   byId('result-shards').textContent = `+${result.shards}`
   byId('gameover-title').textContent = result.won ? 'STAZIONE SICURA' : 'RUN TERMINATA'
   const challengeOutcome = advanceChallenges({ zombie: result })
+  const dailyRecord = result.dailyKey ? recordDailyScore(window.localStorage, result.dailyKey, result.score) : false
+  renderDailyRun()
   // Le carte della run moltiplicano l'esperienza (i frammenti li moltiplica già la partita).
   const xp = Math.round((result.kills * XP_REWARDS.zombieKill + Math.max(0, result.wave - 1) * XP_REWARDS.wave + XP_REWARDS.runComplete) * (result.rewardMultiplier ?? 1)) + challengeOutcome.xp
   byId('gameover-message').textContent = (result.won
     ? 'Hai superato tutte le 15 ondate. Bonus vittoria: 8 frammenti.'
-    : `L’orda ti ha sopraffatto all’ondata ${result.wave} di 15.`) + ((result.bestCombo ?? 0) >= 2 ? ` Combo migliore: ×${result.bestCombo}.` : '') + formatMedals(result.medals) + ((result.rewardMultiplier ?? 1) > 1 ? ` Carte della run: frammenti ed esperienza ×${(result.rewardMultiplier ?? 1).toLocaleString('it-IT')}.` : '') + challengeOutcome.text + grantXp(xp) + grantWeaponXp(result.weaponXp ?? {})
+    : `L’orda ti ha sopraffatto all’ondata ${result.wave} di 15.`) + ((result.bestCombo ?? 0) >= 2 ? ` Combo migliore: ×${result.bestCombo}.` : '') + formatMedals(result.medals) + (result.dailyKey ? (dailyRecord ? ' Run del giorno: nuovo record di oggi!' : ' Run del giorno completata.') : '') + ((result.rewardMultiplier ?? 1) > 1 ? ` Carte della run: frammenti ed esperienza ×${(result.rewardMultiplier ?? 1).toLocaleString('it-IT')}.` : '') + challengeOutcome.text + grantXp(xp) + grantWeaponXp(result.weaponXp ?? {})
   byId('gameover-title').textContent += result.score > previousBest && result.score > 0 ? ' // NUOVO RECORD' : ''
   renderMenu()
 }
@@ -1103,7 +1106,31 @@ function renderRunCards(): void {
     : 'Facoltative: più difficile, più frammenti ed esperienza'
 }
 
+// --- Run del giorno -------------------------------------------------------------------------
+/** L'ultima run era quella del giorno: "Nuova run" la ripropone. */
+let lastRunDaily = false
+
+function renderDailyRun(): void {
+  const daily = createDailyRun(getUtcDayKey(new Date()))
+  const map = MAPS.find((candidate) => candidate.id === daily.mapId)
+  const best = loadDailyBest(window.localStorage, daily.key)
+  const cards = daily.modifiers.map((id) => RUN_MODIFIERS[id].name).join(' · ')
+  byId('daily-run-detail').textContent = `${map?.name.toUpperCase() ?? daily.mapId} · ${cards}${best > 0 ? ` · record di oggi ${best.toLocaleString('it-IT')}` : ''}`
+}
+
+function startDailyRun(): void {
+  const daily = createDailyRun(getUtcDayKey(new Date()))
+  const map = MAPS.find((candidate) => candidate.id === daily.mapId) ?? STATION_13
+  lastRunDaily = true
+  game.start(getMetaBonuses(progress), map, currentLoadout(), { modifiers: daily.modifiers, daily: { key: daily.key, seed: daily.seed } })
+}
+
 function startRun(): void {
+  if (lastRunDaily && selectedMode !== 'tct' && !coopLobby.active && currentState !== 'menu') {
+    startDailyRun()
+    return
+  }
+  lastRunDaily = false
   if (selectedMode === 'tct') returnToLobby()
   else if (coopLobby.active) {
     // Squadra: si torna alla stanza; l'host può avviare una nuova partita.
@@ -1324,6 +1351,7 @@ document.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach((button) => 
     byId('coop-lobby').classList.toggle('hidden', selectedMode === 'tct')
     byId('start-button').classList.toggle('hidden', selectedMode === 'tct')
     byId('run-cards').classList.toggle('hidden', selectedMode === 'tct')
+    byId('daily-run').classList.toggle('hidden', selectedMode === 'tct')
     byId('abandon-button').textContent = selectedMode === 'tct' ? 'ESCI DALLA PARTITA' : 'TERMINA RUN'
     if (selectedMode === 'tct') document.querySelector<HTMLButtonElement>('[data-map="depot-06"]')?.click()
     else leaveRoom()
@@ -1474,6 +1502,8 @@ byId<HTMLButtonElement>('pause-settings-button').addEventListener('click', () =>
 renderMenu()
 renderChallengesBadge()
 renderRunCards()
+renderDailyRun()
+byId<HTMLButtonElement>('daily-run-start').addEventListener('click', startDailyRun)
 renderProfile()
 void initializeCloud()
 void accountPanel.initialize()

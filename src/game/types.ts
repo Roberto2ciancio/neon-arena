@@ -159,6 +159,8 @@ export interface RunResult {
   /** Carte della run scelte e moltiplicatore di frammenti ed esperienza (già applicato ai frammenti). */
   modifiers?: string[]
   rewardMultiplier?: number
+  /** Data UTC della run del giorno (assente nelle run normali). */
+  dailyKey?: string
 }
 
 export interface LeaderboardEntry {
