@@ -53,6 +53,8 @@ export const ENEMY_FLAG_GOLDEN = 8
 export const ENEMY_FLAG_EXPOSED = 16
 /** Bruto che carica il colpo a terra: i compagni disegnano l'onda d'urto. */
 export const ENEMY_FLAG_SLAM = 32
+/** Miniboss: indice in `MINIBOSS_IDS` + 1 nei bit 6–7 (0 = zombie normale). */
+export const ENEMY_FLAG_MINIBOSS_SHIFT = 6
 
 export type CoopClientMessage =
   | { t: 'hello'; v: number; name: string; cosmetics: Cosmetics }

@@ -1063,6 +1063,50 @@ test('sfide: il pannello mostra giornaliere e settimanali e una run le fa avanza
   expect(errors).toEqual([])
 })
 
+test('ritmo delle ondate: miniboss, ondata a tema e cassa nella pausa', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  await page.addInitScript(() => window.localStorage.setItem('neon-arena:graphics:v1', 'low'))
+  await page.goto('/')
+  await page.locator('[data-map="district-zero"]').click()
+  await page.getByRole('button', { name: 'INIZIA RUN' }).click()
+  await expect(page.locator('#app')).toHaveAttribute('data-state', 'playing')
+  // Ondata 3: a metà arriva il miniboss, con la barra in alto.
+  await page.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    game.clearEntities()
+    game.activePowerUps.set('barrier', 999)
+    game.wave = 2
+    game.nextWave()
+    game.spawnQueue = 1
+    game.spawnTimer = 0
+  })
+  await expect(page.locator('#boss-phase')).toHaveText('MINIBOSS')
+  expect(await page.evaluate(() => (window as any).__neonArena.game.enemies.some((enemy: any) => enemy.miniboss))).toBe(true)
+  // Ondata 4: sempre a tema.
+  await page.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    game.clearEntities()
+    game.nextWave()
+  })
+  expect(await page.evaluate(() => (window as any).__neonArena.game.waveEvent)).toMatch(/^theme-/)
+  // Fine ondata: cade una cassa di rifornimenti da raggiungere durante la pausa.
+  await page.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    game.clearEntities()
+    game.spawnQueue = 0
+    game.waveActive = true
+  })
+  await expect(page.locator('#objective-title')).toHaveText('RIFORNIMENTO')
+  await page.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    const crate = game.supplyCrate.position
+    game.debugPlace(crate.x + 0.5, 0, crate.z, 0, 0)
+  })
+  await expect.poll(() => page.evaluate(() => (window as any).__neonArena.game.supplyReward)).toBeNull()
+  expect(errors).toEqual([])
+})
+
 test('la classifica globale mostra schede, K/D con partite e profilo pubblico', async ({ page }) => {
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))

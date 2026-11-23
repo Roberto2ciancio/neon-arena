@@ -20,6 +20,11 @@ export type WaveEventId =
   | 'bounty'
   | 'no-regen'
   | 'chain-reaction'
+  | 'theme-runners'
+  | 'theme-acid'
+  | 'theme-shadows'
+  | 'theme-armor'
+  | 'theme-crawl'
 
 export interface WaveEventModifiers {
   /** Moltiplicatore del numero di zombie dell'ondata. */
@@ -44,6 +49,8 @@ export interface WaveEventModifiers {
   passiveRegen: boolean
   /** Solo questi tipi possono comparire (intersecati con quelli dell'ondata). */
   kinds?: readonly EnemyKind[]
+  /** Ondate a tema: i tipi indicati compaiono anche prima della loro ondata d'esordio. */
+  forceKinds?: boolean
 }
 
 export interface WaveEventDefinition {
@@ -54,6 +61,8 @@ export interface WaveEventDefinition {
   color: number
   /** Prima ondata in cui può capitare. */
   minWave: number
+  /** Ondata a tema: esce solo nelle ondate dedicate, mai a caso. */
+  theme?: boolean
   modifiers: Partial<WaveEventModifiers>
 }
 
@@ -129,6 +138,31 @@ export const WAVE_EVENTS: Record<WaveEventId, WaveEventDefinition> = {
     description: 'Niente rigenerazione naturale della vita. Crediti ×1,75.',
     modifiers: { passiveRegen: false, credits: 1.75 },
   },
+  'theme-runners': {
+    id: 'theme-runners', name: 'CORSA NELLA NEBBIA', icon: '≫', color: 0xc8d4e0, minWave: 4, theme: true,
+    description: 'Solo Corridori, nella nebbia fitta. Più numerosi ma più fragili. Crediti ×1,3.',
+    modifiers: { kinds: ['runner'], forceKinds: true, fogScale: 1.8, spawnCount: 1.25, health: 0.85, credits: 1.3 },
+  },
+  'theme-acid': {
+    id: 'theme-acid', name: 'PIOGGIA ACIDA', icon: '☣', color: 0x9dff6b, minWave: 4, theme: true,
+    description: 'Gonfi e Sputatori: tieniti a distanza e muoviti. Crediti ×1,3.',
+    modifiers: { kinds: ['bloater', 'spitter'], forceKinds: true, spawnCount: 0.85, credits: 1.3 },
+  },
+  'theme-shadows': {
+    id: 'theme-shadows', name: 'OMBRE AL BUIO', icon: '◑', color: 0x7a7f9a, minWave: 8, theme: true,
+    description: 'Luci quasi spente e Ombre quasi invisibili: ascolta i passi. Crediti ×1,5.',
+    modifiers: { kinds: ['stalker', 'walker'], forceKinds: true, lightScale: 0.35, fogScale: 1.5, credits: 1.5 },
+  },
+  'theme-armor': {
+    id: 'theme-armor', name: 'MURO D’ACCIAIO', icon: '▣', color: 0xc28b48, minWave: 4, theme: true,
+    description: 'Corazzati e Scudieri: colpisci generatori e schiene. Meno zombie, più resistenti.',
+    modifiers: { kinds: ['armored', 'shielder'], forceKinds: true, spawnCount: 0.7, credits: 1.4, score: 1.3 },
+  },
+  'theme-crawl': {
+    id: 'theme-crawl', name: 'DAL BASSO', icon: '⌄', color: 0x81905b, minWave: 4, theme: true,
+    description: 'Striscianti e Saltatori arrivano bassi e veloci: mira giù. Crediti ×1,3.',
+    modifiers: { kinds: ['crawler', 'leaper'], forceKinds: true, speed: 1.08, credits: 1.3 },
+  },
   'chain-reaction': {
     id: 'chain-reaction', name: 'REAZIONE A CATENA', icon: '✺', color: 0xff8a3d, minWave: 4,
     description: 'Gli zombie esplodono quando muoiono e feriscono quelli vicini.',
@@ -137,6 +171,11 @@ export const WAVE_EVENTS: Record<WaveEventId, WaveEventDefinition> = {
 }
 
 export const WAVE_EVENT_IDS = Object.keys(WAVE_EVENTS) as WaveEventId[]
+/** Eventi casuali (le ondate a tema escono solo nelle loro ondate). */
+export const RANDOM_EVENT_IDS = WAVE_EVENT_IDS.filter((id) => !WAVE_EVENTS[id].theme)
+export const THEME_EVENT_IDS = WAVE_EVENT_IDS.filter((id) => WAVE_EVENTS[id].theme)
+/** Ondate a tema: rompono la curva di difficoltà con una composizione diversa dal solito. */
+export const THEME_WAVES: readonly number[] = [4, 8, 13]
 
 export function getWaveEventModifiers(id: WaveEventId | null): WaveEventModifiers {
   if (!id) return { ...NEUTRAL_MODIFIERS }
@@ -161,18 +200,25 @@ export const WAVE_EVENT_MAX_GAP = 3
  */
 export function rollWaveEvent(wave: number, used: readonly WaveEventId[], lastEventWave: number, random: () => number = Math.random): WaveEventId | null {
   if (wave < 3 || wave % 5 === 0 || wave >= FINAL_WAVE) return null
+  if (THEME_WAVES.includes(wave)) {
+    // Un tema non ancora visto in questa run (le Ombre al buio solo dall'ottava ondata).
+    const themes = THEME_EVENT_IDS.filter((id) => WAVE_EVENTS[id].minWave <= wave && !used.includes(id))
+    const pool = themes.length > 0 ? themes : THEME_EVENT_IDS.filter((id) => WAVE_EVENTS[id].minWave <= wave)
+    return pool[Math.floor(random() * pool.length)] ?? null
+  }
   const gap = wave - Math.max(2, lastEventWave)
   const chance = gap >= WAVE_EVENT_MAX_GAP ? 1 : lastEventWave === wave - 1 ? WAVE_EVENT_CHANCE_AFTER_EVENT : WAVE_EVENT_CHANCE
   if (random() >= chance) return null
-  const eligible = WAVE_EVENT_IDS.filter((id) => WAVE_EVENTS[id].minWave <= wave)
+  const eligible = RANDOM_EVENT_IDS.filter((id) => WAVE_EVENTS[id].minWave <= wave)
   let candidates = eligible.filter((id) => !used.includes(id))
   if (candidates.length === 0) candidates = eligible.filter((id) => id !== used[used.length - 1])
   return candidates[Math.floor(random() * candidates.length)] ?? null
 }
 
 /** Tipi ammessi dall'evento fra quelli dell'ondata; se nessuno coincide resta il gruppo dell'ondata. */
-export function filterSpawnPool(pool: readonly EnemyKind[], kinds: readonly EnemyKind[] | undefined): readonly EnemyKind[] {
+export function filterSpawnPool(pool: readonly EnemyKind[], kinds: readonly EnemyKind[] | undefined, force = false): readonly EnemyKind[] {
   if (!kinds) return pool
+  if (force && kinds.length > 0) return kinds
   const filtered = pool.filter((kind) => kinds.includes(kind))
   return filtered.length > 0 ? filtered : pool
 }

@@ -282,7 +282,7 @@ function renderBossBar(boss: HudData['boss']): void {
   bar.classList.toggle('hidden', !boss || currentState !== 'playing')
   if (!boss) return
   setText(hudEl('boss-name'), boss.name)
-  setText(hudEl('boss-phase'), boss.exposed ? 'NUCLEO SCOPERTO' : `FASE ${boss.phase}`)
+  setText(hudEl('boss-phase'), boss.miniboss ? 'MINIBOSS' : boss.exposed ? 'NUCLEO SCOPERTO' : `FASE ${boss.phase}`)
   bar.classList.toggle('exposed', boss.exposed)
   const share = Math.round(boss.health * 200) / 200
   if (share !== bossShare) {

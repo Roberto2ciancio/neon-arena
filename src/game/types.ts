@@ -93,7 +93,7 @@ export interface HudData {
   /** Obiettivo in corso: generatore o evacuazione, con l'avanzamento 0–1 quando serve. */
   objective?: { title: string; detail: string; progress?: number; color: number }
   /** Boss in campo (il primo vivo): barra della vita con le soglie delle fasi. */
-  boss?: { name: string; health: number; phase: number; exposed: boolean }
+  boss?: { name: string; health: number; phase: number; exposed: boolean; /** Miniboss: niente fasi. */ miniboss?: boolean }
   /** Modulo di mobilità (solo Zombie). */
   mobility?: { key: string; name: string; charges: number; maxCharges: number; progress: number; cooldown: number; fuel?: number; active: boolean; /** Si attiva con il tasto (scatto, schianto, rampino). */ usesKey: boolean }
   /** Arma bianca impugnata. */

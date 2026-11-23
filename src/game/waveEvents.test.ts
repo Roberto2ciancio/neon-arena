@@ -5,7 +5,9 @@ import {
   getWaveEventModifiers,
   getZoneDamageMultiplier,
   isWaveEventId,
+  RANDOM_EVENT_IDS,
   rollWaveEvent,
+  THEME_WAVES,
   WAVE_EVENT_IDS,
   WAVE_EVENTS,
   type WaveEventId,
@@ -28,13 +30,13 @@ describe('eventi casuali delle ondate', () => {
 
   it('arrivano al più tardi dopo due ondate normali', () => {
     // Con random alto l'evento non scatta, tranne quando il distacco è massimo.
-    expect(rollWaveEvent(4, [], 3, () => 0.99)).toBeNull()
-    expect(rollWaveEvent(6, ['blackout'], 3, () => 0.99)).not.toBeNull()
+    expect(rollWaveEvent(7, [], 6, () => 0.99)).toBeNull()
+    expect(rollWaveEvent(9, ['blackout'], 6, () => 0.99)).not.toBeNull()
   })
 
   it('dopo un evento il successivo è meno probabile', () => {
-    expect(rollWaveEvent(4, ['blackout'], 3, () => 0.3)).toBeNull()
-    expect(rollWaveEvent(6, ['blackout'], 4, () => 0.3)).not.toBeNull()
+    expect(rollWaveEvent(7, ['blackout'], 6, () => 0.3)).toBeNull()
+    expect(rollWaveEvent(7, ['blackout'], 5, () => 0.3)).not.toBeNull()
   })
 
   it('rispettano l’ondata minima e non si ripetono nella stessa run', () => {
@@ -42,13 +44,14 @@ describe('eventi casuali delle ondate', () => {
     const random = seeded(7)
     for (let run = 0; run < 200; run += 1) {
       const wave = 3 + (run % 9)
-      if (wave % 5 === 0) continue
+      if (wave % 5 === 0 || THEME_WAVES.includes(wave)) continue
       const event = rollWaveEvent(wave, used, 0, random)
       if (!event) continue
       expect(WAVE_EVENTS[event].minWave).toBeLessThanOrEqual(wave)
-      if (used.length < WAVE_EVENT_IDS.filter((id) => WAVE_EVENTS[id].minWave <= wave).length) expect(used).not.toContain(event)
+      expect(WAVE_EVENTS[event].theme).toBeFalsy()
+      if (used.length < RANDOM_EVENT_IDS.filter((id) => WAVE_EVENTS[id].minWave <= wave).length) expect(used).not.toContain(event)
       used.push(event)
-      if (used.length >= WAVE_EVENT_IDS.length) used.length = 0
+      if (used.length >= RANDOM_EVENT_IDS.length) used.length = 0
     }
   })
 
@@ -109,5 +112,27 @@ describe('eventi casuali delle ondate', () => {
     expect(isWaveEventId('blackout')).toBe(true)
     expect(isWaveEventId('toString')).toBe(false)
     expect(isWaveEventId(3)).toBe(false)
+  })
+})
+
+describe('ondate a tema', () => {
+  it('escono sempre nelle ondate dedicate, senza ripetersi, e mai a caso nelle altre', () => {
+    const used: WaveEventId[] = []
+    for (const wave of THEME_WAVES) {
+      const event = rollWaveEvent(wave, used, wave - 1, () => 0.99)
+      expect(event).not.toBeNull()
+      expect(WAVE_EVENTS[event!].theme).toBe(true)
+      expect(used).not.toContain(event)
+      used.push(event!)
+    }
+    // Le Ombre al buio non escono alla quarta ondata.
+    for (let seed = 0; seed < 20; seed += 1) expect(rollWaveEvent(4, [], 3, seeded(seed))).not.toBe('theme-shadows')
+  })
+
+  it('i tipi del tema compaiono anche prima della loro ondata d’esordio', () => {
+    const mods = getWaveEventModifiers('theme-shadows')
+    expect(filterSpawnPool(['walker', 'runner'], mods.kinds, mods.forceKinds)).toEqual(['stalker', 'walker'])
+    expect(filterSpawnPool(['walker'], ['stalker'])).toEqual(['walker'])
+    expect(WAVE_EVENT_IDS.filter((id) => WAVE_EVENTS[id].theme).length).toBeGreaterThanOrEqual(THEME_WAVES.length)
   })
 })

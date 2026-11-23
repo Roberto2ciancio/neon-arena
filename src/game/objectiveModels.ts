@@ -33,6 +33,24 @@ export function setGeneratorLook(group: THREE.Group, state: GeneratorState, time
   core.material.emissiveIntensity = state === 'on' ? 2.4 : state === 'starting' ? 1.2 + Math.sin(time * 9) * 0.9 : 0.05
 }
 
+/** Cassa di rifornimenti della pausa fra le ondate, con una colonna di luce bassa. */
+export function createSupplyCrate(): THREE.Group {
+  const group = new THREE.Group()
+  const box = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.6, 0.9), new THREE.MeshStandardMaterial({ color: 0x3d4a36, roughness: 0.7, metalness: 0.3 }))
+  box.position.y = 0.3
+  box.castShadow = true
+  const band = new THREE.Mesh(new THREE.BoxGeometry(0.94, 0.08, 0.94), new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0x58f5e5, emissiveIntensity: 1.6 }))
+  band.position.y = 0.42
+  const glow = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.35, 0.6, 6, 12, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0x58f5e5, transparent: true, opacity: 0.18, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }),
+  )
+  glow.position.y = 3
+  group.add(box, band, glow)
+  group.visible = false
+  return group
+}
+
 export function createBeacon(): THREE.Group {
   const group = new THREE.Group()
   const column = new THREE.Mesh(
