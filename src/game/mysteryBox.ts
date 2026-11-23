@@ -38,12 +38,13 @@ export const MYSTERY_BOX_COST = 14
  * Pesca un'arma dalla cassa: prima la rarità (le comuni escono spesso, le leggendarie di rado),
  * poi un'arma a caso di quella rarità. Se una rarità non ha armi disponibili si scende di livello.
  */
-export function rollMysteryBox(random: () => number = Math.random, exclude: readonly WeaponId[] = []): { weapon: WeaponId; rarity: Rarity } {
+export function rollMysteryBox(random: () => number = Math.random, exclude: readonly WeaponId[] = [], forceRarity?: Rarity): { weapon: WeaponId; rarity: Rarity } {
   const order: Rarity[] = ['legendary', 'epic', 'rare', 'uncommon', 'common']
   const total = order.reduce((sum, rarity) => sum + RARITIES[rarity].weight, 0)
   let roll = Math.min(0.999999, Math.max(0, random())) * total
-  let picked: Rarity = 'common'
-  for (const rarity of order) {
+  // Cassa maledetta: rarità imposta (se mancano armi di quella rarità si scende come al solito).
+  let picked: Rarity = forceRarity ?? 'common'
+  for (const rarity of forceRarity ? [] : order) {
     roll -= RARITIES[rarity].weight
     if (roll < 0) {
       picked = rarity

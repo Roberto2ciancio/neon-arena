@@ -248,6 +248,60 @@ export const UPGRADE_DEFINITIONS: readonly UpgradeDefinition[] = [
     isAvailable: (stats) => stats.mobilityModule === 'wall-run' && stats.wallRunFrenzy === 0,
     apply: (stats) => { stats.wallRunFrenzy = 10 },
   },
+  // --- Compromessi: un vantaggio forte e uno svantaggio chiaro, una volta sola ciascuno ---
+  {
+    id: 'glass-cannon',
+    tag: 'COMPROMESSO',
+    name: 'CANNONE DI VETRO',
+    description: '+40% danno. In cambio −25% integrità massima e niente rigenerazione naturale.',
+    icon: '◇',
+    isAvailable: (stats) => !stats.tradeoffs.includes('glass-cannon'),
+    apply: (stats) => {
+      stats.damage *= 1.4
+      stats.maxHealth = Math.round(stats.maxHealth * 0.75)
+      stats.regenBlocked = true
+      stats.tradeoffs = [...stats.tradeoffs, 'glass-cannon']
+    },
+  },
+  {
+    id: 'greed',
+    tag: 'COMPROMESSO',
+    name: 'AVIDITÀ',
+    description: 'Crediti raddoppiati per ogni uccisione. In cambio gli zombie sono più veloci del 12%.',
+    icon: '⬢',
+    isAvailable: (stats) => !stats.tradeoffs.includes('greed'),
+    apply: (stats) => {
+      stats.creditMultiplier *= 2
+      stats.zombieSpeed *= 1.12
+      stats.tradeoffs = [...stats.tradeoffs, 'greed']
+    },
+  },
+  {
+    id: 'overclock',
+    tag: 'COMPROMESSO',
+    name: 'SURRISCALDAMENTO',
+    description: '+25% cadenza di fuoco. In cambio le ricariche durano il 30% in più.',
+    icon: '♨',
+    isAvailable: (stats) => !stats.tradeoffs.includes('overclock'),
+    apply: (stats) => {
+      stats.fireRate *= 1.25
+      stats.reloadTime *= 1.3
+      stats.tradeoffs = [...stats.tradeoffs, 'overclock']
+    },
+  },
+  {
+    id: 'heavy-plating',
+    tag: 'COMPROMESSO',
+    name: 'CORAZZA PESANTE',
+    description: '−5 danni da ogni colpo subito. In cambio ti muovi il 12% più lentamente.',
+    icon: '▣',
+    isAvailable: (stats) => !stats.tradeoffs.includes('heavy-plating'),
+    apply: (stats) => {
+      stats.armor += 5
+      stats.speed *= 0.88
+      stats.tradeoffs = [...stats.tradeoffs, 'heavy-plating']
+    },
+  },
 ]
 
 export const FIRST_LEVEL_XP = 90
@@ -289,6 +343,10 @@ export function createBaseStats(bonuses: MetaBonuses = { vitality: 0, power: 0, 
     mobilityKillRecharge: 0,
     explosiveLanding: 0,
     wallRunFrenzy: 0,
+    creditMultiplier: 1,
+    zombieSpeed: 1,
+    regenBlocked: false,
+    tradeoffs: [],
   }
 }
 

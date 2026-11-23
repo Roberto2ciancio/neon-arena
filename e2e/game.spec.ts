@@ -1107,6 +1107,76 @@ test('ritmo delle ondate: miniboss, ondata a tema e cassa nella pausa', async ({
   expect(errors).toEqual([])
 })
 
+test('decisioni della run: sinergia, cassa maledetta, nube tossica e porta bloccata', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  await page.addInitScript(() => window.localStorage.setItem('neon-arena:graphics:v1', 'low'))
+  await page.goto('/')
+  await page.locator('[data-map="district-zero"]').click()
+  await page.getByRole('button', { name: 'INIZIA RUN' }).click()
+  await expect(page.locator('#app')).toHaveAttribute('data-state', 'playing')
+  // Due potenziamenti complementari sbloccano una sinergia.
+  const synergies = await page.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    game.clearEntities()
+    game.spawnQueue = 0
+    game.activePowerUps.set('barrier', 999)
+    for (const id of ['incendiary', 'demolition']) {
+      game.pendingUpgrades = 1
+      game.currentUpgradeIds = [id]
+      game.chooseUpgrade(id)
+    }
+    return [...game.activeSynergies]
+  })
+  expect(synergies).toEqual(['wildfire'])
+  // Cassa maledetta: leggendaria garantita e un'élite alle spalle.
+  const box = await page.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    const station = game.stations.find((candidate: any) => candidate.definition.kind === 'box')
+    game.cursedBox = true
+    game.shards = 500
+    game.debugPlace(station.definition.x + 1, station.definition.y, station.definition.z, 0, 0)
+    return game.enemies.length
+  })
+  await expect(page.locator('#door-prompt-text')).toContainText('CASSA MALEDETTA')
+  await page.keyboard.press('KeyE')
+  await expect.poll(() => page.evaluate(() => (window as any).__neonArena.game.enemies.filter((enemy: any) => enemy.elite).length)).toBeGreaterThan(box)
+  // Ondata 6: arriva la nube tossica e fa danno a chi ci sta dentro.
+  await page.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    game.clearEntities()
+    game.activePowerUps.delete('barrier')
+    game.health = game.stats.maxHealth
+    game.wave = 5
+    game.nextWave()
+    // Ondata tenuta aperta (zombie in coda ma nessuno spawn), altrimenti finisce e la nube sparisce.
+    game.spawnQueue = 5
+    game.spawnTimer = 999
+    game.toxicCloud.x = game.player.x
+    game.toxicCloud.z = game.player.z
+  })
+  await expect.poll(() => page.evaluate(() => (window as any).__neonArena.game.health), { timeout: 10000 }).toBeLessThan(100)
+  // Porta bloccata per l'ondata: non si compra e si riapre a fine ondata.
+  const locked = await page.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    game.activePowerUps.set('barrier', 999)
+    const door = game.doors[0]
+    game.openDoor(door)
+    game.setDoorLocked(door, true)
+    return { open: door.open, locked: door.locked, blocking: game.obstacles.includes(door.obstacle) }
+  })
+  expect(locked).toEqual({ open: false, locked: true, blocking: true })
+  await page.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    game.clearEntities()
+    game.spawnQueue = 0
+    game.waveActive = true
+  })
+  await expect.poll(() => page.evaluate(() => (window as any).__neonArena.game.doors[0].open)).toBe(true)
+  expect(await page.evaluate(() => (window as any).__neonArena.game.toxicCloud)).toBeNull()
+  expect(errors).toEqual([])
+})
+
 test('la classifica globale mostra schede, K/D con partite e profilo pubblico', async ({ page }) => {
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))

@@ -51,6 +51,25 @@ export function createSupplyCrate(): THREE.Group {
   return group
 }
 
+/** Nube tossica: cupola verde semitrasparente e un anello a terra (due draw call). */
+export function createToxicCloud(): THREE.Group {
+  const group = new THREE.Group()
+  const dome = new THREE.Mesh(
+    new THREE.SphereGeometry(1, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2),
+    new THREE.MeshBasicMaterial({ color: 0x7ed957, transparent: true, opacity: 0.2, depthWrite: false, side: THREE.DoubleSide }),
+  )
+  dome.scale.set(6.5, 2.6, 6.5)
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(6.2, 6.5, 48),
+    new THREE.MeshBasicMaterial({ color: 0x9dff4a, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false }),
+  )
+  ring.rotation.x = -Math.PI / 2
+  ring.position.y = 0.07
+  group.add(dome, ring)
+  group.visible = false
+  return group
+}
+
 export function createBeacon(): THREE.Group {
   const group = new THREE.Group()
   const column = new THREE.Mesh(

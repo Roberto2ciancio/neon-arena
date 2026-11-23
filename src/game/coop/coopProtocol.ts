@@ -70,7 +70,7 @@ export type CoopHostMessage =
   | { t: 'welcome'; v: number; id: string; hostId: string }
   | { t: 'lobby'; players: CoopLobbyPlayer[]; mapId: string; hostId: string }
   | { t: 'start'; mapId: string; players: CoopLobbyPlayer[] }
-  | { t: 'world'; wave: number; waveBreak: number; remaining: number; enemies: PackedEnemy[]; players: CoopPlayerState[]; /** Obiettivi: [stato generatore 0–2, avvio 0–1, integrità 0–1, evacuazione -1 o 0–1]. */ obj?: [number, number, number, number] }
+  | { t: 'world'; wave: number; waveBreak: number; remaining: number; enemies: PackedEnemy[]; players: CoopPlayerState[]; /** Obiettivi: [stato generatore 0–2, avvio 0–1, integrità 0–1, evacuazione -1 o 0–1, nube x, nube z] (la nube solo se c'è). */ obj?: number[] }
   | { t: 'shot'; by: string; from: Vec3; to: Vec3 }
   | { t: 'wave'; wave: number; event?: WaveEventId | null }
   | { t: 'kill'; enemy: number; by: string; kind: EnemyKind; pos: Vec3; score: number; xp: number; shards: number; precision: boolean; credits?: number; gore?: number; dir?: [number, number]; fall?: number; impulse?: number }
@@ -79,6 +79,8 @@ export type CoopHostMessage =
   | { t: 'power-spawn'; id: number; power: PowerUpId; pos: Vec3 }
   | { t: 'power-take'; id: number; power: PowerUpId; by: string }
   | { t: 'door'; id: string }
+  /** Porta bloccata (o sbloccata) dall'host per un'ondata. */
+  | { t: 'door-lock'; id: string; locked: boolean }
   | { t: 'revived'; target: string; by: string }
   /** Taglia di squadra: contatore unico tenuto dall'host. */
   | { t: 'bounty'; s: 'progress' | 'done' | 'failed'; kills: number; target: number; time: number }
@@ -146,7 +148,7 @@ export function parseCoopClientMessage(raw: unknown): CoopClientMessage | null {
   }
 }
 
-const HOST_TYPES = ['welcome', 'lobby', 'start', 'world', 'shot', 'wave', 'kill', 'damage', 'acid', 'power-spawn', 'power-take', 'door', 'revived', 'bounty', 'end', 'error']
+const HOST_TYPES = ['welcome', 'lobby', 'start', 'world', 'shot', 'wave', 'kill', 'damage', 'acid', 'power-spawn', 'power-take', 'door', 'door-lock', 'revived', 'bounty', 'end', 'error']
 
 /** I messaggi dell'host sono affidabili: si controlla la forma minima e i valori usati come indici. */
 export function parseCoopHostMessage(raw: unknown): CoopHostMessage | null {

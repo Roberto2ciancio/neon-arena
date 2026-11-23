@@ -26,9 +26,12 @@ import type { CoopPlayerStatus } from './coop/coopRules'
 import { ENEMY_FLAG_ATTACK, ENEMY_FLAG_ELITE, ENEMY_FLAG_EXPOSED, ENEMY_FLAG_GOLDEN, ENEMY_FLAG_MINIBOSS_SHIFT, ENEMY_FLAG_RISING, ENEMY_FLAG_SLAM, packEnemy, unpackEnemy } from './coop/coopProtocol'
 import { getMinibossForWave, getRegeneration, MINIBOSS, MINIBOSS_IDS, MINIBOSSES } from './minibosses'
 import type { MinibossId } from './minibosses'
-import { createBeacon, createGeneratorModel, createSupplyCrate, setGeneratorLook } from './objectiveModels'
+import { createBeacon, createGeneratorModel, createSupplyCrate, createToxicCloud, setGeneratorLook } from './objectiveModels'
 import { chooseSupplyReward, getSupplyCredits, shouldDropSupplyCrate, SUPPLY_CRATE, SUPPLY_LABELS } from './waveBreak'
 import type { SupplyReward } from './waveBreak'
+import { CURSED_BOX, hasToxicCloud, isBoxCursed, isInsideToxicCloud, shouldLockDoor, DOOR_LOCK, stepToxicCloud, TOXIC_CLOUD } from './mapHazards'
+import { BLOOD_OATH_HEAL_SHARE, getNewSynergies, SYNERGIES } from './synergies'
+import type { SynergyId } from './synergies'
 import { canStartGenerator, createGenerator, EVACUATION, GENERATOR, getPoweredCost, isInsideExtraction, startGenerator, tickEvacuation, tickGenerator } from './objectives'
 import type { GeneratorState, GeneratorStatus } from './objectives'
 import { DOOR_BREACH_RANGE, distanceToDoor, getDoorHealth, getDoorHitDamage } from './doorBreach'
@@ -277,6 +280,8 @@ interface Door extends BuiltDoor {
   /** Resistenza agli zombie che la sfondano (si ripara a ogni ondata). */
   breachHealth: number
   breachWarned: boolean
+  /** Bloccata dall'host per un'ondata (non si compra e gli zombie non ci passano). */
+  locked?: boolean
 }
 
 interface HitscanHit {
@@ -347,6 +352,15 @@ export class Game implements TouchTarget {
   private readonly generatorModel = createGeneratorModel()
   private readonly beacon = createBeacon()
   private readonly supplyCrate = createSupplyCrate()
+  /** Sinergie attive nella run. */
+  private readonly activeSynergies = new Set<SynergyId>()
+  /** La cassa misteriosa di quest'ondata è maledetta (decisa per ogni giocatore). */
+  private cursedBox = false
+  private cursedWave = -1
+  /** Nube tossica dell'ondata (null se non c'è) e la sua mesh. */
+  private toxicCloud: { x: number; z: number } | null = null
+  private toxicTick = 0
+  private readonly toxicCloudMesh = createToxicCloud()
   /** Ricompensa della cassa della pausa in corso (null = nessuna cassa). */
   private supplyReward: SupplyReward | null = null
   private readonly pickups: Pickup[] = []
@@ -610,7 +624,10 @@ export class Game implements TouchTarget {
         if (!enemy || enemy.health <= 0) return
         const explosive = source === 'grenade' || source === 'claymore' || source === 'molotov' ? 1 + (1 - this.stats.demolition) * 1.25 : 1
         this.dealDamage(enemy, this.scaleDamage(enemy, amount * (this.stats.damage / 20) * explosive * this.executionBonus(enemy)))
-        if (source === 'grenade' || source === 'claymore') this.recordHit(enemy, 'explosion', null, null)
+        if (source === 'grenade' || source === 'claymore') {
+          this.recordHit(enemy, 'explosion', null, null)
+          this.igniteFromExplosion(enemy)
+        }
         enemy.hitFlash = 0.1
         enemy.flinch = Math.min(1, enemy.flinch + (source === 'molotov' ? 0.15 : 0.6))
         if (source === 'molotov') enemy.burnTimer = Math.max(enemy.burnTimer, 0.6)
@@ -722,6 +739,16 @@ export class Game implements TouchTarget {
       station.weapon = weaponId
       station.cost = getPoweredCost(getFieldWeaponCost(STATION_COSTS[weaponId], tier), this.powered)
       setStationLabel(station.model, 'weapon', `${WEAPONS[weaponId].shortName} ${FIELD_TIERS[tier].name}`, `${CREDIT_SYMBOL} ${station.cost}`)
+    }
+    // A volte la cassa misteriosa è maledetta per tutta l'ondata (non per i compagni co-op:
+    // l'élite evocata esisterebbe solo da loro).
+    if (this.cursedWave !== wave) {
+      this.cursedWave = wave
+      this.cursedBox = this.coopRole !== 'client' && isBoxCursed(wave)
+    }
+    for (const station of this.stations) {
+      if (station.definition.kind !== 'box') continue
+      setStationLabel(station.model, 'box', this.cursedBox ? 'CASSA MALEDETTA' : 'CASSA MISTERIOSA', `${CREDIT_SYMBOL} ${getPoweredCost(station.definition.cost, this.powered)}`)
     }
   }
 
@@ -904,12 +931,16 @@ export class Game implements TouchTarget {
   chooseUpgrade(upgradeId: string): void {
     if (!this.isRunActive() || !this.currentUpgradeIds.includes(upgradeId)) return
     const previousMaxHealth = this.stats.maxHealth
+    for (const synergy of getNewSynergies(this.chosenUpgrades.keys(), upgradeId)) {
+      this.activeSynergies.add(synergy)
+      this.events.onNotice?.(`SINERGIA SCOPERTA // ${SYNERGIES[synergy].name}`, SYNERGIES[synergy].description, SYNERGIES[synergy].color)
+    }
     this.stats = applyUpgrade(this.stats, upgradeId)
     if (upgradeId === 'double-charge' && this.mobility) this.mobility = { ...this.mobility, charges: this.mobility.charges + 1 }
     this.weapons.reloadMultiplier = this.stats.reloadTime
     this.shield = this.stats.energyShield
     this.chosenUpgrades.set(upgradeId, (this.chosenUpgrades.get(upgradeId) ?? 0) + 1)
-    this.health = Math.min(this.stats.maxHealth, this.health + this.stats.maxHealth - previousMaxHealth)
+    this.health = Math.max(1, Math.min(this.stats.maxHealth, this.health + this.stats.maxHealth - previousMaxHealth))
     this.currentUpgradeIds = []
     this.pendingUpgrades = Math.max(0, this.pendingUpgrades - 1)
     this.audio.play('upgrade')
@@ -1024,6 +1055,7 @@ export class Game implements TouchTarget {
     this.minibossSpawned = false
     this.supplyCrate.visible = false
     this.supplyReward = null
+    if (this.coopRole !== 'client') this.startWaveChanges()
     for (const door of this.doors) {
       if (door.open) continue
       door.breachHealth = getDoorHealth(this.wave)
@@ -1066,6 +1098,9 @@ export class Game implements TouchTarget {
     this.beacon.visible = true
     const crateVisible = this.supplyCrate.visible
     this.supplyCrate.visible = true
+    const cloudVisible = this.toxicCloudMesh.visible
+    this.toxicCloudMesh.visible = true
+    this.toxicCloudMesh.position.copy(this.camera.position).addScaledVector(forward, 14).setY(0)
     this.supplyCrate.position.copy(this.camera.position).addScaledVector(forward, 7).setY(0)
     this.beacon.position.copy(this.camera.position).addScaledVector(forward, 8).setY(0)
     this.renderer.compile(this.scene, this.camera)
@@ -1078,6 +1113,7 @@ export class Game implements TouchTarget {
     restoreGore()
     this.beacon.visible = beaconVisible
     this.supplyCrate.visible = crateVisible
+    this.toxicCloudMesh.visible = cloudVisible
     this.beacon.position.set(this.map.extraction.x, 0, this.map.extraction.z)
     for (const model of created) {
       this.scene.remove(model.group)
@@ -1123,6 +1159,7 @@ export class Game implements TouchTarget {
     if (this.waveActive) {
       this.waveActive = false
       this.endWaveEvent()
+      this.endWaveChanges()
       if (this.wave >= FINAL_WAVE) {
         this.beginEvacuation()
         return
@@ -1174,7 +1211,7 @@ export class Game implements TouchTarget {
       ...baseStats,
       health: baseStats.health * scaling.health * mods.health * (isGolden ? GOLDEN_HEALTH_MULTIPLIER : 1),
       damage: baseStats.damage * scaling.damage * mods.damage * (isGolden ? 0.5 : 1),
-      speed: baseStats.speed * mods.speed * (isGolden ? GOLDEN_SPEED_MULTIPLIER : 1),
+      speed: baseStats.speed * mods.speed * this.stats.zombieSpeed * (isGolden ? GOLDEN_SPEED_MULTIPLIER : 1),
       radius: baseStats.radius * eventScale,
       score: baseStats.score * (isGolden ? 10 : 1),
     }
@@ -1287,7 +1324,7 @@ export class Game implements TouchTarget {
     this.adrenalineTimer = Math.max(0, this.adrenalineTimer - delta)
     this.shieldDelay = Math.max(0, this.shieldDelay - delta)
     if (this.shieldDelay <= 0 && this.shield < this.stats.energyShield) this.shield = Math.min(this.stats.energyShield, this.shield + 15 * delta)
-    if (this.waveMods.passiveRegen) this.health += getPassiveRegen(this.health, this.stats.maxHealth, this.sinceDamage, delta)
+    if (this.waveMods.passiveRegen && !this.stats.regenBlocked) this.health += getPassiveRegen(this.health, this.stats.maxHealth, this.sinceDamage, delta)
     const warning = getLowHealthWarning(this.health, this.stats.maxHealth)
     if (warning.intensity > 0) {
       this.heartbeatTimer -= delta
@@ -1640,6 +1677,7 @@ export class Game implements TouchTarget {
       const falloff = 1 - 0.5 * Math.min(1, distance / radius)
       this.dealDamage(enemy, this.scaleDamage(enemy, projectile.damage * falloff * explosive * this.executionBonus(enemy)))
       this.recordHit(enemy, 'explosion', null, null, point)
+      this.igniteFromExplosion(enemy)
       const push = enemy.body.position.clone().sub(point).setY(0)
       if (push.lengthSq() > 0.0001) enemy.knockback.addScaledVector(push.normalize(), isBoss(enemy.kind) ? 1 : 6)
       enemy.hitFlash = 0.12
@@ -1790,7 +1828,7 @@ export class Game implements TouchTarget {
     let nearest: Door | null = null
     let nearestDistance = 2.6
     for (const door of this.doors) {
-      if (door.open) continue
+      if (door.open || door.locked) continue
       const distance = this.player.distanceTo(door.group.position)
       if (distance < nearestDistance) {
         nearest = door
@@ -1828,7 +1866,7 @@ export class Game implements TouchTarget {
     const { definition } = interaction.station
     if (definition.kind === 'medkit') return { label: 'KIT MEDICO // CURA COMPLETA', cost: getPoweredCost(definition.cost, this.powered) }
     if (definition.kind === 'ammo') return { label: 'RIFORNIMENTO MUNIZIONI', cost: getPoweredCost(definition.cost, this.powered) }
-    if (definition.kind === 'box') return { label: 'CASSA MISTERIOSA // ARMA A SORPRESA', cost: getPoweredCost(definition.cost, this.powered) }
+    if (definition.kind === 'box') return { label: this.cursedBox ? 'CASSA MALEDETTA // LEGGENDARIA GARANTITA, MA ARRIVA UN’ÉLITE' : 'CASSA MISTERIOSA // ARMA A SORPRESA', cost: getPoweredCost(definition.cost, this.powered) }
     const station = interaction.station
     const weaponId = station.weapon!
     const name = `${WEAPONS[weaponId].shortName} ${FIELD_TIERS[getFieldTier(Math.max(1, this.wave))].name}`
@@ -1873,7 +1911,9 @@ export class Game implements TouchTarget {
       } else if (definition.kind === 'box') {
         // Arma a caso: le comuni escono spesso, le leggendarie di rado e con un grado MK in più.
         const owned = (['primary', 'secondary'] as const).map((slot) => this.weapons.currentOf(slot)?.id).filter((id): id is WeaponId => id !== undefined)
-        const { weapon, rarity } = rollMysteryBox(Math.random, owned)
+        const cursed = this.cursedBox
+        const { weapon, rarity } = rollMysteryBox(Math.random, owned, cursed ? 'legendary' : undefined)
+        if (cursed) this.summonCursedElite()
         const tier = Math.min(3, getFieldTier(Math.max(1, this.wave)) + RARITIES[rarity].tierBonus) as FieldTier
         const purchasable = weapon as PurchasableWeapon
         this.weapons.replace(resolveWeapon(WEAPONS[weapon], FIELD_ATTACHMENTS[purchasable], { fieldTier: tier, level: this.loadout.weaponLevels[weapon] }))
@@ -1942,6 +1982,12 @@ export class Game implements TouchTarget {
 
   private updateDoors(delta: number): void {
     for (const door of this.doors) {
+      // Una porta bloccata si richiude; sbloccata torna su.
+      if (!door.open && door.progress > 0) {
+        door.progress = Math.max(0, door.progress - delta * 1.8)
+        door.group.position.y = door.definition.height * door.progress
+        continue
+      }
       if (!door.open || door.progress >= 1) continue
       door.progress = Math.min(1, door.progress + delta * 1.4)
       door.group.position.y = door.definition.height * door.progress
@@ -2576,7 +2622,7 @@ export class Game implements TouchTarget {
 
   /** Esecuzione riuscita: cura, crediti extra, suono dedicato e scossone. */
   private executeBonus(): void {
-    this.health = Math.min(this.stats.maxHealth, this.health + this.stats.maxHealth * EXECUTION_HEAL_SHARE)
+    this.health = Math.min(this.stats.maxHealth, this.health + this.stats.maxHealth * (this.activeSynergies.has('blood-oath') ? BLOOD_OATH_HEAL_SHARE : EXECUTION_HEAL_SHARE))
     this.shards += EXECUTION_CREDITS
     this.audio.play('execution')
     this.cameraShake = Math.max(this.cameraShake, 0.2)
@@ -2623,7 +2669,12 @@ export class Game implements TouchTarget {
       this.feats.headshotStreak = Math.max(this.feats.headshotStreak, this.headshotRun)
     } else if (variant === 'kill') this.headshotRun = 0
     // Crediti per comprare in partita e esperienza per l'arma impugnata.
-    this.shards += Math.round(getKillCredits(kind, elite) * this.lootMultiplier * this.waveMods.credits * getComboMultiplier(this.combo.count))
+    this.shards += Math.round(getKillCredits(kind, elite) * this.lootMultiplier * this.waveMods.credits * getComboMultiplier(this.combo.count) * this.stats.creditMultiplier)
+    // Scudo cinetico: ogni uccisione ricarica lo scudo.
+    if (this.activeSynergies.has('kinetic-shield') && this.stats.energyShield > 0) {
+      this.shield = this.stats.energyShield
+      this.shieldDelay = 0
+    }
     if (bonusCredits > 0) {
       this.shards += bonusCredits
       this.events.onNotice?.('ZOMBIE DORATO ABBATTUTO', `+${bonusCredits} crediti e bonus a terra.`, WAVE_EVENTS['golden-zombie'].color)
@@ -3023,6 +3074,99 @@ export class Game implements TouchTarget {
     this.supplyCrate.visible = false
     this.supplyReward = null
     if (!this.supplyCrate.parent) this.scene.add(this.supplyCrate)
+    this.activeSynergies.clear()
+    this.cursedBox = false
+    this.cursedWave = -1
+    this.toxicCloud = null
+    this.toxicCloudMesh.visible = false
+    if (!this.toxicCloudMesh.parent) this.scene.add(this.toxicCloudMesh)
+    for (const door of this.doors) door.locked = false
+  }
+
+  // --- Mappe che cambiano, sinergie, cassa maledetta (piano gameplay G2) ---------------------
+  private igniteFromExplosion(enemy: Enemy): void {
+    if (!this.activeSynergies.has('wildfire') || enemy.health <= 0) return
+    enemy.burnTimer = Math.max(enemy.burnTimer, 3)
+    enemy.burnDamagePerSecond = Math.max(enemy.burnDamagePerSecond, this.stats.damage * 0.6)
+  }
+
+  /** Cassa maledetta: un'élite potenziata compare alle spalle di chi l'ha aperta. */
+  private summonCursedElite(): void {
+    const kinds = getSpawnPool(Math.max(3, this.wave)).filter((kind) => kind !== 'bloater')
+    const kind = kinds[Math.floor(Math.random() * kinds.length)] ?? 'walker'
+    const behind = new THREE.Vector3(Math.sin(this.yaw), 0, Math.cos(this.yaw)).multiplyScalar(5)
+    const point = this.player.clone().add(behind)
+    resolveBodyCollisions(point, 0.8, 1.8, this.obstacles)
+    const enemy = this.spawnEnemy(kind)
+    enemy.body.position.copy(point)
+    enemy.elite = true
+    enemy.health *= CURSED_BOX.eliteHealth
+    enemy.maxHealth = enemy.health
+    enemy.model.group.scale.multiplyScalar(1.15)
+    this.events.onNotice?.('LA CASSA ERA MALEDETTA', 'Un’élite è comparsa alle tue spalle.', 0xff4f6e)
+    this.audio.play('groanBig')
+  }
+
+  /** Inizio ondata (host o solitaria): nube tossica e porte bloccate. */
+  private startWaveChanges(): void {
+    if (hasToxicCloud(this.wave)) {
+      const angle = Math.random() * Math.PI * 2
+      const radius = this.map.arenaLimit - 4
+      this.toxicCloud = { x: Math.cos(angle) * radius, z: Math.sin(angle) * radius }
+      this.toxicCloudMesh.visible = true
+      this.events.onNotice?.('NUBE TOSSICA', 'Una nube velenosa avanza lenta verso di te: tieniti in movimento.', 0x9dff4a)
+    }
+    if (!shouldLockDoor(this.wave, FINAL_WAVE)) return
+    const players = [this.player, ...this.teammates.all.filter((mate) => mate.status !== 'dead').map((mate) => mate.feet)]
+    const candidates = this.doors.filter((door) => door.open && !door.locked && players.every((feet) => feet.distanceTo(door.group.position) > DOOR_LOCK.safeDistance))
+    const door = candidates[Math.floor(Math.random() * candidates.length)]
+    if (!door) return
+    this.setDoorLocked(door, true)
+    if (this.coopRole === 'host') this.coop?.broadcast({ t: 'door-lock', id: door.definition.id, locked: true })
+  }
+
+  /** Fine ondata: la nube si dissolve e le porte bloccate si riaprono. */
+  private endWaveChanges(): void {
+    this.toxicCloud = null
+    this.toxicCloudMesh.visible = false
+    for (const door of this.doors) {
+      if (!door.locked) continue
+      this.setDoorLocked(door, false)
+      if (this.coopRole === 'host') this.coop?.broadcast({ t: 'door-lock', id: door.definition.id, locked: false })
+    }
+  }
+
+  private setDoorLocked(door: Door, locked: boolean): void {
+    door.locked = locked
+    if (locked) {
+      door.open = false
+      if (!this.obstacles.includes(door.obstacle)) this.obstacles.push(door.obstacle)
+      this.events.onNotice?.('PORTA BLOCCATA', 'Una porta si è richiusa: si riaprirà a fine ondata.', 0xffb657)
+    } else {
+      this.openDoor(door)
+    }
+  }
+
+  private updateToxicCloud(delta: number): void {
+    const cloud = this.toxicCloud
+    if (!cloud) return
+    if (this.coopRole !== 'client') {
+      // Avanza verso il giocatore in piedi più vicino.
+      const targets = [...(this.coopStatus === 'alive' ? [this.player] : []), ...this.teammates.all.filter((mate) => mate.status === 'alive').map((mate) => mate.feet)]
+      const target = targets.sort((a, b) => Math.hypot(a.x - cloud.x, a.z - cloud.z) - Math.hypot(b.x - cloud.x, b.z - cloud.z))[0]
+      if (target) Object.assign(cloud, stepToxicCloud(cloud.x, cloud.z, target.x, target.z, delta))
+    }
+    this.toxicCloudMesh.position.set(cloud.x, 0, cloud.z)
+    this.toxicCloudMesh.rotation.y += delta * 0.2
+    if (this.coopStatus !== 'alive' || !isInsideToxicCloud(this.player.x, this.player.z, cloud.x, cloud.z) || this.player.y > 3) {
+      this.toxicTick = 0
+      return
+    }
+    this.toxicTick -= delta
+    if (this.toxicTick <= 0) {
+      this.toxicTick = 0.5
+      this.damagePlayer(this.stats.maxHealth * TOXIC_CLOUD.damageShare * 0.5)
+    }
   }
 
   /** Cassa in una zona aperta a media distanza, circondata da pozze acide. */
@@ -3095,6 +3239,7 @@ export class Game implements TouchTarget {
 
   private updateObjectives(delta: number): void {
     this.updateSupplyCrate(delta)
+    this.updateToxicCloud(delta)
     const generator = this.map.generator
     if (generator) {
       setGeneratorLook(this.generatorModel, this.generator.state, this.elapsed)
@@ -3135,7 +3280,11 @@ export class Game implements TouchTarget {
   }
 
   /** Client co-op: stato degli obiettivi deciso dall'host. */
-  private applyRemoteObjectives([state, progress, health, evacuation]: [number, number, number, number]): void {
+  private applyRemoteObjectives(values: number[]): void {
+    const [state = 0, progress = 0, health = 1, evacuation = -1, cloudX, cloudZ] = values
+    // Nube tossica: la posizione la decide l'host, il danno lo calcola ognuno per sé.
+    this.toxicCloud = cloudX !== undefined && cloudZ !== undefined ? { x: cloudX, z: cloudZ } : null
+    this.toxicCloudMesh.visible = this.toxicCloud !== null
     const next: GeneratorState = state === 2 ? 'on' : state === 1 ? 'starting' : 'off'
     const previous = this.generator.state
     this.generator = { ...this.generator, state: next, progress, health: health * GENERATOR.health }
@@ -3549,7 +3698,7 @@ export class Game implements TouchTarget {
       ...this.teammates.all.map((mate) => ({ id: mate.id, x: round2(mate.target.x), y: round2(mate.target.y), z: round2(mate.target.z), yaw: round2(mate.targetYaw), pitch: 0, crouch: mate.crouch, health: Math.round(mate.health), status: mate.status, kills: this.teammateKills.get(mate.id) ?? 0 })),
     ]
     const generatorState = this.generator.state === 'off' ? 0 : this.generator.state === 'starting' ? 1 : 2
-    this.coop?.broadcast({ t: 'world', wave: this.wave, waveBreak: round2(this.waveBreak), remaining: this.enemies.length + this.spawnQueue, enemies, players, obj: [generatorState, round2(this.generator.progress), round2(this.generator.health / GENERATOR.health), round2(this.evacuation)] })
+    this.coop?.broadcast({ t: 'world', wave: this.wave, waveBreak: round2(this.waveBreak), remaining: this.enemies.length + this.spawnQueue, enemies, players, obj: [generatorState, round2(this.generator.progress), round2(this.generator.health / GENERATOR.health), round2(this.evacuation), ...(this.toxicCloud ? [round2(this.toxicCloud.x), round2(this.toxicCloud.z)] : [])] })
   }
 
   private applyRevive(target: string, by: string): void {
@@ -3705,6 +3854,11 @@ export class Game implements TouchTarget {
       case 'door': {
         const door = this.doors.find((candidate) => candidate.definition.id === message.id)
         if (door) this.openDoor(door)
+        return
+      }
+      case 'door-lock': {
+        const door = this.doors.find((candidate) => candidate.definition.id === message.id)
+        if (door) this.setDoorLocked(door, message.locked)
         return
       }
       case 'bounty':
@@ -4088,6 +4242,7 @@ export class Game implements TouchTarget {
       const damage = getSlamDamage(distance * (SLAM_RADIUS / radius), bonus) * (this.stats.damage / 20)
       this.dealDamage(enemy, this.scaleDamage(enemy, damage * this.executionBonus(enemy)))
       this.recordHit(enemy, 'explosion', null, null, origin)
+      this.igniteFromExplosion(enemy)
       const push = enemy.body.position.clone().sub(origin).setY(0)
       if (push.lengthSq() > 0.0001) enemy.knockback.addScaledVector(push.normalize(), isBoss(enemy.kind) ? 2 : 9)
       enemy.hitFlash = 0.12

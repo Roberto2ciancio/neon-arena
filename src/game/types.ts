@@ -44,6 +44,12 @@ export interface PlayerStats {
   explosiveLanding: number
   /** Secondi di corsa sui muri senza limite dopo un'uccisione multipla. */
   wallRunFrenzy: number
+  /** Compromessi: moltiplicatore dei crediti, velocità degli zombie, rigenerazione spenta. */
+  creditMultiplier: number
+  zombieSpeed: number
+  regenBlocked: boolean
+  /** Già preso un compromesso di questo tipo (ognuno una volta sola). */
+  tradeoffs: string[]
 }
 
 export interface MetaBonuses {
