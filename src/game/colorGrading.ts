@@ -42,16 +42,18 @@ export interface PostEffects {
   samples: number
   ambientOcclusion: boolean
   bloom: boolean
+  /** Profondità di campo in mira (serve la profondità della scena: solo alto). */
+  depthOfField: boolean
 }
 
 /** Effetti per preset: il basso resta identico a prima, il medio aggiunge solo il colore. */
 export function getPostEffects(quality: GraphicsQuality): PostEffects {
   switch (quality) {
-    case 'low': return { enabled: false, grade: false, grain: 0, samples: 0, ambientOcclusion: false, bloom: false }
+    case 'low': return { enabled: false, grade: false, grain: 0, samples: 0, ambientOcclusion: false, bloom: false, depthOfField: false }
     // Il medio prima disegnava diretto con l'MSAA del canvas: nel buffer di composizione lo si mantiene.
-    case 'medium': return { enabled: true, grade: true, grain: 0, samples: 4, ambientOcclusion: false, bloom: false }
+    case 'medium': return { enabled: true, grade: true, grain: 0, samples: 4, ambientOcclusion: false, bloom: false, depthOfField: false }
     // L'alto componeva già senza antialias (SSAO e bloom): stessi passaggi di prima, nessun MSAA in più.
-    case 'high': return { enabled: true, grade: true, grain: 0.03, samples: 0, ambientOcclusion: true, bloom: true }
+    case 'high': return { enabled: true, grade: true, grain: 0.03, samples: 0, ambientOcclusion: true, bloom: true, depthOfField: true }
   }
 }
 

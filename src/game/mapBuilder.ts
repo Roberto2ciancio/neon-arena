@@ -1,7 +1,7 @@
 import { DEFAULT_THEME } from './maps'
 import type { MapTheme } from './maps'
 import * as THREE from 'three'
-import { addLightShafts } from './atmosphere'
+import { addLightShafts, createEmbers, EMBER_HEIGHT } from './atmosphere'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import type { CollisionObstacle } from './collision'
@@ -24,6 +24,8 @@ export interface BuiltMap {
   ambient: THREE.Points
   /** Pioggia, polvere o spore che cadono o fluttuano (null senza meteo). */
   weather: THREE.Points | null
+  /** Braci che fluttuano (null sulle mappe con pioggia o spore). */
+  embers: THREE.Points | null
   theme: MapTheme
 }
 
@@ -372,6 +374,11 @@ export function buildMap(map: MapDefinition): BuiltMap {
   if (weather) group.add(weather)
 
   addLightShafts(group)
+  const embers = createEmbers(theme.weather, extent)
+  if (embers) {
+    embers.position.y = -EMBER_HEIGHT
+    group.add(embers)
+  }
 
-  return { group, obstacles, doors, ambient, weather, theme }
+  return { group, obstacles, doors, ambient, weather, embers, theme }
 }

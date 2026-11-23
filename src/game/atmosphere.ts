@@ -4,7 +4,9 @@ import * as THREE from 'three'
  * Atmosfera della Fase D senza luci in più: coni di luce finti (piani additivi) sotto le
  * lampade della mappa. Un solo InstancedMesh per mappa (una draw call), nascosto sul basso.
  */
+/** Oggetti d'atmosfera (coni di luce, braci): nascosti sul preset basso. */
 export const LIGHT_SHAFT_TAG = 'lightShafts'
+export const EMBER_HEIGHT = 14
 
 let shaftTexture: THREE.CanvasTexture | null = null
 
@@ -45,6 +47,39 @@ export function getShaftSources(group: THREE.Object3D): ShaftSource[] {
     sources.push({ position, color: object.color.clone(), radius: Math.min(2.4, Math.max(1.1, (object.distance || 10) * 0.13)) })
   })
   return sources
+}
+
+/**
+ * Braci che salgono lente nell'aria sulle mappe asciutte (con pioggia o spore no). Come il
+ * meteo, si muove l'intero sistema di particelle: nessun calcolo per particella.
+ */
+export function createEmbers(weather: string, extent: number): THREE.Points | null {
+  if (weather === 'rain' || weather === 'drizzle' || weather === 'spores') return null
+  const count = 140
+  const positions = new Float32Array(count * 3)
+  let seed = 4242
+  const random = () => {
+    seed = seed * 16807 % 2147483647
+    return (seed - 1) / 2147483646
+  }
+  for (let index = 0; index < count; index += 1) {
+    positions[index * 3] = (random() - 0.5) * extent * 1.6
+    positions[index * 3 + 1] = random() * EMBER_HEIGHT * 2
+    positions[index * 3 + 2] = (random() - 0.5) * extent * 1.6
+  }
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+  const embers = new THREE.Points(geometry, new THREE.PointsMaterial({ color: 0xff9a4a, size: 0.09, transparent: true, opacity: 0.75, blending: THREE.AdditiveBlending, depthWrite: false }))
+  embers.userData[LIGHT_SHAFT_TAG] = true
+  embers.frustumCulled = false
+  return embers
+}
+
+export function animateEmbers(embers: THREE.Points | null, delta: number): void {
+  if (!embers || !embers.visible) return
+  embers.position.y += delta * 0.55
+  if (embers.position.y > 0) embers.position.y -= EMBER_HEIGHT
+  embers.position.x = Math.sin(performance.now() * 0.00025) * 1.2
 }
 
 export function addLightShafts(group: THREE.Group): THREE.InstancedMesh | null {

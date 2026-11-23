@@ -38,7 +38,8 @@ import * as THREE from 'three'
 import { GameAudio } from './audio'
 import { RenderPipeline } from './RenderPipeline'
 import { getHurtAberration } from './colorGrading'
-import { LIGHT_SHAFT_TAG } from './atmosphere'
+import { getGaitPose } from './gait'
+import { animateEmbers, LIGHT_SHAFT_TAG } from './atmosphere'
 import { DecalEffects } from './decals'
 import { getGraphicsSettings } from './graphics'
 import type { GraphicsQuality } from './graphics'
@@ -72,7 +73,7 @@ import type { BuiltDoor } from './mapBuilder'
 import type { AccessibilitySettings } from './accessibility'
 import { FIELD_ATTACHMENTS, MAPS, STATION_13, STATION_COSTS } from './maps'
 import type { MapDefinition, PurchasableWeapon, StationDefinition } from './maps'
-import { createEnemyModel } from './models'
+import { createEnemyModel, getTorsoPitch } from './models'
 import type { EnemyModel } from './models'
 import { applyUpgrade, createBaseStats, FIRST_LEVEL_XP, getNextLevelXp, getUpgradeChoices, UPGRADE_KEYS } from './upgrades'
 import { WEAPONS } from './weapons'
@@ -380,6 +381,8 @@ export class Game implements TouchTarget {
   private highContrast = false
   /** Colpo appena subito (1 → 0 in mezzo secondo): aberrazione cromatica ai bordi. */
   private hurtFlash = 0
+  /** Transizione 0–1 della profondità di campo in mira. */
+  private aimFocus = 0
   /** Modulo di mobilità equipaggiato (null senza modulo). */
   private mobility: MobilityState | null = null
   /** Secondi passati fermi su una superficie che nessuno zombie raggiunge. */
@@ -1313,6 +1316,10 @@ export class Game implements TouchTarget {
 
     const weapon = this.weapons.current
     const aiming = this.aiming && weapon !== null
+    // Profondità di campo in mira (alto): con l'ottica a forte ingrandimento c'è già la sovrimpressione.
+    const focusTarget = aiming && this.weaponDefinition.adsFov > 30 ? 1 : 0
+    this.aimFocus += (focusTarget - this.aimFocus) * Math.min(1, delta * 10)
+    this.pipeline.setFocusBlur(this.aimFocus)
     const adsFov = weapon?.adsFov ?? 52
     const targetFov = aiming ? adsFov : this.controller.sliding ? 84 : this.controller.sprinting ? 80 : 75
     this.camera.fov = THREE.MathUtils.lerp(this.camera.fov, targetFov, 1 - Math.exp(-delta * 12)) + punch * (aiming ? 0.4 : 1.4)
@@ -2205,31 +2212,26 @@ export class Game implements TouchTarget {
       // Sobbalzo all'indietro quando viene colpito.
       enemy.model.group.rotation.x = -enemy.flinch * 0.28
 
-      const strideSpeed = enemy.kind === 'runner' ? 12 : enemy.kind === 'crawler' ? 10 : enemy.kind === 'walker' ? 5 : 4
-      const strideAmount = enemy.kind === 'runner' ? 0.85 : enemy.kind === 'walker' ? 0.5 : 0.32
-      const walk = Math.sin(this.elapsed * strideSpeed + enemy.phase) * strideAmount
-      enemy.model.leftLeg.rotation.x = walk
-      enemy.model.rightLeg.rotation.x = -walk
-      if (enemy.kind === 'walker') {
-        enemy.model.leftArm.rotation.x = -1.05 + walk * 0.18
-        enemy.model.rightArm.rotation.x = -1.05 - walk * 0.18
-        enemy.model.group.rotation.z = Math.sin(this.elapsed * 2.5 + enemy.phase) * 0.06
-      } else if (isBoss(enemy.kind) && enemy.slamWindup > 0) {
+      // Camminata del tipo (zoppia, falcata, passo pesante, dondolio); da fermi quasi immobili.
+      const pose = getGaitPose(enemy.kind, this.elapsed, enemy.phase, movement.lengthSq() > 0 ? 1 : 0.15)
+      enemy.model.leftLeg.rotation.x = pose.leftLeg
+      enemy.model.rightLeg.rotation.x = pose.rightLeg
+      enemy.model.leftArm.rotation.x = pose.leftArm
+      enemy.model.rightArm.rotation.x = pose.rightArm
+      enemy.model.group.rotation.z = pose.bodyRoll
+      enemy.model.body.rotation.x = getTorsoPitch(enemy.kind) + pose.torsoPitch
+      enemy.model.head.rotation.z = pose.headRoll
+      enemy.model.head.rotation.x = pose.headPitch
+      if (isBoss(enemy.kind) && enemy.slamWindup > 0) {
         // Braccia alzate: colpo a terra (Bruto) o macigno pronto al lancio (Tiranno).
         enemy.model.leftArm.rotation.x = -2.9
         enemy.model.rightArm.rotation.x = -2.9
       } else if (isBoss(enemy.kind) && charging) {
         enemy.model.leftArm.rotation.x = -1.3
         enemy.model.rightArm.rotation.x = -1.3
-      } else if (enemy.kind === 'crawler') {
-        enemy.model.leftArm.rotation.x = -1.25 + walk
-        enemy.model.rightArm.rotation.x = -1.25 - walk
       } else if (enemy.kind === 'screamer' && enemy.specialCooldown > 6.4) {
         enemy.model.leftArm.rotation.x = -2.1
         enemy.model.rightArm.rotation.x = -2.1
-      } else {
-        enemy.model.leftArm.rotation.x = -walk * 0.75
-        enemy.model.rightArm.rotation.x = walk * 0.75
       }
 
       if (enemy.attackAnim > 0) {
@@ -3696,6 +3698,7 @@ export class Game implements TouchTarget {
     this.elapsed += delta
     this.mapContent.ambient.rotation.y += delta * 0.015
     animateWeather(this.mapContent.weather, delta)
+    animateEmbers(this.mapContent.embers, delta)
     this.updatePlayer(delta)
     if (!this.isRunActive()) return
     if (this.coopRole === 'client') {

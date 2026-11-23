@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import { createFabricTexture, createOrganicTexture } from './textures'
 import type { EnemyKind } from './types'
 
@@ -117,16 +118,105 @@ export interface SoldierOutfit {
   accent: number
 }
 
-const organicTextures = new Map<number, THREE.CanvasTexture>()
+const organicTextures = new Map<string, THREE.CanvasTexture>()
+const fabricTextures = new Map<string, THREE.CanvasTexture>()
 
-/** Texture della pelle condivisa fra i modelli dello stesso colore (creata una volta sola). */
-function getOrganicTexture(color: number): THREE.CanvasTexture {
-  let texture = organicTextures.get(color)
+/** Texture della pelle condivisa per colore e variante (al massimo 3 per colore). */
+function getOrganicTexture(color: number, variant = 0): THREE.CanvasTexture {
+  const key = `${color}:${variant}`
+  let texture = organicTextures.get(key)
   if (!texture) {
-    texture = createOrganicTexture(color)
-    organicTextures.set(color, texture)
+    texture = createOrganicTexture(color, variant)
+    organicTextures.set(key, texture)
   }
   return texture
+}
+
+/** Tessuto condiviso per colore e variante: prima ogni modello ne creava uno nuovo. */
+function getFabricTexture(color: number, variant = 0): THREE.CanvasTexture {
+  const key = `${color}:${variant}`
+  let texture = fabricTextures.get(key)
+  if (!texture) {
+    texture = createFabricTexture(color, variant)
+    fabricTextures.set(key, texture)
+  }
+  return texture
+}
+
+/** Inclinazione di base del busto per tipo (la camminata ci aggiunge il movimento del passo). */
+export function getTorsoPitch(kind: EnemyKind): number {
+  return kind === 'runner' ? -0.28 : kind === 'leaper' ? -0.5 : kind === 'crawler' ? 1.05 : 0
+}
+
+/** Geometria con posizione, normali e uv, senza indice: così si può unire con le altre. */
+function prepareGeometry(geometry: THREE.BufferGeometry, matrix: THREE.Matrix4): THREE.BufferGeometry {
+  const prepared = (geometry.index ? geometry.toNonIndexed() : geometry.clone()).applyMatrix4(matrix)
+  for (const name of Object.keys(prepared.attributes)) {
+    if (name !== 'position' && name !== 'normal' && name !== 'uv') prepared.deleteAttribute(name)
+  }
+  prepared.clearGroups()
+  return prepared
+}
+
+function sameKey(mesh: THREE.Mesh): THREE.Material | null {
+  return Array.isArray(mesh.material) ? null : mesh.material
+}
+
+/**
+ * Unisce i figli fissi di ogni parte animata: quelli con lo stesso materiale della parte
+ * entrano nella sua geometria, gli altri si raggruppano per materiale. Lo stesso per i figli
+ * fissi del gruppo (bacino, collo, piastre...). Il punto debole resta separato: cambia luce
+ * e serve per i colpi.
+ */
+export function mergeStaticParts(group: THREE.Group, parts: THREE.Mesh[], keep: THREE.Object3D, details: THREE.Object3D[]): void {
+  const protectedObjects = new Set<THREE.Object3D>([...parts, keep])
+  const replaceDetails = (removed: THREE.Object3D[], added: THREE.Object3D | null) => {
+    let wasDetail = false
+    for (const object of removed) {
+      const index = details.indexOf(object)
+      if (index >= 0) {
+        details.splice(index, 1)
+        wasDetail = true
+      }
+    }
+    if (wasDetail && added) details.push(added)
+  }
+  const mergeChildren = (parent: THREE.Object3D, ownMesh: THREE.Mesh | null) => {
+    const leaves = parent.children.filter((child): child is THREE.Mesh => child instanceof THREE.Mesh && child.children.length === 0 && !protectedObjects.has(child) && sameKey(child) !== null)
+    const byMaterial = new Map<THREE.Material, THREE.Mesh[]>()
+    for (const leaf of leaves) {
+      const material = sameKey(leaf)!
+      byMaterial.set(material, [...(byMaterial.get(material) ?? []), leaf])
+    }
+    for (const [material, meshes] of byMaterial) {
+      if (ownMesh && material === ownMesh.material) {
+        // Nella geometria della parte stessa (es. mascella nella testa, mano nel braccio).
+        const merged = mergeGeometries([prepareGeometry(ownMesh.geometry, new THREE.Matrix4()), ...meshes.map((mesh) => {
+          mesh.updateMatrix()
+          return prepareGeometry(mesh.geometry, mesh.matrix)
+        })])
+        if (!merged) continue
+        ownMesh.geometry = merged
+        for (const mesh of meshes) parent.remove(mesh)
+        replaceDetails(meshes, null)
+        continue
+      }
+      if (meshes.length < 2) continue
+      const merged = mergeGeometries(meshes.map((mesh) => {
+        mesh.updateMatrix()
+        return prepareGeometry(mesh.geometry, mesh.matrix)
+      }))
+      if (!merged) continue
+      const combined = new THREE.Mesh(merged, material)
+      combined.castShadow = meshes.some((mesh) => mesh.castShadow)
+      combined.receiveShadow = meshes.some((mesh) => mesh.receiveShadow)
+      for (const mesh of meshes) parent.remove(mesh)
+      parent.add(combined)
+      replaceDetails(meshes, combined)
+    }
+  }
+  for (const part of parts) mergeChildren(part, part)
+  mergeChildren(group, null)
 }
 
 export function createEnemyModel(kind: EnemyKind, color: number, appearance: 'zombie' | 'soldier' = 'zombie', outfit?: SoldierOutfit): EnemyModel {
@@ -139,9 +229,11 @@ export function createEnemyModel(kind: EnemyKind, color: number, appearance: 'zo
   const skinColor = new THREE.Color(soldier ? 0x8b6b57 : 0x727768).lerp(new THREE.Color(color), soldier ? 0 : kind === 'stalker' ? 0.75 : 0.28)
   // Ogni zombie ha un incarnato leggermente diverso (stessa texture, solo il colore del materiale).
   const tint = soldier ? new THREE.Color(0xffffff) : new THREE.Color().setHSL(0.08 + Math.random() * 0.12, 0.12 + Math.random() * 0.12, 0.82 + Math.random() * 0.16)
-  const skin = new THREE.MeshStandardMaterial({ color: tint, map: getOrganicTexture(skinColor.getHex()), roughness: 0.72 + Math.random() * 0.16 })
+  // Gli zombie hanno ferite e vestiti strappati in tre varianti; i soldati restano puliti.
+  const wear = soldier ? 0 : Math.floor(Math.random() * 3)
+  const skin = new THREE.MeshStandardMaterial({ color: tint, map: getOrganicTexture(skinColor.getHex(), wear), roughness: 0.72 + Math.random() * 0.16 })
   const clothesColor = soldier ? outfit?.suit ?? 0x1d252b : kind === 'runner' ? 0x39262a : 0x252a2c
-  const clothes = new THREE.MeshStandardMaterial({ color: 0xffffff, map: createFabricTexture(clothesColor), roughness: 0.96, side: THREE.DoubleSide })
+  const clothes = new THREE.MeshStandardMaterial({ color: 0xffffff, map: getFabricTexture(clothesColor, wear), roughness: 0.96, side: THREE.DoubleSide })
   const armor = new THREE.MeshStandardMaterial({ color: outfit?.accent ?? 0x4c5050, metalness: outfit ? 0.45 : 0.72, roughness: 0.48 })
   const glow = new THREE.MeshStandardMaterial({ color: 0xffd28a, emissive: color, emissiveIntensity: 1.5, roughness: 0.4 })
   const woundMaterial = new THREE.MeshStandardMaterial({ color: 0x47151a, roughness: 0.72 })
@@ -149,10 +241,8 @@ export function createEnemyModel(kind: EnemyKind, color: number, appearance: 'zo
 
   const body = new THREE.Mesh(new RoundedBoxGeometry(width, 0.72 * scale, 0.4 * scale, 4, 0.08 * scale), clothes)
   body.position.y = 1.12 * scale
-  if (kind === 'runner') body.rotation.x = -0.28
-  if (kind === 'leaper') body.rotation.x = -0.5
+  body.rotation.x = getTorsoPitch(kind)
   if (kind === 'crawler') {
-    body.rotation.x = 1.05
     body.position.y = 0.58
     body.position.z = 0.15
   }
@@ -389,6 +479,9 @@ export function createEnemyModel(kind: EnemyKind, color: number, appearance: 'zo
     weakPoint.visible = false
     group.add(weakPoint)
   }
+
+  // Zombie: parti fisse di ogni arto unite per materiale (molte meno draw call, stesse animazioni).
+  if (!soldier) mergeStaticParts(group, [body, head, leftArm, rightArm, leftLeg, rightLeg], weakPoint, details)
 
   const floorRing = new THREE.Mesh(
     new THREE.RingGeometry(width * 0.55, width * 0.68, 32),

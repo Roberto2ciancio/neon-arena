@@ -83,7 +83,7 @@ Criteri di chiusura: regole pure dei moduli con test (ricariche, cariche, durata
 
 ## Fase D — Grafica "realismo stilizzato"
 
-> **Stato (2026-11-23): in parte fatta** — correzione colore per mappa, passaggio finale unico, ambiente riflesso per mappa, coni di luce, asfalto bagnato, fumo persistente, incarnato variato (vedi il diario). Restano: nebbia con altezza, profondità di campo in mira, ferite e vestiti, modelli degli zombie arrotondati, misura su telefono reale.
+> **Stato (2026-11-23): fatta** — correzione colore per mappa, passaggio finale unico, ambiente riflesso per mappa, nebbia con altezza, coni di luce, braci, asfalto bagnato, fumo persistente, profondità di campo in mira (alto), sporco/ruggine/crepe, ferite e vestiti strappati, zombie con parti unite (−43% draw call sull'alto) e camminate per tipo (vedi il diario). Resta solo la misura su telefono reale, da fare dall'utente.
 
 Una precisazione onesta: con modelli fatti di forme semplici, "realistico" ha un limite. Questa fase rende tutto molto più credibile senza scaricare asset: luce, materiali, atmosfera e post-processing. Il salto da "gioco fatto di blocchi" a "gioco realistico" arriva solo con la Fase E.
 

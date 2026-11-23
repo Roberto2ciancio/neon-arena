@@ -52,6 +52,44 @@ function createAlbedo(base: string, line: string): HTMLCanvasElement {
     context.lineTo(x + random() * 45, y + random() * 4)
     context.stroke()
   }
+  // Sporco: chiazze scure sfumate, più dense lungo le giunture.
+  for (let index = 0; index < 14; index += 1) {
+    const x = random() * 256
+    const y = index % 2 === 0 ? 128 + (random() - 0.5) * 40 : random() * 256
+    const radius = 14 + random() * 34
+    const grime = context.createRadialGradient(x, y, 0, x, y, radius)
+    grime.addColorStop(0, `rgba(18,14,10,${0.18 + random() * 0.16})`)
+    grime.addColorStop(1, 'rgba(18,14,10,0)')
+    context.fillStyle = grime
+    context.fillRect(x - radius, y - radius, radius * 2, radius * 2)
+  }
+  // Ruggine: colature dalle giunture e dal bordo superiore.
+  for (let index = 0; index < 10; index += 1) {
+    const x = random() * 256
+    const start = random() > 0.5 ? 4 : 130
+    const length = 18 + random() * 60
+    const rust = context.createLinearGradient(x, start, x, start + length)
+    rust.addColorStop(0, `rgba(122,58,22,${0.35 + random() * 0.25})`)
+    rust.addColorStop(1, 'rgba(122,58,22,0)')
+    context.fillStyle = rust
+    context.fillRect(x, start, 1.5 + random() * 3.5, length)
+  }
+  // Crepe: spezzate scure e sottili (la mappa di rilievo le trasforma in solchi).
+  context.strokeStyle = 'rgba(8,8,10,0.55)'
+  for (let index = 0; index < 6; index += 1) {
+    let x = random() * 256
+    let y = random() * 256
+    context.lineWidth = 0.6 + random() * 0.9
+    context.beginPath()
+    context.moveTo(x, y)
+    const segments = 4 + Math.floor(random() * 6)
+    for (let segment = 0; segment < segments; segment += 1) {
+      x += (random() - 0.5) * 26
+      y += (random() - 0.3) * 22
+      context.lineTo(x, y)
+    }
+    context.stroke()
+  }
   return canvas
 }
 
@@ -99,7 +137,8 @@ function createSurfaceMaps(albedo: HTMLCanvasElement, repeat: number): { normalM
   }
 }
 
-export function createOrganicTexture(color: number): THREE.CanvasTexture {
+/** Pelle con macchie, venature e, nelle varianti 1–2, ferite aperte e sangue rappreso. */
+export function createOrganicTexture(color: number, variant = 0): THREE.CanvasTexture {
   const canvas = document.createElement('canvas')
   canvas.width = 128
   canvas.height = 128
@@ -108,7 +147,7 @@ export function createOrganicTexture(color: number): THREE.CanvasTexture {
   const base = new THREE.Color(color)
   context.fillStyle = `#${base.getHexString()}`
   context.fillRect(0, 0, 128, 128)
-  let seed = 73
+  let seed = 73 + variant * 1009
   const random = () => {
     seed = seed * 16807 % 2147483647
     return (seed - 1) / 2147483646
@@ -131,12 +170,33 @@ export function createOrganicTexture(color: number): THREE.CanvasTexture {
     context.lineTo(x + random() * 14 - 7, y + random() * 20)
     context.stroke()
   }
+  for (let index = 0; index < variant * 2; index += 1) {
+    // Ferita: taglio scuro con bordo arrossato e una colatura.
+    const x = 16 + random() * 96
+    const y = 16 + random() * 96
+    const width = 8 + random() * 12
+    context.save()
+    context.translate(x, y)
+    context.rotate(random() * Math.PI)
+    context.fillStyle = 'rgba(150,52,48,0.45)'
+    context.beginPath()
+    context.ellipse(0, 0, width, 4.5, 0, 0, Math.PI * 2)
+    context.fill()
+    context.fillStyle = 'rgba(50,8,10,0.85)'
+    context.beginPath()
+    context.ellipse(0, 0, width * 0.75, 1.8, 0, 0, Math.PI * 2)
+    context.fill()
+    context.restore()
+    context.fillStyle = 'rgba(70,10,12,0.5)'
+    context.fillRect(x, y, 1.6, 6 + random() * 14)
+  }
   const texture = new THREE.CanvasTexture(canvas)
   texture.colorSpace = THREE.SRGBColorSpace
   return texture
 }
 
-export function createFabricTexture(color: number): THREE.CanvasTexture {
+/** Tessuto a trama; nelle varianti 1–2 strappi sfilacciati e macchie di sangue. */
+export function createFabricTexture(color: number, variant = 0): THREE.CanvasTexture {
   const canvas = document.createElement('canvas')
   canvas.width = 128
   canvas.height = 128
@@ -164,6 +224,40 @@ export function createFabricTexture(color: number): THREE.CanvasTexture {
     const y = (seed - 1) / 2147483646 * 128
     context.fillStyle = 'rgba(5,7,8,0.09)'
     context.fillRect(x, y, 2, 2)
+  }
+  const random = () => {
+    seed = seed * 16807 % 2147483647
+    return (seed - 1) / 2147483646
+  }
+  seed += variant * 7919
+  for (let index = 0; index < variant * 3; index += 1) {
+    const x = random() * 128
+    const y = random() * 128
+    if (index % 2 === 0) {
+      // Strappo: buco scuro irregolare con i fili sfilacciati.
+      context.fillStyle = 'rgba(4,4,5,0.9)'
+      context.beginPath()
+      context.moveTo(x, y)
+      for (let corner = 0; corner < 6; corner += 1) context.lineTo(x + (random() - 0.5) * 16, y + (random() - 0.5) * 12)
+      context.closePath()
+      context.fill()
+      context.strokeStyle = 'rgba(200,200,190,0.18)'
+      context.lineWidth = 0.6
+      for (let thread = 0; thread < 5; thread += 1) {
+        context.beginPath()
+        context.moveTo(x + (random() - 0.5) * 12, y + (random() - 0.5) * 8)
+        context.lineTo(x + (random() - 0.5) * 20, y + (random() - 0.5) * 16)
+        context.stroke()
+      }
+    } else {
+      // Sangue rappreso.
+      const radius = 6 + random() * 12
+      const stain = context.createRadialGradient(x, y, 0, x, y, radius)
+      stain.addColorStop(0, 'rgba(70,6,10,0.75)')
+      stain.addColorStop(1, 'rgba(70,6,10,0)')
+      context.fillStyle = stain
+      context.fillRect(x - radius, y - radius, radius * 2, radius * 2)
+    }
   }
   const texture = new THREE.CanvasTexture(canvas)
   texture.colorSpace = THREE.SRGBColorSpace

@@ -9,6 +9,10 @@ import { getColorGrade, getPostEffects, NEUTRAL_GRADE } from './colorGrading'
 import type { ColorGrade, PostEffects } from './colorGrading'
 import type { GraphicsQuality } from './graphics'
 import type { MapTheme } from './maps'
+import { installHeightFog } from './heightFog'
+
+// Prima di qualsiasi compilazione di materiali: la nebbia diventa più fitta vicino al suolo.
+installHeightFog()
 
 /**
  * Passaggio finale unico: tone mapping ACES e conversione in sRGB (al posto dell'OutputPass),
@@ -27,6 +31,10 @@ const FinishShader = {
     vignette: { value: 0.25 },
     grain: { value: 0 },
     aberration: { value: 0 },
+    tDepth: { value: null as THREE.Texture | null },
+    cameraNear: { value: 0.1 },
+    cameraFar: { value: 200 },
+    focusBlur: { value: 0 },
     time: { value: 0 },
     resolution: { value: new THREE.Vector2(1, 1) },
   },
@@ -39,7 +47,12 @@ const FinishShader = {
   `,
   fragmentShader: /* glsl */ `
     #include <tonemapping_pars_fragment>
+    #include <packing>
     uniform sampler2D tDiffuse;
+    uniform sampler2D tDepth;
+    uniform float cameraNear;
+    uniform float cameraFar;
+    uniform float focusBlur;
     uniform vec3 lift;
     uniform vec3 gain;
     uniform float saturation;
@@ -60,7 +73,21 @@ const FinishShader = {
       float dist = length(offset);
       vec4 base = texture2D(tDiffuse, vUv);
       vec3 color = base.rgb;
-      if (aberration > 0.0) {
+      // Profondità di campo in mira: si sfoca ciò che è vicinissimo (l'arma) e appena i bordi.
+      if (focusBlur > 0.0) {
+        float viewZ = -perspectiveDepthToViewZ(texture2D(tDepth, vUv).x, cameraNear, cameraFar);
+        float amount = focusBlur * max(1.0 - smoothstep(0.4, 1.1, viewZ), 0.45 * smoothstep(0.3, 0.75, dist));
+        if (amount > 0.01) {
+          vec2 texel = amount * 3.5 / resolution;
+          vec3 sum = color;
+          for (int i = 0; i < 8; i++) {
+            float angle = float(i) * 0.785398;
+            sum += texture2D(tDiffuse, vUv + vec2(cos(angle), sin(angle)) * texel).rgb;
+          }
+          color = sum / 9.0;
+        }
+      }
+      if (aberration > 0.0 && focusBlur <= 0.0) {
         vec2 shift = offset * aberration * dist * 0.025;
         color.r = texture2D(tDiffuse, vUv + shift).r;
         color.b = texture2D(tDiffuse, vUv - shift).b;
@@ -115,13 +142,15 @@ export class RenderPipeline {
     this.finish = new ShaderPass(FinishShader)
     // Il tone mapping lo fa lo shader stesso: niente quello automatico del renderer.
     this.finish.material.toneMapped = false
-    this.composer = this.createComposer(this.effects.samples)
+    this.composer = this.createComposer(this.effects.samples, this.effects.depthOfField)
     this.setQuality('medium')
   }
 
   /** Il buffer di composizione ha l'MSAA: con la composizione l'antialias del canvas non vale. */
-  private createComposer(samples: number): EffectComposer {
+  private createComposer(samples: number, depth: boolean): EffectComposer {
     const target = new THREE.WebGLRenderTarget(this.width, this.height, { type: THREE.HalfFloatType, samples })
+    // La profondità serve solo alla sfocatura in mira (alto, senza MSAA).
+    if (depth) target.depthTexture = new THREE.DepthTexture(this.width, this.height)
     const composer = new EffectComposer(this.renderer, target)
     composer.addPass(new RenderPass(this.scene, this.camera))
     composer.addPass(this.ambientOcclusion)
@@ -132,11 +161,11 @@ export class RenderPipeline {
 
   setQuality(quality: GraphicsQuality): void {
     this.quality = quality
-    const previousSamples = this.effects.samples
+    const previous = this.effects
     this.effects = getPostEffects(quality)
-    if (this.effects.samples !== previousSamples) {
+    if (this.effects.samples !== previous.samples || this.effects.depthOfField !== previous.depthOfField) {
       this.composer.dispose()
-      this.composer = this.createComposer(this.effects.samples)
+      this.composer = this.createComposer(this.effects.samples, this.effects.depthOfField)
       this.setSize(this.width, this.height)
     }
     const high = quality === 'high'
@@ -161,6 +190,11 @@ export class RenderPipeline {
     uniforms.saturation!.value = this.grade.saturation
     uniforms.contrast!.value = this.grade.contrast
     uniforms.vignette!.value = this.grade.vignette
+  }
+
+  /** Mira 0–1: sfoca l'arma in primo piano (solo con la profondità di campo attiva). */
+  setFocusBlur(amount: number): void {
+    this.finish.uniforms.focusBlur!.value = this.effects.depthOfField ? Math.max(0, Math.min(1, amount)) : 0
   }
 
   /** Intensità 0–1 dell'aberrazione cromatica (ferite). */
@@ -218,6 +252,13 @@ export class RenderPipeline {
     }
     this.finish.uniforms.time!.value = performance.now() / 1000
     this.finish.uniforms.toneMappingExposure!.value = this.renderer.toneMappingExposure
+    if (this.effects.depthOfField) {
+      // Il RenderPass scrive nel buffer di lettura (i due buffer si alternano a ogni frame).
+      this.finish.uniforms.tDepth!.value = this.composer.readBuffer.depthTexture
+      const camera = this.camera as THREE.PerspectiveCamera
+      this.finish.uniforms.cameraNear!.value = camera.near
+      this.finish.uniforms.cameraFar!.value = camera.far
+    }
     this.composer.render()
   }
 

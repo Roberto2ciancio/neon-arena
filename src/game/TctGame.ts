@@ -11,7 +11,7 @@ import { getSpatialSound } from './spatialAudio'
 import * as THREE from 'three'
 import { GameAudio } from './audio'
 import { RenderPipeline } from './RenderPipeline'
-import { LIGHT_SHAFT_TAG } from './atmosphere'
+import { animateEmbers, LIGHT_SHAFT_TAG } from './atmosphere'
 import { DecalEffects } from './decals'
 import { getGraphicsSettings } from './graphics'
 import type { GraphicsQuality } from './graphics'
@@ -1003,6 +1003,7 @@ export class TctGame implements TouchTarget {
   private update(delta: number): void {
     this.mapContent.ambient.rotation.y += delta * 0.015
     animateWeather(this.mapContent.weather, delta)
+    animateEmbers(this.mapContent.embers, delta)
     this.updatePlayer(delta)
     this.updateRemotes(delta)
     this.updateEquipment(delta)
