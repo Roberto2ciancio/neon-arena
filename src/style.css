@@ -407,6 +407,17 @@ kbd { display: inline-block; color: #aab4cb; font-family: 'Chakra Petch', sans-s
 .profile-level small { color: #8a93ad; font-size: 9px; }
 .account-button { min-height: 38px; padding: 0 14px; font-size: 10px; }
 .welcome-card { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; padding: 10px 14px; border: 1px solid rgba(154, 123, 255, 0.45); background: rgba(154, 123, 255, 0.08); }
+.news-card { border-color: rgba(88, 245, 229, 0.5); background: rgba(88, 245, 229, 0.07); }
+.news-summary { display: grid; gap: 3px; margin: 6px 0 0; padding-left: 16px; color: #c9cfdf; font-size: 12px; line-height: 1.45; }
+.news-summary li::marker { color: var(--cyan); }
+.news-panel { display: grid; gap: 22px; }
+.news-entry h3 { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin: 0 0 10px; color: var(--cyan); font-family: 'Chakra Petch', sans-serif; font-size: 13px; letter-spacing: 0.12em; }
+.news-entry h3 small { color: #8a93ad; font-weight: 400; font-size: 10px; letter-spacing: 0.08em; }
+.news-entry.unseen h3::after { content: 'NUOVO'; margin-left: auto; padding: 2px 6px; border: 1px solid #ffd166; color: #ffd166; font-size: 9px; }
+.news-item { display: grid; gap: 4px; margin-bottom: 10px; padding: 10px 12px; border: 1px solid var(--line); background: rgba(8, 12, 24, 0.6); }
+.news-item strong { color: #dfe4f0; font-family: 'Chakra Petch', sans-serif; font-size: 12px; letter-spacing: 0.06em; }
+.news-item p { margin: 0; color: #a5adc4; font-size: 12px; line-height: 1.5; }
+.news-item span { color: #ffd166; font-family: 'Chakra Petch', sans-serif; font-size: 10px; letter-spacing: 0.06em; }
 .welcome-card strong { font-family: 'Chakra Petch', sans-serif; font-size: 12px; letter-spacing: 0.1em; }
 .welcome-card p { max-width: 380px; margin: 6px 0 0; color: #a5adc4; font-size: 12px; line-height: 1.5; }
 .welcome-actions { display: flex; flex-wrap: wrap; gap: 8px; }

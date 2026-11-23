@@ -38,6 +38,7 @@ import type { CosmeticOption } from './game/cosmetics'
 import { EQUIPMENT } from './game/equipment'
 import { JETPACK_FUEL, MOBILITY } from './game/mobility'
 import { LORE, loadFoundLore, saveFoundLore } from './game/lore'
+import { CHANGELOG, getUnseenEntries, loadSeenChangelog, markChangelogSeen } from './game/changelog'
 import { GAME_MODE_IDS, GAME_MODES, isGameMode, isRanked } from './game/gameModes'
 import type { GameMode } from './game/gameModes'
 import { createDailyRun, getUtcDayKey, loadDailyBest, recordDailyScore } from './game/dailyRun'
@@ -702,6 +703,7 @@ function applyMergedSave(save: PlayerSave): void {
 }
 
 const DRAWER_TITLES: Record<string, string> = {
+  news: 'NOVITÀ',
   archive: 'ARCHIVIO',
   challenges: 'SFIDE',
   profile: 'PROFILO',
@@ -716,6 +718,7 @@ function openDrawer(panel: string): void {
   if (panel === 'profile') renderProfileSection()
   if (panel === 'challenges') renderChallenges()
   if (panel === 'archive') renderArchive()
+  if (panel === 'news') openNews()
   if (panel === 'leaderboard') void leaderboardPanel.open()
   document.querySelectorAll<HTMLElement>('[data-drawer-panel]').forEach((section) => {
     section.classList.toggle('active', section.dataset.drawerPanel === panel)
@@ -1157,6 +1160,61 @@ function renderRunCards(): void {
     : 'Facoltative: più difficile, più frammenti ed esperienza'
 }
 
+// --- Novità --------------------------------------------------------------------------------
+/** Voci non ancora viste, calcolate all'apertura: restano evidenziate finché la pagina è aperta. */
+let unseenNews = getUnseenEntries(loadSeenChangelog(window.localStorage), progress.runs > 0 || armory.level > 1)
+// Un nuovo giocatore non ha nulla da recuperare: si parte da qui per i prossimi aggiornamenti.
+if (unseenNews.length === 0) markChangelogSeen(window.localStorage)
+
+function renderNewsCard(): void {
+  const card = byId('news-card')
+  card.classList.toggle('hidden', unseenNews.length === 0)
+  byId('news-badge').textContent = unseenNews.length > 0 ? 'NUOVO' : ''
+  const summary = byId('news-summary')
+  summary.replaceChildren()
+  for (const entry of unseenNews) {
+    const line = document.createElement('li')
+    line.textContent = `${entry.title}: ${entry.items.map((item) => item.name.charAt(0).toLowerCase() + item.name.slice(1)).join(', ')}`
+    summary.append(line)
+  }
+}
+
+function renderNewsPanel(highlight: readonly string[]): void {
+  const panel = byId('news-panel')
+  panel.replaceChildren()
+  for (const entry of CHANGELOG) {
+    const section = document.createElement('section')
+    section.className = `news-entry${highlight.includes(entry.id) ? ' unseen' : ''}`
+    const heading = document.createElement('h3')
+    heading.textContent = entry.title.toUpperCase()
+    const date = document.createElement('small')
+    date.textContent = entry.date
+    heading.append(date)
+    section.append(heading)
+    for (const item of entry.items) {
+      const row = document.createElement('div')
+      row.className = 'news-item'
+      const name = document.createElement('strong')
+      name.textContent = item.name
+      const text = document.createElement('p')
+      text.textContent = item.text
+      const where = document.createElement('span')
+      where.textContent = `DOVE: ${item.where}`
+      row.append(name, text, where)
+      section.append(row)
+    }
+    panel.append(section)
+  }
+}
+
+/** Aprendo le novità si considerano lette (restano evidenziate fino alla chiusura del pannello). */
+function openNews(): void {
+  renderNewsPanel(unseenNews.map((entry) => entry.id))
+  markChangelogSeen(window.localStorage)
+  unseenNews = []
+  renderNewsCard()
+}
+
 // --- Archivio della storia ------------------------------------------------------------------
 let foundLore: string[] = loadFoundLore(window.localStorage)
 
@@ -1593,6 +1651,13 @@ renderRunCards()
 renderGameModes()
 renderDailyRun()
 renderArchiveBadge()
+renderNewsCard()
+byId<HTMLButtonElement>('news-open').addEventListener('click', () => openDrawer('news'))
+byId<HTMLButtonElement>('news-dismiss').addEventListener('click', () => {
+  markChangelogSeen(window.localStorage)
+  unseenNews = []
+  renderNewsCard()
+})
 byId<HTMLButtonElement>('daily-run-start').addEventListener('click', startDailyRun)
 renderProfile()
 void initializeCloud()

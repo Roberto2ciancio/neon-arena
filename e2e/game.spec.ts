@@ -1351,6 +1351,31 @@ test('modalità alternative: Sopravvivi 5 minuti e Difendi il generatore', async
   expect(errors).toEqual([])
 })
 
+test('novità: chi torna vede gli aggiornamenti con dove trovarli, un nuovo giocatore no', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  // Nuovo giocatore: niente riquadro delle novità.
+  await page.goto('/')
+  await expect(page.locator('#news-card')).toBeHidden()
+  // Giocatore che torna (livello 9, nessuna novità vista).
+  await page.evaluate(() => {
+    window.localStorage.clear()
+    window.localStorage.setItem('neon-arena:armory:v1', JSON.stringify({ level: 9, xp: 0 }))
+  })
+  await page.reload()
+  await expect(page.locator('#news-card')).toBeVisible()
+  await expect(page.locator('#news-summary li').first()).toContainText('Partite mai uguali')
+  await page.locator('#news-open').click()
+  await expect(page.locator('.news-entry.unseen').first()).toBeVisible()
+  await expect(page.locator('.news-item', { hasText: 'Carte della run' })).toContainText('DOVE: Menu > modalità Zombie > CARTE DELLA RUN')
+  await closeDrawer(page)
+  await expect(page.locator('#news-card')).toBeHidden()
+  // Lette: alla visita successiva non ricompaiono.
+  await page.reload()
+  await expect(page.locator('#news-card')).toBeHidden()
+  expect(errors).toEqual([])
+})
+
 test('la classifica globale mostra schede, K/D con partite e profilo pubblico', async ({ page }) => {
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))
