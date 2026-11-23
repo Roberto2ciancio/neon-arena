@@ -11,6 +11,7 @@ import { getSpatialSound } from './spatialAudio'
 import * as THREE from 'three'
 import { GameAudio } from './audio'
 import { RenderPipeline } from './RenderPipeline'
+import { LIGHT_SHAFT_TAG } from './atmosphere'
 import { DecalEffects } from './decals'
 import { getGraphicsSettings } from './graphics'
 import type { GraphicsQuality } from './graphics'
@@ -163,6 +164,8 @@ export class TctGame implements TouchTarget {
   constructor(container: HTMLElement, private readonly events: TctEvents) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' })
     this.pipeline = new RenderPipeline(this.renderer, this.scene, this.camera)
+    this.pipeline.setColorGrade(this.map.id)
+    this.pipeline.setEnvironmentTheme(this.map.theme ?? DEFAULT_THEME)
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     this.renderer.outputColorSpace = THREE.SRGBColorSpace
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
@@ -211,6 +214,7 @@ export class TctGame implements TouchTarget {
     let staticLightIndex = 0
     this.mapContent.group.traverse((object) => {
       if (object instanceof THREE.PointLight) object.visible = staticLightIndex++ < settings.staticLights
+      if (object.userData[LIGHT_SHAFT_TAG]) object.visible = quality !== 'low'
       if (!(object instanceof THREE.Mesh)) return
       const materials = Array.isArray(object.material) ? object.material : [object.material]
       for (const material of materials) {
@@ -369,6 +373,8 @@ export class TctGame implements TouchTarget {
     })
     this.map = map
     const theme = map.theme ?? DEFAULT_THEME
+    this.pipeline.setColorGrade(map.id)
+    this.pipeline.setEnvironmentTheme(theme)
     this.scene.background = new THREE.Color(theme.background)
     this.scene.fog = new THREE.FogExp2(theme.fog, theme.fogDensity)
     this.mapContent = buildMap(map)
@@ -386,6 +392,7 @@ export class TctGame implements TouchTarget {
 
   private setState(state: GameState): void {
     this.state = state
+    this.pipeline.setCompositing(state !== 'menu')
     this.weapons.setVisible(state !== 'menu' && this.alive)
     if (state !== 'playing' && document.pointerLockElement === this.renderer.domElement) document.exitPointerLock()
     this.events.onStateChange(state)

@@ -1,6 +1,7 @@
 import { DEFAULT_THEME } from './maps'
 import type { MapTheme } from './maps'
 import * as THREE from 'three'
+import { addLightShafts } from './atmosphere'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import type { CollisionObstacle } from './collision'
@@ -158,18 +159,20 @@ export function buildMap(map: MapDefinition): BuiltMap {
   const coverMaps = createIndustrialMaterialMaps('#68737b', '#87949c', 2)
   const wallMaps = createIndustrialMaterialMaps('#48535f', '#65717c', 2)
   const groundSize = map.arenaLimit * 2 + 9
+  // Con la pioggia l'asfalto è bagnato: meno ruvido, riflette il cielo e le insegne.
+  const wet = theme.weather === 'rain' || theme.weather === 'drizzle'
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(groundSize, groundSize),
-    new THREE.MeshStandardMaterial({ color: 0x8996a8, map: groundMaps.map, normalMap: groundMaps.normalMap, normalScale: new THREE.Vector2(0.65, 0.65), roughnessMap: groundMaps.roughnessMap, roughness: 0.85, metalness: 0.35 }),
+    new THREE.MeshStandardMaterial({ color: 0x8996a8, map: groundMaps.map, normalMap: groundMaps.normalMap, normalScale: new THREE.Vector2(0.65, 0.65), roughnessMap: groundMaps.roughnessMap, roughness: wet ? 0.58 : 0.85, metalness: 0.35, envMapIntensity: wet ? 1.2 : 1 }),
   )
   ground.receiveShadow = true
   ground.rotation.x = -Math.PI / 2
   ground.position.y = -0.06
   group.add(ground)
   // Pozzanghere riflettenti per spezzare l'uniformità del terreno.
-  const puddleMaterial = new THREE.MeshStandardMaterial({ color: 0x3a4a5c, roughness: 0.08, metalness: 0.85, transparent: true, opacity: 0.32, depthWrite: false })
+  const puddleMaterial = new THREE.MeshStandardMaterial({ color: 0x3a4a5c, roughness: 0.06, metalness: 0.85, transparent: true, opacity: wet ? 0.5 : 0.32, depthWrite: false, envMapIntensity: wet ? 2 : 1 })
   const puddleGeometries: THREE.BufferGeometry[] = []
-  for (let index = 0; index < Math.round(map.arenaLimit / 2.5); index += 1) {
+  for (let index = 0; index < Math.round(map.arenaLimit / (wet ? 1.3 : 2.5)); index += 1) {
     const angle = index * 2.399
     const radius = map.arenaLimit * (0.25 + ((index * 37) % 70) / 100)
     const geometry = new THREE.CircleGeometry(0.8 + (index % 4) * 0.45, 20)
@@ -367,6 +370,8 @@ export function buildMap(map: MapDefinition): BuiltMap {
   group.add(ambient)
   const weather = createWeather(theme, extent)
   if (weather) group.add(weather)
+
+  addLightShafts(group)
 
   return { group, obstacles, doors, ambient, weather, theme }
 }

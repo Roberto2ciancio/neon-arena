@@ -1,5 +1,8 @@
 import * as THREE from 'three'
 
+/** Nubi di fumo persistente presenti insieme al massimo. */
+const MAX_LINGERING_SMOKE = 18
+
 interface TimedMesh {
   mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>
   life: number
@@ -126,6 +129,24 @@ export class CombatEffects {
         velocity: new THREE.Vector3(Math.cos(angle) * 1.4, 1.1 + Math.random() * 0.9, Math.sin(angle) * 1.4),
         fade: 'late',
         spin: (Math.random() - 0.5) * 2,
+      })
+    }
+
+    // Fumo che resta: poche nubi grandi e lente che si diradano in alcuni secondi. Non sul
+    // preset basso e con un tetto, perché con le reazioni a catena si accumulerebbero.
+    const lingering = this.lightsEnabled ? this.items.reduce((count, item) => count + (item.mesh.userData.linger ? 1 : 0), 0) : MAX_LINGERING_SMOKE
+    for (let index = 0; index < Math.min(3, MAX_LINGERING_SMOKE - lingering); index += 1) {
+      const angle = Math.random() * Math.PI * 2
+      const linger = new THREE.Mesh(this.smokeGeometry, new THREE.MeshBasicMaterial({ color: 0x2e3036, transparent: true, opacity: 0.22, depthWrite: false }))
+      linger.position.copy(center).add(new THREE.Vector3(Math.cos(angle) * radius * 0.3, 0.4 + index * 0.3, Math.sin(angle) * radius * 0.3))
+      linger.scale.setScalar(radius * 0.25)
+      linger.userData.linger = true
+      this.add(linger, {
+        life: 5 + Math.random() * 2.5,
+        growth: radius * 0.35,
+        velocity: new THREE.Vector3(Math.cos(angle) * 0.25, 0.35, Math.sin(angle) * 0.25),
+        fade: 'late',
+        spin: (Math.random() - 0.5) * 0.4,
       })
     }
 

@@ -83,6 +83,8 @@ Criteri di chiusura: regole pure dei moduli con test (ricariche, cariche, durata
 
 ## Fase D — Grafica "realismo stilizzato"
 
+> **Stato (2026-11-23): in parte fatta** — correzione colore per mappa, passaggio finale unico, ambiente riflesso per mappa, coni di luce, asfalto bagnato, fumo persistente, incarnato variato (vedi il diario). Restano: nebbia con altezza, profondità di campo in mira, ferite e vestiti, modelli degli zombie arrotondati, misura su telefono reale.
+
 Una precisazione onesta: con modelli fatti di forme semplici, "realistico" ha un limite. Questa fase rende tutto molto più credibile senza scaricare asset: luce, materiali, atmosfera e post-processing. Il salto da "gioco fatto di blocchi" a "gioco realistico" arriva solo con la Fase E.
 
 1. **Illuminazione**: mappa d'ambiente HDR per mappa (cielo notturno, capannone, laboratorio) invece di `RoomEnvironment`; luci a riempimento cotte nelle mappe (lightmap generate all'avvio o precalcolate) al posto di luci in tempo reale; ombre più morbide sul preset alto.

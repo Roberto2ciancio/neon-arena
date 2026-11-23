@@ -37,6 +37,8 @@ import { FIELD_TIERS, getFieldTier, getFieldWeaponCost, rollStationWeapons } fro
 import * as THREE from 'three'
 import { GameAudio } from './audio'
 import { RenderPipeline } from './RenderPipeline'
+import { getHurtAberration } from './colorGrading'
+import { LIGHT_SHAFT_TAG } from './atmosphere'
 import { DecalEffects } from './decals'
 import { getGraphicsSettings } from './graphics'
 import type { GraphicsQuality } from './graphics'
@@ -375,6 +377,9 @@ export class Game implements TouchTarget {
   private spawnTimer = 0
   private waveActive = false
   private waveBreak = 0
+  private highContrast = false
+  /** Colpo appena subito (1 → 0 in mezzo secondo): aberrazione cromatica ai bordi. */
+  private hurtFlash = 0
   /** Modulo di mobilità equipaggiato (null senza modulo). */
   private mobility: MobilityState | null = null
   /** Secondi passati fermi su una superficie che nessuno zombie raggiunge. */
@@ -487,6 +492,8 @@ export class Game implements TouchTarget {
   ) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' })
     this.pipeline = new RenderPipeline(this.renderer, this.scene, this.camera)
+    this.pipeline.setColorGrade(this.map.id)
+    this.pipeline.setEnvironmentTheme(this.map.theme ?? DEFAULT_THEME)
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     this.renderer.outputColorSpace = THREE.SRGBColorSpace
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping
@@ -523,6 +530,7 @@ export class Game implements TouchTarget {
 
   setAccessibility(settings: AccessibilitySettings): void {
     this.reducedMotion = settings.reducedMotion
+    this.highContrast = settings.highContrast
     this.mouseSensitivity = 0.002 * settings.sensitivity
     this.adsSensitivity = settings.adsSensitivity
     this.goreLevel = normalizeGore(settings.gore)
@@ -547,6 +555,7 @@ export class Game implements TouchTarget {
     let staticLightIndex = 0
     this.mapContent.group.traverse((object) => {
       if (object instanceof THREE.PointLight) object.visible = staticLightIndex++ < settings.staticLights
+      if (object.userData[LIGHT_SHAFT_TAG]) object.visible = quality !== 'low'
       if (!(object instanceof THREE.Mesh)) return
       const materials = Array.isArray(object.material) ? object.material : [object.material]
       for (const material of materials) {
@@ -653,6 +662,8 @@ export class Game implements TouchTarget {
     })
     this.map = map
     const theme = map.theme ?? DEFAULT_THEME
+    this.pipeline.setColorGrade(map.id)
+    this.pipeline.setEnvironmentTheme(theme)
     this.scene.background = new THREE.Color(theme.background)
     this.scene.fog = new THREE.FogExp2(theme.fog, theme.fogDensity)
     this.mapContent = buildMap(map)
@@ -926,6 +937,7 @@ export class Game implements TouchTarget {
 
   private setState(state: GameState): void {
     this.state = state
+    this.pipeline.setCompositing(state !== 'menu')
     this.weapons.setVisible(state !== 'menu')
     if (state !== 'playing' && document.pointerLockElement === this.renderer.domElement) document.exitPointerLock()
     this.events.onStateChange(state)
@@ -1033,7 +1045,11 @@ export class Game implements TouchTarget {
     this.beacon.position.copy(this.camera.position).addScaledVector(forward, 8).setY(0)
     this.renderer.compile(this.scene, this.camera)
     this.renderer.shadowMap.needsUpdate = true
+    // Anche i passaggi di composizione (si attivano solo in partita) vanno compilati qui.
+    const compositing = this.pipeline.isCompositing
+    this.pipeline.setCompositing(true)
     this.pipeline.render()
+    this.pipeline.setCompositing(compositing)
     restoreGore()
     this.beacon.visible = beaconVisible
     this.beacon.position.set(this.map.extraction.x, 0, this.map.extraction.z)
@@ -1228,6 +1244,8 @@ export class Game implements TouchTarget {
 
   private updatePlayer(delta: number): void {
     this.invulnerability = Math.max(0, this.invulnerability - delta)
+    this.hurtFlash = Math.max(0, this.hurtFlash - delta * 2)
+    this.pipeline.setHurt(getHurtAberration(this.health / this.stats.maxHealth, this.hurtFlash, this.reducedMotion || this.highContrast))
     this.doorDeniedTimer = Math.max(0, this.doorDeniedTimer - delta)
     this.health = Math.min(this.stats.maxHealth, this.health + this.stats.regen * delta)
     this.sinceDamage += delta
@@ -1523,6 +1541,8 @@ export class Game implements TouchTarget {
       const hits = this.rayZoneHits(projectile.position, direction, step, wall).filter((hit) => !projectile.hit.has(hit.enemy))
       let stopped = false
       for (const hit of hits) {
+        // Testa e corpo dello stesso zombie nello stesso passo: conta una volta sola.
+        if (projectile.hit.has(hit.enemy)) continue
         if (projectile.kind === 'grenade') {
           this.launcherBlast(hit.point, projectile)
           stopped = true
@@ -2934,6 +2954,7 @@ export class Game implements TouchTarget {
       return
     }
     this.health = Math.max(0, this.health - Math.max(1, amount - this.stats.armor))
+    this.hurtFlash = 1
     this.invulnerability = 0.32
     this.sinceDamage = 0
     this.cameraShake = 0.4

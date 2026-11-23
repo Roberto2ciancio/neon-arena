@@ -137,7 +137,9 @@ export function createEnemyModel(kind: EnemyKind, color: number, appearance: 'zo
   const scale = height / 1.8
   const width = (kind === 'armored' || kind === 'shielder' ? 0.95 : kind === 'brute' ? 1.05 : kind === 'tyrant' ? 1.2 : kind === 'bloater' ? 1.2 : kind === 'runner' || kind === 'stalker' ? 0.52 : kind === 'leaper' ? 0.6 : 0.66) * scale
   const skinColor = new THREE.Color(soldier ? 0x8b6b57 : 0x727768).lerp(new THREE.Color(color), soldier ? 0 : kind === 'stalker' ? 0.75 : 0.28)
-  const skin = new THREE.MeshStandardMaterial({ color: 0xffffff, map: getOrganicTexture(skinColor.getHex()), roughness: 0.8 })
+  // Ogni zombie ha un incarnato leggermente diverso (stessa texture, solo il colore del materiale).
+  const tint = soldier ? new THREE.Color(0xffffff) : new THREE.Color().setHSL(0.08 + Math.random() * 0.12, 0.12 + Math.random() * 0.12, 0.82 + Math.random() * 0.16)
+  const skin = new THREE.MeshStandardMaterial({ color: tint, map: getOrganicTexture(skinColor.getHex()), roughness: 0.72 + Math.random() * 0.16 })
   const clothesColor = soldier ? outfit?.suit ?? 0x1d252b : kind === 'runner' ? 0x39262a : 0x252a2c
   const clothes = new THREE.MeshStandardMaterial({ color: 0xffffff, map: createFabricTexture(clothesColor), roughness: 0.96, side: THREE.DoubleSide })
   const armor = new THREE.MeshStandardMaterial({ color: outfit?.accent ?? 0x4c5050, metalness: outfit ? 0.45 : 0.72, roughness: 0.48 })
