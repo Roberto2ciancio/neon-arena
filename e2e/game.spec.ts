@@ -875,7 +875,13 @@ test('il modulo di mobilità scelto in armeria funziona in partita (scatto)', as
   // Senza cariche il tasto non fa nulla; la ricarica riporta le cariche.
   await page.keyboard.press('KeyB')
   await expect(page.locator('#mobility-status')).toHaveText(/^\d+s$/)
-  await expect(page.locator('#mobility-status')).toHaveText('1/2', { timeout: 6000 })
+  // In headless il tempo di gioco scorre più lento dell'orologio (rendering software): invece di
+  // aspettare 3,5 s di ricarica si porta il residuo a 0,3 s. La durata è verificata nei test unitari.
+  await page.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    game.mobility = { ...game.mobility, cooldown: 0.3 }
+  })
+  await expect(page.locator('#mobility-status')).toHaveText('1/2')
   expect(errors).toEqual([])
 })
 
