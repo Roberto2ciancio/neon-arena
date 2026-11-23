@@ -37,6 +37,7 @@ import { CAMOS, COSMETIC_CATALOG } from './game/cosmetics'
 import type { CosmeticOption } from './game/cosmetics'
 import { EQUIPMENT } from './game/equipment'
 import { JETPACK_FUEL, MOBILITY } from './game/mobility'
+import { LORE, loadFoundLore, saveFoundLore } from './game/lore'
 import { createDailyRun, getUtcDayKey, loadDailyBest, recordDailyScore } from './game/dailyRun'
 import { getRewardMultiplier, loadRunModifiers, MAX_RUN_MODIFIERS, RUN_MODIFIER_IDS, RUN_MODIFIERS, saveRunModifiers, toggleRunModifier } from './game/runModifiers'
 import { CHALLENGE_REWARDS, describeChallenge, getChallengeRewards, loadChallenges, recordChallengeEvent, refreshChallenges, saveChallenges } from './game/challenges'
@@ -113,6 +114,11 @@ const game = new Game(byId('scene'), {
   onPowerUp: showPowerUp,
   onKill: showKillMarker,
   onCombo: showComboCallout,
+  onLoreFound: (id) => {
+    foundLore = [...new Set([...foundLore, id])]
+    saveFoundLore(window.localStorage, foundLore)
+    renderArchiveBadge()
+  },
   onDamageNumber: showDamageNumber,
   // I colori dei nemici sono spenti: schiariti per restare leggibili sul fondo scuro.
   onNotice: (title, text, color) => showPowerUp(title, text, new THREE.Color(color).lerp(new THREE.Color(0xffffff), 0.45).getHex()),
@@ -692,6 +698,7 @@ function applyMergedSave(save: PlayerSave): void {
 }
 
 const DRAWER_TITLES: Record<string, string> = {
+  archive: 'ARCHIVIO',
   challenges: 'SFIDE',
   profile: 'PROFILO',
   workshop: 'OFFICINA',
@@ -704,6 +711,7 @@ function openDrawer(panel: string): void {
   byId('drawer-title').textContent = DRAWER_TITLES[panel] ?? ''
   if (panel === 'profile') renderProfileSection()
   if (panel === 'challenges') renderChallenges()
+  if (panel === 'archive') renderArchive()
   if (panel === 'leaderboard') void leaderboardPanel.open()
   document.querySelectorAll<HTMLElement>('[data-drawer-panel]').forEach((section) => {
     section.classList.toggle('active', section.dataset.drawerPanel === panel)
@@ -1106,6 +1114,42 @@ function renderRunCards(): void {
     : 'Facoltative: più difficile, più frammenti ed esperienza'
 }
 
+// --- Archivio della storia ------------------------------------------------------------------
+let foundLore: string[] = loadFoundLore(window.localStorage)
+
+function renderArchiveBadge(): void {
+  byId('archive-badge').textContent = `${foundLore.length}/${LORE.length}`
+}
+
+function renderArchive(): void {
+  const panel = byId('archive-panel')
+  panel.replaceChildren()
+  for (const map of MAPS) {
+    const section = document.createElement('section')
+    section.className = 'challenge-group'
+    const heading = document.createElement('h3')
+    heading.textContent = map.name.toUpperCase()
+    const entries = LORE.filter((entry) => entry.map === map.id)
+    const count = document.createElement('small')
+    count.textContent = `${entries.filter((entry) => foundLore.includes(entry.id)).length}/${entries.length}`
+    heading.append(count)
+    section.append(heading)
+    for (const entry of entries) {
+      const found = foundLore.includes(entry.id)
+      const row = document.createElement('div')
+      row.className = `challenge-item${found ? ' done' : ''}`
+      const title = document.createElement('p')
+      title.textContent = found ? entry.title : '??? // REGISTRAZIONE NON TROVATA'
+      const detail = document.createElement('span')
+      detail.textContent = found ? `${entry.author} — ${entry.text}` : 'Cercala in questa mappa.'
+      row.append(title, detail)
+      section.append(row)
+    }
+    panel.append(section)
+  }
+  renderArchiveBadge()
+}
+
 // --- Run del giorno -------------------------------------------------------------------------
 /** L'ultima run era quella del giorno: "Nuova run" la ripropone. */
 let lastRunDaily = false
@@ -1122,7 +1166,7 @@ function startDailyRun(): void {
   const daily = createDailyRun(getUtcDayKey(new Date()))
   const map = MAPS.find((candidate) => candidate.id === daily.mapId) ?? STATION_13
   lastRunDaily = true
-  game.start(getMetaBonuses(progress), map, currentLoadout(), { modifiers: daily.modifiers, daily: { key: daily.key, seed: daily.seed } })
+  game.start(getMetaBonuses(progress), map, currentLoadout(), { modifiers: daily.modifiers, daily: { key: daily.key, seed: daily.seed }, foundLore })
 }
 
 function startRun(): void {
@@ -1136,7 +1180,7 @@ function startRun(): void {
     // Squadra: si torna alla stanza; l'host può avviare una nuova partita.
     game.returnToMenu()
     coopLobby.backToLobby()
-  } else game.start(getMetaBonuses(progress), selectedMap, currentLoadout(), { modifiers: runCards })
+  } else game.start(getMetaBonuses(progress), selectedMap, currentLoadout(), { modifiers: runCards, foundLore })
 }
 
 const coopLobby = new CoopLobby({
@@ -1146,7 +1190,7 @@ const coopLobby = new CoopLobby({
   getMapId: () => selectedMap.id,
   onStart: (coopSession, mapId, players) => {
     closeDrawer()
-    game.startCoop(coopSession, mapId, players, getMetaBonuses(progress), currentLoadout('zombies'))
+    game.startCoop(coopSession, mapId, players, getMetaBonuses(progress), currentLoadout('zombies'), foundLore)
   },
   onClosed: () => {
     if (game.isCoop) game.returnToMenu()
@@ -1503,6 +1547,7 @@ renderMenu()
 renderChallengesBadge()
 renderRunCards()
 renderDailyRun()
+renderArchiveBadge()
 byId<HTMLButtonElement>('daily-run-start').addEventListener('click', startDailyRun)
 renderProfile()
 void initializeCloud()

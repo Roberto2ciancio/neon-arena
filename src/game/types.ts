@@ -188,6 +188,8 @@ export interface GameEvents {
   onKill?: (variant?: 'kill' | 'headshot' | 'execution') => void
   /** Annuncio di combo (DOPPIA, MASSACRO…) o di esecuzione. */
   onCombo?: (text: string, count: number) => void
+  /** Registrazione della storia raccolta (si salva nell'archivio del menu). */
+  onLoreFound?: (id: string) => void
   /** Numero di danno da mostrare (coordinate dello schermo 0–1). */
   onDamageNumber?: (x: number, y: number, amount: number, kind: 'body' | 'head' | 'kill') => void
   /** Avviso informativo (es. nuovo tipo di zombie). */

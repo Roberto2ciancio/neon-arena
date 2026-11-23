@@ -70,6 +70,23 @@ export function createToxicCloud(): THREE.Group {
   return group
 }
 
+/** Registrazione da raccogliere: un tablet luminoso che fluttua, con un alone a terra. */
+export function createLorePickup(): THREE.Group {
+  const group = new THREE.Group()
+  const pad = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.04, 0.3), new THREE.MeshStandardMaterial({ color: 0x1a1f2a, emissive: 0xffc94a, emissiveIntensity: 1.2, roughness: 0.4 }))
+  pad.position.y = 1
+  pad.rotation.x = -0.6
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.5, 0.62, 32),
+    new THREE.MeshBasicMaterial({ color: 0xffc94a, transparent: true, opacity: 0.55, side: THREE.DoubleSide, depthWrite: false }),
+  )
+  ring.rotation.x = -Math.PI / 2
+  ring.position.y = 0.05
+  group.add(pad, ring)
+  group.userData.pad = pad
+  return group
+}
+
 export function createBeacon(): THREE.Group {
   const group = new THREE.Group()
   const column = new THREE.Mesh(

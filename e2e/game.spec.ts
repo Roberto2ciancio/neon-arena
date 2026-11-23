@@ -1289,6 +1289,33 @@ test('run del giorno: mappa e carte uguali per tutti, record di oggi a fine run'
   expect(errors).toEqual([])
 })
 
+test('storia a frammenti: una registrazione raccolta finisce nell’archivio', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  await page.addInitScript(() => window.localStorage.setItem('neon-arena:graphics:v1', 'low'))
+  await page.goto('/')
+  await expect(page.locator('#archive-badge')).toHaveText('0/15')
+  await page.locator('[data-map="lab-21"]').click()
+  await page.getByRole('button', { name: 'INIZIA RUN' }).click()
+  await expect(page.locator('#app')).toHaveAttribute('data-state', 'playing')
+  expect(await page.evaluate(() => (window as any).__neonArena.game.lorePickups.length)).toBe(3)
+  await page.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    game.clearEntities()
+    game.spawnQueue = 5
+    game.spawnTimer = 999
+    const pickup = game.lorePickups[0].group.position
+    game.debugPlace(pickup.x + 0.3, 0, pickup.z, 0, 0)
+  })
+  await expect.poll(() => page.evaluate(() => (window as any).__neonArena.game.lorePickups.length)).toBe(2)
+  await expect(page.locator('#archive-badge')).toHaveText('1/15')
+  await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: 'TERMINA RUN' }).click()
+  await page.locator('[data-drawer="archive"]').click()
+  await expect(page.locator('#archive-panel .challenge-item.done')).toHaveCount(1)
+  expect(errors).toEqual([])
+})
+
 test('la classifica globale mostra schede, K/D con partite e profilo pubblico', async ({ page }) => {
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))

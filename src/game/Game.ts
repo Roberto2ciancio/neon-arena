@@ -26,7 +26,8 @@ import type { CoopPlayerStatus } from './coop/coopRules'
 import { ENEMY_FLAG_ATTACK, ENEMY_FLAG_ELITE, ENEMY_FLAG_EXPOSED, ENEMY_FLAG_GOLDEN, ENEMY_FLAG_MINIBOSS_SHIFT, ENEMY_FLAG_RISING, ENEMY_FLAG_SLAM, packEnemy, unpackEnemy } from './coop/coopProtocol'
 import { getMinibossForWave, getRegeneration, MINIBOSS, MINIBOSS_IDS, MINIBOSSES } from './minibosses'
 import type { MinibossId } from './minibosses'
-import { createBeacon, createGeneratorModel, createSupplyCrate, createToxicCloud, setGeneratorLook } from './objectiveModels'
+import { createBeacon, createGeneratorModel, createLorePickup, createSupplyCrate, createToxicCloud, setGeneratorLook } from './objectiveModels'
+import { findLorePoint, getLoreForMap, LORE_PICKUP_RANGE } from './lore'
 import { chooseSupplyReward, getSupplyCredits, shouldDropSupplyCrate, SUPPLY_CRATE, SUPPLY_LABELS } from './waveBreak'
 import type { SupplyReward } from './waveBreak'
 import { getRewardMultiplier, getRunModifierEffects, RUN_MODIFIERS } from './runModifiers'
@@ -383,6 +384,8 @@ export class Game implements TouchTarget {
   private runEffects: RunModifierEffects = getRunModifierEffects([])
   /** Run del giorno: eventi, miniboss ed eventi rari dallo stesso seme per tutti. */
   private dailyKey: string | null = null
+  /** Registrazioni della storia ancora da raccogliere in questa run. */
+  private lorePickups: { id: string; group: THREE.Group }[] = []
   private random: () => number = Math.random
   private hordeRemaining = 0
   private hordeTimer = 0
@@ -797,6 +800,7 @@ export class Game implements TouchTarget {
     this.clearEntities()
     this.setMap(map)
     this.resetObjectives()
+    this.spawnLore(options.foundLore ?? [])
     this.prewarmEnemies()
     this.introducedKinds.clear()
     this.introducedKinds.add('walker')
@@ -880,13 +884,13 @@ export class Game implements TouchTarget {
    * Avvia una partita Zombie cooperativa. L'host simula zombie, ondate e bonus; i compagni
    * ricevono lo stato del mondo e inviano posizione e colpi.
    */
-  startCoop(session: CoopSession, mapId: string, players: readonly CoopLobbyPlayer[], bonuses: MetaBonuses, loadout?: ResolvedLoadout): void {
+  startCoop(session: CoopSession, mapId: string, players: readonly CoopLobbyPlayer[], bonuses: MetaBonuses, loadout?: ResolvedLoadout, foundLore: readonly string[] = []): void {
     this.detachCoop()
     this.coop = session
     this.coopPlayers = Math.max(1, players.length)
     this.teammateKills.clear()
     const map = MAPS.find((candidate) => candidate.id === mapId) ?? STATION_13
-    this.start(bonuses, map, loadout)
+    this.start(bonuses, map, loadout, { foundLore })
     this.teammates.sync(players, session.localId, map.playerSpawn)
     if (session.isHost) {
       this.coopUnsubscribe.push(session.onClient((peerId, message) => this.handleCoopClient(peerId, message)))
@@ -3183,6 +3187,49 @@ export class Game implements TouchTarget {
     for (const door of this.doors) door.locked = false
   }
 
+  // --- Storia a frammenti (piano gameplay G6) ------------------------------------------------
+  private spawnLore(found: readonly string[]): void {
+    for (const pickup of this.lorePickups) {
+      this.scene.remove(pickup.group)
+      disposeObject(pickup.group)
+    }
+    this.lorePickups = []
+    const isFree = (x: number, z: number) => {
+      if (getGroundHeight(x, z, 0, 0.8, this.obstacles) > 0 || this.navigation.areaHeightOf({ x, y: 0, z }) > 0) return false
+      const point = new THREE.Vector3(x, 0, z)
+      resolveBodyCollisions(point, 0.8, 1, this.obstacles)
+      return point.distanceTo(new THREE.Vector3(x, 0, z)) < 0.01
+    }
+    for (const entry of getLoreForMap(this.map.id)) {
+      if (found.includes(entry.id)) continue
+      const point = findLorePoint(entry.id, this.map.arenaLimit, isFree)
+      if (!point) continue
+      const group = createLorePickup()
+      group.position.set(point.x, 0, point.z)
+      this.scene.add(group)
+      this.lorePickups.push({ id: entry.id, group })
+    }
+  }
+
+  private updateLore(): void {
+    for (let index = this.lorePickups.length - 1; index >= 0; index -= 1) {
+      const pickup = this.lorePickups[index]!
+      const pad = pickup.group.userData.pad as THREE.Object3D
+      pad.rotation.y = this.elapsed * 1.2
+      pad.position.y = 1 + Math.sin(this.elapsed * 2 + index) * 0.08
+      if (this.coopStatus !== 'alive') continue
+      if (Math.hypot(pickup.group.position.x - this.player.x, pickup.group.position.z - this.player.z) > LORE_PICKUP_RANGE || Math.abs(this.player.y - pickup.group.position.y) > 1.5) continue
+      const entry = getLoreForMap(this.map.id).find((candidate) => candidate.id === pickup.id)
+      this.scene.remove(pickup.group)
+      disposeObject(pickup.group)
+      this.lorePickups.splice(index, 1)
+      if (!entry) continue
+      this.audio.play('pickup')
+      this.events.onNotice?.(`REGISTRAZIONE // ${entry.title}`, `${entry.author}: «${entry.text}»`, 0xffc94a)
+      this.events.onLoreFound?.(entry.id)
+    }
+  }
+
   // --- Coperture, nemici che si combinano, eventi rari (piano gameplay G3) -------------------
   private findCoverAhead(enemy: Enemy, direction: THREE.Vector3): CollisionObstacle | null {
     const probeX = enemy.body.position.x + direction.x * (enemy.radius + 0.45)
@@ -3445,6 +3492,7 @@ export class Game implements TouchTarget {
   }
 
   private updateObjectives(delta: number): void {
+    this.updateLore()
     this.updateSupplyCrate(delta)
     this.updateToxicCloud(delta)
     const generator = this.map.generator
@@ -4857,6 +4905,8 @@ function toVec3(vector: THREE.Vector3): Vec3 {
 export interface RunOptions {
   modifiers?: RunModifierId[]
   daily?: { key: string; seed: number }
+  /** Registrazioni già trovate: non ricompaiono sulla mappa. */
+  foundLore?: readonly string[]
 }
 
 interface Victim {
