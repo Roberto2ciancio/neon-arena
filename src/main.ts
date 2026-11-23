@@ -37,6 +37,8 @@ import { CAMOS, COSMETIC_CATALOG } from './game/cosmetics'
 import type { CosmeticOption } from './game/cosmetics'
 import { EQUIPMENT } from './game/equipment'
 import { JETPACK_FUEL, MOBILITY } from './game/mobility'
+import { CHALLENGE_REWARDS, describeChallenge, getChallengeRewards, loadChallenges, recordChallengeEvent, refreshChallenges, saveChallenges } from './game/challenges'
+import type { ActiveChallenge, ChallengeEvent, ChallengeSet } from './game/challenges'
 import { MELEE_WEAPONS } from './game/weapons'
 import type { GameState, HudData, RunResult, TctHudData } from './game/types'
 
@@ -688,6 +690,7 @@ function applyMergedSave(save: PlayerSave): void {
 }
 
 const DRAWER_TITLES: Record<string, string> = {
+  challenges: 'SFIDE',
   profile: 'PROFILO',
   workshop: 'OFFICINA',
   leaderboard: 'CLASSIFICA',
@@ -698,6 +701,7 @@ const DRAWER_TITLES: Record<string, string> = {
 function openDrawer(panel: string): void {
   byId('drawer-title').textContent = DRAWER_TITLES[panel] ?? ''
   if (panel === 'profile') renderProfileSection()
+  if (panel === 'challenges') renderChallenges()
   if (panel === 'leaderboard') void leaderboardPanel.open()
   document.querySelectorAll<HTMLElement>('[data-drawer-panel]').forEach((section) => {
     section.classList.toggle('active', section.dataset.drawerPanel === panel)
@@ -775,6 +779,63 @@ function grantXp(amount: number): string {
   return ` +${amount} XP // LIVELLO ${result.state.level}!${unlocked.length > 0 ? ` Sbloccati: ${unlocked.join(', ')}.` : ''}`
 }
 
+// --- Sfide giornaliere e settimanali ----------------------------------------------------------
+let challenges = loadChallenges(window.localStorage, new Date())
+
+function renderChallenges(): void {
+  challenges = refreshChallenges(challenges, new Date())
+  const panel = byId('challenges-panel')
+  panel.replaceChildren()
+  const group = (title: string, set: ChallengeSet, reward: { xp: number; shards: number }) => {
+    const section = document.createElement('section')
+    section.className = 'challenge-group'
+    const heading = document.createElement('h3')
+    heading.textContent = title
+    const small = document.createElement('small')
+    small.textContent = `+${reward.xp} XP · ◆ ${reward.shards} ciascuna`
+    heading.append(small)
+    section.append(heading)
+    for (const item of set.items) {
+      const row = document.createElement('div')
+      row.className = `challenge-item${item.done ? ' done' : ''}`
+      const text = document.createElement('p')
+      text.textContent = describeChallenge(item)
+      const status = document.createElement('span')
+      status.textContent = item.done ? 'COMPLETATA' : `${item.progress} / ${item.goal}${item.best ? ' // IN UNA SOLA RUN' : ''}`
+      const bar = document.createElement('div')
+      bar.className = 'challenge-bar'
+      const fill = document.createElement('i')
+      fill.style.width = `${Math.round((item.progress / item.goal) * 100)}%`
+      bar.append(fill)
+      row.append(text, bar, status)
+      section.append(row)
+    }
+    panel.append(section)
+  }
+  group('GIORNALIERE', challenges.daily, CHALLENGE_REWARDS.daily)
+  group('SETTIMANALI', challenges.weekly, CHALLENGE_REWARDS.weekly)
+  renderChallengesBadge()
+}
+
+function renderChallengesBadge(): void {
+  const open = [...challenges.daily.items, ...challenges.weekly.items].filter((item) => !item.done).length
+  byId('challenges-badge').textContent = open > 0 ? `${open} DA FARE` : 'TUTTE FATTE'
+}
+
+/** Registra la partita nelle sfide; restituisce XP da aggiungere, frammenti già accreditati e il testo. */
+function advanceChallenges(event: ChallengeEvent): { xp: number; text: string } {
+  const outcome = recordChallengeEvent(challenges, event, new Date())
+  challenges = outcome.state
+  saveChallenges(window.localStorage, challenges)
+  renderChallengesBadge()
+  const completed: ActiveChallenge[] = [...outcome.daily, ...outcome.weekly]
+  if (completed.length === 0) return { xp: 0, text: '' }
+  const reward = getChallengeRewards(outcome.daily.length, outcome.weekly.length)
+  progress = { ...progress, cores: progress.cores + reward.shards }
+  saveProgress(window.localStorage, progress)
+  return { xp: reward.xp, text: ` Sfide completate: ${completed.map(describeChallenge).join('; ')} (+◆ ${reward.shards}).` }
+}
+
 /** I livelli delle armi valgono solo in Zombie: nel TCT tutti hanno le stesse statistiche. */
 function currentLoadout(mode: 'zombies' | 'tct' = 'zombies') {
   return resolveLoadout(armory.loadout, armory.cosmetics, mode === 'zombies' ? armory.weaponLevels : {}, mode === 'zombies')
@@ -797,10 +858,11 @@ function completeRun(result: RunResult): void {
   byId('result-kills').textContent = String(result.kills)
   byId('result-shards').textContent = `+${result.shards}`
   byId('gameover-title').textContent = result.won ? 'STAZIONE SICURA' : 'RUN TERMINATA'
-  const xp = result.kills * XP_REWARDS.zombieKill + Math.max(0, result.wave - 1) * XP_REWARDS.wave + XP_REWARDS.runComplete
+  const challengeOutcome = advanceChallenges({ zombie: result })
+  const xp = result.kills * XP_REWARDS.zombieKill + Math.max(0, result.wave - 1) * XP_REWARDS.wave + XP_REWARDS.runComplete + challengeOutcome.xp
   byId('gameover-message').textContent = (result.won
     ? 'Hai superato tutte le 15 ondate. Bonus vittoria: 8 frammenti.'
-    : `L’orda ti ha sopraffatto all’ondata ${result.wave} di 15.`) + ((result.bestCombo ?? 0) >= 2 ? ` Combo migliore: ×${result.bestCombo}.` : '') + formatMedals(result.medals) + grantXp(xp) + grantWeaponXp(result.weaponXp ?? {})
+    : `L’orda ti ha sopraffatto all’ondata ${result.wave} di 15.`) + ((result.bestCombo ?? 0) >= 2 ? ` Combo migliore: ×${result.bestCombo}.` : '') + formatMedals(result.medals) + challengeOutcome.text + grantXp(xp) + grantWeaponXp(result.weaponXp ?? {})
   byId('gameover-title').textContent += result.score > previousBest && result.score > 0 ? ' // NUOVO RECORD' : ''
   renderMenu()
 }
@@ -818,8 +880,9 @@ function completeTctMatch(result: TctResult): void {
   byId('result-kills').textContent = `${result.kills} / ${result.deaths}`
   byId('result-shards').parentElement?.classList.add('hidden')
   byId('gameover-title').textContent = result.outcome === 'draw' ? 'PAREGGIO' : result.outcome === 'win' ? 'VITTORIA' : 'SCONFITTA'
-  const xp = result.kills * XP_REWARDS.tctKill + XP_REWARDS.tctMatch + (result.outcome === 'win' ? XP_REWARDS.tctWin : 0)
-  byId('gameover-message').textContent = `Match TCT online terminato.${grantXp(xp)}${grantWeaponXp(result.weaponXp ?? {})}`
+  const challengeOutcome = advanceChallenges({ tct: { kills: result.kills, won: result.outcome === 'win' } })
+  const xp = result.kills * XP_REWARDS.tctKill + XP_REWARDS.tctMatch + (result.outcome === 'win' ? XP_REWARDS.tctWin : 0) + challengeOutcome.xp
+  byId('gameover-message').textContent = `Match TCT online terminato.${challengeOutcome.text}${grantXp(xp)}${grantWeaponXp(result.weaponXp ?? {})}`
   byId('restart-button').textContent = 'TORNA ALLA LOBBY'
   byId('menu-button').textContent = 'ESCI DALLA STANZA'
 }
@@ -1372,6 +1435,7 @@ window.addEventListener('keydown', (event) => {
 byId<HTMLButtonElement>('pause-settings-button').addEventListener('click', () => openDrawer('settings'))
 
 renderMenu()
+renderChallengesBadge()
 renderProfile()
 void initializeCloud()
 void accountPanel.initialize()

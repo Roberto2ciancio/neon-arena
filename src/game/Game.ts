@@ -187,6 +187,25 @@ interface Projectile {
   blast?: number
 }
 
+interface PlayerProjectile {
+  mesh: THREE.Mesh
+  /** Posizione vera della traiettoria (parte dall'occhio). */
+  position: THREE.Vector3
+  velocity: THREE.Vector3
+  gravity: number
+  kind: 'bolt' | 'grenade'
+  damage: number
+  blast: number
+  pierceLeft: number
+  hit: Set<Enemy>
+  life: number
+  critical: boolean
+  /** Arma che l'ha sparato: conta anche se nel frattempo si cambia arma. */
+  weapon: ResolvedWeapon
+  /** 1 = mesh ancora sulla bocca dell'arma, 0 = sulla traiettoria. */
+  visualBlend: number
+}
+
 interface Shockwave {
   origin: THREE.Vector3
   elapsed: number
@@ -302,6 +321,10 @@ export class Game implements TouchTarget {
   private readonly dyingEnemies: DyingEnemy[] = []
   private readonly projectiles: Projectile[] = []
   private readonly shockwaves: Shockwave[] = []
+  private readonly playerProjectiles: PlayerProjectile[] = []
+  private readonly boltGeometry = new THREE.CylinderGeometry(0.012, 0.012, 0.62, 6).rotateX(Math.PI / 2)
+  private readonly launcherGrenadeGeometry = new THREE.SphereGeometry(0.07, 10, 8)
+  private readonly launcherMaterial = new THREE.MeshStandardMaterial({ color: 0x5a5f68, roughness: 0.45, metalness: 0.6, emissive: 0x332211, emissiveIntensity: 0.4 })
   // --- Obiettivi ---
   private generator: GeneratorStatus = createGenerator()
   private generatorDamage = 0
@@ -1349,6 +1372,10 @@ export class Game implements TouchTarget {
   private firePlayerWeapon(): void {
     const profile = this.weapons.soundProfile()
     if (profile) this.audio.gunshot(profile)
+    if (this.weaponDefinition.projectile) {
+      this.fireLauncher()
+      return
+    }
     if (this.weaponDefinition.pellets === 1 || Math.random() < 0.5) this.audio.play('shell')
     this.precisionHitThisShot = false
 
@@ -1367,60 +1394,8 @@ export class Game implements TouchTarget {
       direction.y += (Math.random() - 0.5) * spread
       direction.z += (Math.random() - 0.5) * spread
       direction.normalize()
-      const ray = new THREE.Ray(origin, direction)
       const wallDistance = raycastObstacles(origin, direction, this.weaponDefinition.range, this.obstacles)
-      const hits: HitscanHit[] = []
-
-      for (const enemy of this.enemies) {
-        if (enemy.health <= 0) continue
-        const zones: { point: THREE.Vector3 | null; zone: HitZone }[] = [
-          {
-            point: ray.intersectSphere(new THREE.Sphere(
-              enemy.model.head.getWorldPosition(new THREE.Vector3()),
-              enemy.model.height * 0.14,
-            ), new THREE.Vector3()),
-            zone: 'head',
-          },
-          {
-            point: ray.intersectSphere(new THREE.Sphere(
-              enemy.model.body.getWorldPosition(new THREE.Vector3()),
-              enemy.radius * 0.9,
-            ), new THREE.Vector3()),
-            zone: 'body',
-          },
-        ]
-        if (enemy.kind === 'runner') {
-          zones.push({
-            point: ray.intersectSphere(new THREE.Sphere(
-              enemy.model.group.position.clone().add(new THREE.Vector3(0, 0.45, 0)),
-              0.48,
-            ), new THREE.Vector3()),
-            zone: 'legs',
-          })
-        }
-        const hasWeakPoint = enemy.kind === 'armored' || enemy.kind === 'crawler'
-          || enemy.kind === 'spitter' || enemy.kind === 'screamer'
-          || enemy.kind === 'bloater' || enemy.kind === 'shielder' || enemy.kind === 'leaper'
-          || (isBoss(enemy.kind) && enemy.coreExposedTimer > 0)
-        if (hasWeakPoint) {
-          zones.push({
-            point: ray.intersectSphere(new THREE.Sphere(
-              enemy.model.weakPoint.getWorldPosition(new THREE.Vector3()),
-              isBoss(enemy.kind) ? 0.36 : 0.3,
-            ), new THREE.Vector3()),
-            zone: getWeakPointZone(enemy.kind),
-          })
-        }
-
-        for (const zone of zones) {
-          if (!zone.point) continue
-          const distance = origin.distanceTo(zone.point)
-          if (distance > this.weaponDefinition.range || (wallDistance !== null && distance > wallDistance)) continue
-          hits.push({ enemy, point: zone.point, distance, zone: zone.zone })
-        }
-      }
-
-      hits.sort((a, b) => a.distance - b.distance)
+      const hits = this.rayZoneHits(origin, direction, this.weaponDefinition.range, wallDistance)
       const targets: HitscanHit[] = []
       const hitEnemies = new Set<Enemy>()
       for (const hit of hits) {
@@ -1450,11 +1425,175 @@ export class Game implements TouchTarget {
     this.killDestroyedEnemies()
   }
 
-  private applyZombieHit(hit: HitscanHit, critical: boolean, shotFactor = 1): void {
+  /** Zone colpite (testa, corpo, punti deboli) lungo un raggio, ordinate per distanza. */
+  private rayZoneHits(origin: THREE.Vector3, direction: THREE.Vector3, maxDistance: number, wallDistance: number | null): HitscanHit[] {
+    const ray = new THREE.Ray(origin, direction)
+    const hits: HitscanHit[] = []
+    for (const enemy of this.enemies) {
+      if (enemy.health <= 0) continue
+      const zones: { point: THREE.Vector3 | null; zone: HitZone }[] = [
+        {
+          point: ray.intersectSphere(new THREE.Sphere(
+            enemy.model.head.getWorldPosition(new THREE.Vector3()),
+            enemy.model.height * 0.14,
+          ), new THREE.Vector3()),
+          zone: 'head',
+        },
+        {
+          point: ray.intersectSphere(new THREE.Sphere(
+            enemy.model.body.getWorldPosition(new THREE.Vector3()),
+            enemy.radius * 0.9,
+          ), new THREE.Vector3()),
+          zone: 'body',
+        },
+      ]
+      if (enemy.kind === 'runner') {
+        zones.push({
+          point: ray.intersectSphere(new THREE.Sphere(
+            enemy.model.group.position.clone().add(new THREE.Vector3(0, 0.45, 0)),
+            0.48,
+          ), new THREE.Vector3()),
+          zone: 'legs',
+        })
+      }
+      const hasWeakPoint = enemy.kind === 'armored' || enemy.kind === 'crawler'
+        || enemy.kind === 'spitter' || enemy.kind === 'screamer'
+        || enemy.kind === 'bloater' || enemy.kind === 'shielder' || enemy.kind === 'leaper'
+        || (isBoss(enemy.kind) && enemy.coreExposedTimer > 0)
+      if (hasWeakPoint) {
+        zones.push({
+          point: ray.intersectSphere(new THREE.Sphere(
+            enemy.model.weakPoint.getWorldPosition(new THREE.Vector3()),
+            isBoss(enemy.kind) ? 0.36 : 0.3,
+          ), new THREE.Vector3()),
+          zone: getWeakPointZone(enemy.kind),
+        })
+      }
+      for (const zone of zones) {
+        if (!zone.point) continue
+        const distance = origin.distanceTo(zone.point)
+        if (distance > maxDistance || (wallDistance !== null && distance > wallDistance)) continue
+        hits.push({ enemy, point: zone.point, distance, zone: zone.zone })
+      }
+    }
+    return hits.sort((a, b) => a.distance - b.distance)
+  }
+
+  // --- Lanciatori (balestra e lanciagranate) -------------------------------------------------
+  private fireLauncher(): void {
+    const weapon = this.weaponDefinition
+    const profile = weapon.projectile!
+    const direction = this.camera.getWorldDirection(new THREE.Vector3())
+    const spread = (this.aiming ? weapon.adsSpread : weapon.hipSpread) * (this.controller.crouched ? 0.7 : 1)
+    direction.x += (Math.random() - 0.5) * spread
+    direction.y += (Math.random() - 0.5) * spread
+    direction.z += (Math.random() - 0.5) * spread
+    direction.normalize()
+    // Parte dall'occhio (così colpisce dove si mira) ma si disegna dalla bocca dell'arma.
+    const mesh = new THREE.Mesh(profile.kind === 'bolt' ? this.boltGeometry : this.launcherGrenadeGeometry, this.launcherMaterial)
+    mesh.position.copy(this.weapons.muzzlePosition())
+    mesh.lookAt(mesh.position.clone().add(direction))
+    this.scene.add(mesh)
+    this.playerProjectiles.push({
+      mesh,
+      position: this.camera.position.clone(),
+      velocity: direction.multiplyScalar(profile.speed),
+      gravity: profile.gravity,
+      kind: profile.kind,
+      damage: weapon.damage * (this.stats.damage / 20),
+      blast: profile.blastRadius ?? 0,
+      pierceLeft: (profile.pierce ?? 0) + this.stats.pierce,
+      hit: new Set(),
+      life: 4,
+      critical: Math.random() < this.stats.critChance,
+      weapon,
+      visualBlend: 1,
+    })
+  }
+
+  private updatePlayerProjectiles(delta: number): void {
+    for (let index = this.playerProjectiles.length - 1; index >= 0; index -= 1) {
+      const projectile = this.playerProjectiles[index]!
+      projectile.life -= delta
+      projectile.velocity.y -= projectile.gravity * delta
+      const step = projectile.velocity.length() * delta
+      const direction = projectile.velocity.clone().normalize()
+      const wall = raycastObstacles(projectile.position, direction, step, this.obstacles)
+      const floor = getGroundHeight(projectile.position.x, projectile.position.z, projectile.position.y, 0.1, this.obstacles)
+      const hits = this.rayZoneHits(projectile.position, direction, step, wall).filter((hit) => !projectile.hit.has(hit.enemy))
+      let stopped = false
+      for (const hit of hits) {
+        if (projectile.kind === 'grenade') {
+          this.launcherBlast(hit.point, projectile)
+          stopped = true
+          break
+        }
+        projectile.hit.add(hit.enemy)
+        // Il dardo usa le stesse regole dei colpi (punti deboli, armature, scudi) e poi prosegue.
+        this.applyZombieHit(hit, projectile.critical, 1, projectile.weapon)
+        this.audio.play(hit.zone === 'head' ? 'headshot' : 'hit')
+        if (projectile.pierceLeft <= 0) {
+          stopped = true
+          break
+        }
+        projectile.pierceLeft -= 1
+      }
+      if (!stopped && wall !== null) {
+        const impact = projectile.position.clone().addScaledVector(direction, wall)
+        if (projectile.kind === 'grenade') this.launcherBlast(impact, projectile)
+        else {
+          this.effects.sparks(impact, direction.clone().negate(), 0xd8e2ff, 4)
+          this.decals.spawn(impact, projectile.position)
+        }
+        stopped = true
+      }
+      if (!stopped) projectile.position.addScaledVector(direction, step)
+      if (!stopped && (projectile.position.y <= floor || projectile.life <= 0)) {
+        if (projectile.kind === 'grenade') this.launcherBlast(projectile.position.clone().setY(Math.max(floor, projectile.position.y)), projectile)
+        stopped = true
+      }
+      if (stopped) {
+        this.scene.remove(projectile.mesh)
+        this.playerProjectiles.splice(index, 1)
+        continue
+      }
+      // La mesh parte dalla bocca dell'arma e raggiunge in fretta la traiettoria vera.
+      projectile.visualBlend = Math.max(0, projectile.visualBlend - delta * 8)
+      projectile.mesh.position.lerp(projectile.position, 1 - projectile.visualBlend * 0.5)
+      projectile.mesh.lookAt(projectile.mesh.position.clone().add(direction))
+    }
+    this.killDestroyedEnemies()
+  }
+
+  /** Granata del lanciagranate: danno ad area decrescente, esplosivi potenziati da Esplosivista. */
+  private launcherBlast(point: THREE.Vector3, projectile: PlayerProjectile): void {
+    const radius = projectile.blast
+    const ground = getGroundHeight(point.x, point.z, point.y + 0.3, 0.3, this.obstacles)
+    this.effects.explosion(point.clone(), radius, 0xffa04a, ground)
+    this.audio.playAt('explosion', point, this.player, this.yaw)
+    if (point.distanceTo(this.player) < radius * 2.5) this.cameraShake = Math.max(this.cameraShake, 0.3)
+    const explosive = 1 + (1 - this.stats.demolition) * 1.25
+    for (const enemy of this.enemies) {
+      if (enemy.health <= 0 || enemy.spawnTimer > 0) continue
+      const center = enemy.body.position.clone().setY(enemy.body.position.y + Math.min(enemy.model.height, 1.9) / 2)
+      const distance = center.distanceTo(point)
+      if (distance > radius + enemy.radius) continue
+      const falloff = 1 - 0.5 * Math.min(1, distance / radius)
+      this.dealDamage(enemy, this.scaleDamage(enemy, projectile.damage * falloff * explosive * this.executionBonus(enemy)))
+      this.recordHit(enemy, 'explosion', null, null, point)
+      const push = enemy.body.position.clone().sub(point).setY(0)
+      if (push.lengthSq() > 0.0001) enemy.knockback.addScaledVector(push.normalize(), isBoss(enemy.kind) ? 1 : 6)
+      enemy.hitFlash = 0.12
+      enemy.flinch = 1
+    }
+    this.killDestroyedEnemies()
+  }
+
+  private applyZombieHit(hit: HitscanHit, critical: boolean, shotFactor = 1, weapon: ResolvedWeapon = this.weaponDefinition): void {
     const enemy = hit.enemy
     // Danno pieno entro la distanza efficace della categoria, poi cala; i colpi di Colpo multiplo valgono meno.
-    const baseDamage = this.weaponDefinition.damage * (this.stats.damage / 20) * shotFactor * getRangeMultiplier(this.weaponDefinition, this.camera.position.distanceTo(hit.point))
-    let multiplier = hit.zone === 'head' ? this.weaponDefinition.headshotMultiplier : 1
+    const baseDamage = weapon.damage * (this.stats.damage / 20) * shotFactor * getRangeMultiplier(weapon, this.camera.position.distanceTo(hit.point))
+    let multiplier = hit.zone === 'head' ? weapon.headshotMultiplier : 1
 
     if (enemy.kind === 'runner' && hit.zone === 'legs') {
       enemy.slowTimer = 2.2
@@ -1494,7 +1633,7 @@ export class Game implements TouchTarget {
     const healthBefore = enemy.health
     this.dealDamage(enemy, damage, precisionZone)
     enemy.hitFlash = 0.08
-    this.recordHit(enemy, this.weaponDefinition.pellets > 1 ? 'shotgun' : 'bullet', hit.zone, hit.point)
+    this.recordHit(enemy, weapon.pellets > 1 ? 'shotgun' : 'bullet', hit.zone, hit.point)
     this.spawnBlood(hit.point, enemy.lastHitDir, enemy.kind, hit.zone === 'head' ? 7 : 3)
     if (this.damageNumbers) this.emitDamageNumber(hit.point, damage, healthBefore > 0 && enemy.health <= 0 ? 'kill' : precisionZone ? 'head' : 'body')
     // Reazione al colpo: sobbalzo e piccola spinta all'indietro.
@@ -3043,6 +3182,8 @@ export class Game implements TouchTarget {
     this.dyingEnemies.length = 0
     this.projectiles.length = 0
     this.shockwaves.length = 0
+    for (const projectile of this.playerProjectiles) this.scene.remove(projectile.mesh)
+    this.playerProjectiles.length = 0
     this.pickups.length = 0
     this.particles.length = 0
     this.tracers.length = 0
@@ -3552,6 +3693,8 @@ export class Game implements TouchTarget {
     this.updateEquipment(delta)
     if (this.state !== 'playing') return
     this.updateObjectives(delta)
+    if (this.state !== 'playing') return
+    this.updatePlayerProjectiles(delta)
     if (this.state !== 'playing') return
     this.updateProjectiles(delta)
     this.updateShockwaves(delta)

@@ -996,6 +996,73 @@ test('boss: il Bruto cambia fase, il Tiranno lancia macigni e gli zombie sfondan
   expect(errors).toEqual([])
 })
 
+test('lanciatori: il dardo della balestra attraversa tre zombie', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  await page.addInitScript(() => {
+    window.localStorage.setItem('neon-arena:armory:v1', JSON.stringify({ level: 40, xp: 0, loadout: { primary: 'xb-9', secondary: 'p-12' } }))
+    window.localStorage.setItem('neon-arena:graphics:v1', 'low')
+  })
+  await page.goto('/')
+  await page.locator('[data-map="district-zero"]').click()
+  await page.getByRole('button', { name: 'INIZIA RUN' }).click()
+  await expect(page.locator('#app')).toHaveAttribute('data-state', 'playing')
+  await expect(page.locator('#weapon-name')).toContainText('XB-9')
+  const lineUp = () => page.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    game.clearEntities()
+    game.spawnQueue = 0
+    game.activePowerUps.set('barrier', 999)
+    game.debugPlace(0, 0, 12, 0, 0)
+    for (let index = 0; index < 3; index += 1) {
+      const zombie = game.spawnEnemy('walker')
+      zombie.body.position.set(0, 0, 4 - index * 1.2)
+      zombie.spawnTimer = 0
+      zombie.speed = 0
+    }
+  })
+  const shoot = async () => {
+    await page.evaluate(() => (window as any).__neonArena.game.touchAction('fire', true))
+    await page.waitForTimeout(120)
+    await page.evaluate(() => (window as any).__neonArena.game.touchAction('fire', false))
+  }
+  await lineUp()
+  await shoot()
+  await expect.poll(() => page.evaluate(() => (window as any).__neonArena.game.kills)).toBe(3)
+  await expect(page.locator('#ammo-text')).toHaveText('04')
+  expect(errors).toEqual([])
+})
+
+test('sfide: il pannello mostra giornaliere e settimanali e una run le fa avanzare', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  await page.addInitScript(() => {
+    if (window.localStorage.getItem('test-seeded')) return
+    window.localStorage.setItem('test-seeded', '1')
+    window.localStorage.setItem('neon-arena:graphics:v1', 'low')
+    const now = new Date()
+    const pad = (value: number) => String(value).padStart(2, '0')
+    const key = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+    // Sfida giornaliera "gioca una run" pronta da completare (la settimanale si rigenera).
+    window.localStorage.setItem('neon-arena:challenges:v1', JSON.stringify({
+      daily: { key, items: [{ id: 'runs', metric: 'runs', goal: 1, progress: 0, done: false, best: false }, { id: 'kills', metric: 'kills', goal: 150, progress: 0, done: false, best: false }] },
+      weekly: { key: 'vecchia', items: [] },
+    }))
+  })
+  await page.goto('/')
+  await page.locator('[data-drawer="challenges"]').click()
+  await expect(page.locator('.challenge-group')).toHaveCount(2)
+  await expect(page.locator('.challenge-group').nth(1).locator('.challenge-item')).toHaveCount(2)
+  await expect(page.locator('.challenge-item').first()).toContainText('0 / 1')
+  await closeDrawer(page)
+  await page.getByRole('button', { name: 'INIZIA RUN' }).click()
+  await expect(page.locator('#app')).toHaveAttribute('data-state', 'playing')
+  await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: 'TERMINA RUN' }).click()
+  await expect(page.locator('#gameover-message')).toContainText('Sfide completate: Gioca 1 run Zombie')
+  expect(errors).toEqual([])
+})
+
 test('la classifica globale mostra schede, K/D con partite e profilo pubblico', async ({ page }) => {
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))

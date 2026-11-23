@@ -33,6 +33,7 @@ const BASE: Record<WeaponCategory, GunSoundProfile> = {
   assault: { crackFrequency: 2200, crackGain: 0.55, crackDecay: 0.035, bodyFrequency: 1700, bodyGain: 0.6, bodyDecay: 0.11, thumpStart: 150, thumpEnd: 55, thumpGain: 0.55, thumpDecay: 0.1, reverb: 0.3, actionDelay: null, pitchJitter: 0.05 },
   lmg: { crackFrequency: 1900, crackGain: 0.55, crackDecay: 0.04, bodyFrequency: 1400, bodyGain: 0.65, bodyDecay: 0.13, thumpStart: 130, thumpEnd: 48, thumpGain: 0.65, thumpDecay: 0.12, reverb: 0.32, actionDelay: null, pitchJitter: 0.05 },
   shotgun: { crackFrequency: 1500, crackGain: 0.6, crackDecay: 0.05, bodyFrequency: 1100, bodyGain: 0.8, bodyDecay: 0.2, thumpStart: 110, thumpEnd: 40, thumpGain: 0.85, thumpDecay: 0.18, reverb: 0.4, actionDelay: 0.32, pitchJitter: 0.04 },
+  launcher: { crackFrequency: 900, crackGain: 0.18, crackDecay: 0.04, bodyFrequency: 600, bodyGain: 0.55, bodyDecay: 0.16, thumpStart: 95, thumpEnd: 35, thumpGain: 0.8, thumpDecay: 0.2, reverb: 0.35, actionDelay: null, pitchJitter: 0.05 },
   sniper: { crackFrequency: 1800, crackGain: 0.75, crackDecay: 0.05, bodyFrequency: 1200, bodyGain: 0.75, bodyDecay: 0.24, thumpStart: 120, thumpEnd: 38, thumpGain: 0.9, thumpDecay: 0.22, reverb: 0.5, actionDelay: 0.45, pitchJitter: 0.03 },
 }
 

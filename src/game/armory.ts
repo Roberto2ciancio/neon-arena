@@ -326,15 +326,22 @@ export function syncActiveClass(state: ArmoryState): ArmoryState {
   return { ...state, classes: state.classes.map((entry, index) => index === state.activeClass ? { ...entry, loadout: state.loadout } : entry) }
 }
 
-export function resolveLoadout(loadout: Loadout, cosmetics: Cosmetics, weaponLevels: Partial<Record<WeaponId, number>> = {}, withMobility = true): ResolvedLoadout {
+/**
+ * `zombieMode` falso = TCT: niente modulo di mobilità e le armi solo Zombie (lanciatori)
+ * sostituite da quelle predefinite dello slot.
+ */
+export function resolveLoadout(loadout: Loadout, cosmetics: Cosmetics, weaponLevels: Partial<Record<WeaponId, number>> = {}, zombieMode = true): ResolvedLoadout {
+  const allowed = (id: WeaponId, fallback: WeaponId): WeaponId => (zombieMode || !WEAPONS[id].zombieOnly ? id : fallback)
+  const primary = allowed(loadout.primary, DEFAULT_LOADOUT.primary)
+  const secondary = allowed(loadout.secondary, DEFAULT_LOADOUT.secondary)
   return {
-    primary: resolveWeapon(WEAPONS[loadout.primary], loadout.attachments[loadout.primary], { level: weaponLevels[loadout.primary] }),
-    secondary: resolveWeapon(WEAPONS[loadout.secondary], loadout.attachments[loadout.secondary], { level: weaponLevels[loadout.secondary] }),
+    primary: resolveWeapon(WEAPONS[primary], loadout.attachments[primary], { level: weaponLevels[primary] }),
+    secondary: resolveWeapon(WEAPONS[secondary], loadout.attachments[secondary], { level: weaponLevels[secondary] }),
     melee: MELEE_WEAPONS[loadout.melee],
     lethal: loadout.lethal,
     tactical: loadout.tactical,
     gadget: loadout.gadget,
-    mobility: withMobility ? loadout.mobility : null,
+    mobility: zombieMode ? loadout.mobility : null,
     camos: loadout.camos,
     attachments: loadout.attachments,
     weaponLevels,

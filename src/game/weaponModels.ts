@@ -25,6 +25,7 @@ const SHAPES: Record<WeaponCategory, Shape> = {
   lmg: { receiver: 0.86, height: 0.26, barrel: 0.6, barrelRadius: 0.028, stock: 'full', magazine: 'drum', handguard: 0.5, pistol: false },
   pistol: { receiver: 0.32, height: 0.13, barrel: 0.04, barrelRadius: 0.016, stock: 'none', magazine: 'pistol', handguard: 0, pistol: true },
   'machine-pistol': { receiver: 0.34, height: 0.14, barrel: 0.08, barrelRadius: 0.017, stock: 'none', magazine: 'pistol', handguard: 0, pistol: true },
+  launcher: { receiver: 0.6, height: 0.22, barrel: 0.46, barrelRadius: 0.045, stock: 'full', magazine: 'cylinder', handguard: 0.3, pistol: false },
 }
 
 const camoCache = new Map<CamoId, THREE.CanvasTexture>()
@@ -193,6 +194,18 @@ export function createViewWeapon(weapon: WeaponDefinition, attachments: Attachme
     add(new RoundedBoxGeometry(0.12, 0.3, 0.15, 3, 0.025), dark, 0, -0.22, -0.12, -0.25)
     add(new THREE.BoxGeometry(0.09, 0.025, shape.receiver * 0.9), dark, 0, shape.height / 2 + 0.02, -0.28)
     add(new THREE.BoxGeometry(0.185, 0.025, shape.receiver * 0.35), accent, 0, shape.height / 2 - 0.005, -0.28 - shape.receiver * 0.2)
+    if (weapon.id === 'xb-9') {
+      // Balestra: flettenti ai lati della canna e corda.
+      for (const side of [-1, 1]) {
+        const limb = add(new RoundedBoxGeometry(0.34, 0.035, 0.05, 2, 0.012), dark, side * 0.2, 0.035, muzzleZ + 0.1)
+        limb.rotation.y = side * 0.32
+      }
+      add(new THREE.BoxGeometry(0.66, 0.006, 0.006), new THREE.MeshBasicMaterial({ color: 0xc9cfdf }), 0, 0.035, muzzleZ + 0.24)
+    }
+    if (attachments.stock === 'tactical-stock') {
+      add(new RoundedBoxGeometry(0.13, 0.17, 0.12, 3, 0.03), glove, 0, -0.03, 0.48)
+      add(new THREE.BoxGeometry(0.03, 0.05, 0.3), metal, 0, 0.05, 0.36)
+    }
   }
 
   // Caricatore: le sue parti finiscono in un gruppo a sé, così la ricarica può farlo cadere e reinserirlo.
@@ -209,6 +222,12 @@ export function createViewWeapon(weapon: WeaponDefinition, attachments: Attachme
   } else if (shape.magazine === 'drum') {
     const drum = add(new THREE.CylinderGeometry(0.16 * Math.sqrt(magScale), 0.16 * Math.sqrt(magScale), 0.12, 16), dark, 0, -0.22, magZ)
     drum.rotation.z = Math.PI / 2
+  } else if (shape.magazine === 'cylinder' && weapon.id === 'gl-40') {
+    // Tamburo da sei granate.
+    const drum = add(new THREE.CylinderGeometry(0.13, 0.13, 0.22 * magScale, 6), dark, 0, -0.06, -0.36)
+    drum.rotation.x = Math.PI / 2
+  } else if (shape.magazine === 'cylinder') {
+    add(new RoundedBoxGeometry(0.08, 0.06, 0.26, 2, 0.012), dark, 0, shape.height / 2 + 0.06, -0.15)
   } else if (shape.magazine === 'pistol' && extended) {
     add(new RoundedBoxGeometry(0.075, 0.12, 0.08, 2, 0.015), dark, 0, -0.29, 0.06, -0.22)
   }
@@ -240,6 +259,12 @@ export function createViewWeapon(weapon: WeaponDefinition, attachments: Attachme
     add(new RoundedBoxGeometry(0.07, 0.03, 0.09, 2, 0.01), dark, 0, opticY - 0.035, opticZ)
     add(new THREE.TorusGeometry(0.035, 0.007, 8, 20), dark, 0, opticY + 0.005, opticZ)
     add(new THREE.SphereGeometry(0.006, 8, 8), new THREE.MeshBasicMaterial({ color: 0xff3b3b }), 0, opticY + 0.005, opticZ - 0.01)
+  } else if (attachments.optic === 'canted-sight') {
+    // Mirino inclinato di 45° sul lato destro.
+    const mount = add(new RoundedBoxGeometry(0.06, 0.03, 0.09, 2, 0.01), dark, 0.06, opticY - 0.04, opticZ)
+    mount.rotation.z = -0.78
+    const ring = add(new THREE.TorusGeometry(0.03, 0.006, 8, 18), dark, 0.085, opticY - 0.015, opticZ)
+    ring.rotation.z = -0.78
   } else if (!shape.pistol) {
     add(new THREE.TorusGeometry(0.055, 0.008, 8, 24), dark, 0, opticY, opticZ)
     add(new THREE.SphereGeometry(0.009, 8, 8), accent, 0, opticY, opticZ - 0.095)

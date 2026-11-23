@@ -5,11 +5,12 @@ export type WeaponId =
   | 'dmr-3' | 'sr-50' | 'xr-1'
   | 'lmg-75' | 'mg-3x'
   | 'p-12' | 'r-44' | 'ap-18' | 'hc-50'
+  | 'xb-9' | 'gl-40'
 
 export type WeaponSlot = 'primary' | 'secondary'
-export type WeaponCategory = 'assault' | 'smg' | 'shotgun' | 'sniper' | 'lmg' | 'pistol' | 'machine-pistol'
+export type WeaponCategory = 'assault' | 'smg' | 'shotgun' | 'sniper' | 'lmg' | 'pistol' | 'machine-pistol' | 'launcher'
 export type FireMode = 'auto' | 'semi' | 'burst' | 'bolt'
-export type AttachmentSlot = 'optic' | 'muzzle' | 'barrel' | 'underbarrel' | 'magazine'
+export type AttachmentSlot = 'optic' | 'muzzle' | 'barrel' | 'underbarrel' | 'magazine' | 'stock'
 
 /** Rinculo per colpo in radianti: spinta verticale, deriva orizzontale, crescita nella raffica, recupero al secondo. */
 export interface RecoilProfile {
@@ -46,6 +47,21 @@ export interface WeaponDefinition {
   adsFov: number
   attachmentSlots: readonly AttachmentSlot[]
   unlockLevel: number
+  /** Arma a proiettile (balestra, lanciagranate) invece che istantanea. */
+  projectile?: ProjectileProfile
+  /** Solo nella modalità Zombie: nel TCT al suo posto si usa l'arma predefinita dello slot. */
+  zombieOnly?: boolean
+}
+
+export interface ProjectileProfile {
+  kind: 'bolt' | 'grenade'
+  /** Velocità iniziale (m/s) e gravità della traiettoria. */
+  speed: number
+  gravity: number
+  /** Raggio dell'esplosione (solo granate): danno pieno al centro, metà al bordo. */
+  blastRadius?: number
+  /** Nemici attraversati dal dardo oltre al primo. */
+  pierce?: number
 }
 
 export interface MagazineState {
@@ -53,9 +69,10 @@ export interface MagazineState {
   reserveAmmo: number | null
 }
 
-const RIFLE_SLOTS: readonly AttachmentSlot[] = ['optic', 'muzzle', 'barrel', 'underbarrel', 'magazine']
+const RIFLE_SLOTS: readonly AttachmentSlot[] = ['optic', 'muzzle', 'barrel', 'underbarrel', 'magazine', 'stock']
 const PISTOL_SLOTS: readonly AttachmentSlot[] = ['optic', 'muzzle', 'magazine']
-const SHOTGUN_SLOTS: readonly AttachmentSlot[] = ['optic', 'barrel', 'underbarrel', 'magazine']
+const SHOTGUN_SLOTS: readonly AttachmentSlot[] = ['optic', 'barrel', 'underbarrel', 'magazine', 'stock']
+const LAUNCHER_SLOTS: readonly AttachmentSlot[] = ['optic', 'underbarrel', 'stock']
 
 type Base = Omit<WeaponDefinition, 'id' | 'automatic' | 'burstCount'> & { burstCount?: number }
 
@@ -183,6 +200,22 @@ export const WEAPONS: Record<WeaponId, WeaponDefinition> = {
     recoil: { vertical: 0.022, horizontal: 0.005, growth: 0, recovery: 6 },
     headshotMultiplier: 2.3, pellets: 1, moveMultiplier: 1.05, adsFov: 58, attachmentSlots: ['optic', 'barrel'], unlockLevel: 5,
   }),
+  'xb-9': define('xb-9', {
+    name: 'XB-9 // BALESTRA', shortName: 'XB-9', description: 'Dardi silenziosi e pesanti che attraversano più nemici. Solo Zombie.',
+    slot: 'primary', category: 'launcher', fireMode: 'semi', damage: 150, fireRate: 1.15, magazineSize: 5,
+    reserveAmmo: 30, reloadDuration: 2.6, range: 90, hipSpread: 0.012, adsSpread: 0.0008,
+    recoil: { vertical: 0.006, horizontal: 0.001, growth: 0, recovery: 8 },
+    headshotMultiplier: 2.5, pellets: 1, moveMultiplier: 0.97, adsFov: 42, attachmentSlots: LAUNCHER_SLOTS, unlockLevel: 22,
+    projectile: { kind: 'bolt', speed: 78, gravity: 5, pierce: 2 }, zombieOnly: true,
+  }),
+  'gl-40': define('gl-40', {
+    name: 'GL-40 // LANCIAGRANATE', shortName: 'GL-40', description: 'Tamburo da sei granate che esplodono all’impatto: perfetto contro le folle. Solo Zombie.',
+    slot: 'primary', category: 'launcher', fireMode: 'semi', damage: 170, fireRate: 1, magazineSize: 6,
+    reserveAmmo: 24, reloadDuration: 3.4, range: 70, hipSpread: 0.01, adsSpread: 0.004,
+    recoil: { vertical: 0.03, horizontal: 0.006, growth: 0, recovery: 5 },
+    headshotMultiplier: 1, pellets: 1, moveMultiplier: 0.92, adsFov: 55, attachmentSlots: LAUNCHER_SLOTS, unlockLevel: 32,
+    projectile: { kind: 'grenade', speed: 32, gravity: 14, blastRadius: 4.2 }, zombieOnly: true,
+  }),
   'hc-50': define('hc-50', {
     name: 'HC-50 // CANNONE A MANO', shortName: 'HC-50', description: 'Pistola di grosso calibro: sette colpi devastanti.',
     slot: 'secondary', category: 'pistol', fireMode: 'semi', damage: 70, fireRate: 1.4, magazineSize: 7,
@@ -216,6 +249,8 @@ export const CATEGORY_RANGE: Record<WeaponCategory, RangeProfile> = {
   lmg: { effective: 30, max: 70, minDamage: 0.7 },
   sniper: { effective: 120, max: 160, minDamage: 0.9 },
   pistol: { effective: 16, max: 50, minDamage: 0.55 },
+  // I proiettili non perdono danno con la distanza: la traiettoria è già il limite.
+  launcher: { effective: 200, max: 200, minDamage: 1 },
 }
 
 /**
@@ -243,6 +278,7 @@ export const CATEGORY_LABELS: Record<WeaponCategory, string> = {
   lmg: 'MITRAGLIATRICI',
   pistol: 'PISTOLE',
   'machine-pistol': 'PISTOLE AUTOMATICHE',
+  launcher: 'LANCIATORI // SOLO ZOMBIE',
 }
 
 export type MeleeId = 'knife' | 'machete' | 'plasma'

@@ -224,6 +224,7 @@
 
         <nav class="menu-side" aria-label="Altre sezioni">
           <button type="button" class="side-link" data-drawer="profile"><strong>PROFILO</strong><span>Statistiche, armi potenziate, ultime run</span></button>
+          <button type="button" class="side-link" data-drawer="challenges"><strong>SFIDE</strong><span>Obiettivi del giorno e della settimana</span><b id="challenges-badge"></b></button>
           <button type="button" class="side-link" data-drawer="workshop"><strong>OFFICINA</strong><span>Potenziamenti permanenti con i frammenti</span><b><span class="core-icon">◆</span> <span id="core-balance-side">0</span></b></button>
           <button type="button" class="side-link" data-drawer="leaderboard"><strong>CLASSIFICA</strong><span>Le migliori run</span></button>
           <button type="button" class="side-link" data-drawer="settings"><strong>IMPOSTAZIONI</strong><span>Grafica, mouse, accessibilità, callsign</span></button>
@@ -244,6 +245,10 @@
           </div>
           <p class="panel-description">Investi i frammenti recuperati nelle run. I potenziamenti restano attivi per sempre.</p>
           <div id="meta-upgrades" class="meta-upgrades"></div>
+          </div>
+          <div class="drawer-section" data-drawer-panel="challenges">
+            <p class="panel-description">Uguali per tutti, cambiano ogni giorno e ogni lunedì. Si completano giocando: XP e frammenti arrivano a fine partita.</p>
+            <div id="challenges-panel" class="challenges-panel"></div>
           </div>
           <div class="drawer-section" data-drawer-panel="profile">
             <div id="profile-panel" class="profile-panel"></div>

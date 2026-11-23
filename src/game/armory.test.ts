@@ -156,3 +156,12 @@ describe('modulo di mobilità nel loadout', () => {
     expect(resolveLoadout(unlocked.loadout, DEFAULT_COSMETICS, {}, false).mobility).toBeNull()
   })
 })
+
+describe('armi solo Zombie', () => {
+  it('nel TCT balestra e lanciagranate diventano l’arma predefinita', () => {
+    const armory = normalizeArmory({ level: 40, loadout: { primary: 'gl-40' } })
+    expect(armory.loadout.primary).toBe('gl-40')
+    expect(resolveLoadout(armory.loadout, DEFAULT_COSMETICS).primary.id).toBe('gl-40')
+    expect(resolveLoadout(armory.loadout, DEFAULT_COSMETICS, {}, false).primary.id).toBe(DEFAULT_LOADOUT.primary)
+  })
+})

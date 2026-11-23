@@ -3,7 +3,7 @@ import { createMagazine, DEFAULT_WEAPON, MELEE_WEAPONS, PRIMARY_WEAPONS, reloadM
 
 describe('armi basate su dati', () => {
   it('copre tutte le classi primarie e secondarie con slot coerenti', () => {
-    expect(PRIMARY_WEAPONS).toHaveLength(15)
+    expect(PRIMARY_WEAPONS).toHaveLength(17)
     expect(SECONDARY_WEAPONS).toHaveLength(4)
     for (const id of WEAPON_ORDER) {
       const weapon = WEAPONS[id]
@@ -70,5 +70,19 @@ describe('gittata per categoria', () => {
     expect(getRangeMultiplier(catalog['ar-07'], 30)).toBeGreaterThan(getRangeMultiplier(catalog['smg-9'], 30))
     // Una canna lunga sposta in avanti la distanza efficace.
     expect(getRangeMultiplier({ ...catalog['smg-9'], range: 38 * 1.3 }, 14)).toBe(1)
+  })
+})
+
+describe('lanciatori (Fase 13)', () => {
+  it('balestra e lanciagranate sparano proiettili e restano fuori dal TCT', () => {
+    expect(WEAPONS['xb-9'].projectile?.kind).toBe('bolt')
+    expect(WEAPONS['xb-9'].projectile?.pierce).toBeGreaterThan(0)
+    expect(WEAPONS['gl-40'].projectile?.kind).toBe('grenade')
+    expect(WEAPONS['gl-40'].projectile?.blastRadius).toBeGreaterThan(3)
+    for (const id of ['xb-9', 'gl-40'] as const) {
+      expect(WEAPONS[id].zombieOnly).toBe(true)
+      expect(WEAPONS[id].category).toBe('launcher')
+    }
+    expect(WEAPON_ORDER.filter((id) => WEAPONS[id].projectile)).toEqual(['xb-9', 'gl-40'])
   })
 })

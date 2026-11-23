@@ -151,6 +151,16 @@ kbd { display: inline-block; color: #aab4cb; font-family: 'Chakra Petch', sans-s
 .equipment-hud span { color: #8a93ad; font-family: 'Chakra Petch', sans-serif; font-size: 8px; letter-spacing: 0.12em; }
 .equipment-hud strong { color: var(--cyan); font-family: 'Chakra Petch', sans-serif; font-size: 10px; font-weight: 500; }
 .equipment-hud strong.cooldown { color: #ffd166; }
+.challenges-panel { display: grid; gap: 18px; }
+.challenge-group h3 { display: flex; justify-content: space-between; margin: 0 0 8px; color: var(--cyan); font-family: 'Chakra Petch', sans-serif; font-size: 11px; letter-spacing: 0.14em; }
+.challenge-group h3 small { color: #8a93ad; font-weight: 400; }
+.challenge-item { display: grid; gap: 5px; margin-bottom: 8px; padding: 10px 12px; border: 1px solid var(--line); background: rgba(8, 12, 24, 0.6); }
+.challenge-item p { margin: 0; color: #dfe4f0; font-size: 12px; }
+.challenge-item span { color: #8a93ad; font-family: 'Chakra Petch', sans-serif; font-size: 9px; letter-spacing: 0.1em; }
+.challenge-item.done { border-color: rgba(88, 245, 229, 0.6); }
+.challenge-item.done span { color: var(--cyan); }
+.challenge-bar { height: 3px; background: rgba(255, 255, 255, 0.1); }
+.challenge-bar i { display: block; height: 100%; background: var(--cyan); }
 .objective-hud { position: absolute; z-index: 4; top: 132px; left: 50%; width: min(360px, 70vw); transform: translateX(-50%); padding: 8px 12px; border: 1px solid var(--objective, #ffd166); background: rgba(8, 12, 24, 0.78); text-align: center; pointer-events: none; font-family: 'Chakra Petch', sans-serif; letter-spacing: 0.12em; }
 .objective-hud.hidden { display: none; }
 .objective-hud strong { display: block; color: var(--objective, #ffd166); font-size: 11px; font-weight: 600; }

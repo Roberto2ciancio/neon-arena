@@ -8,6 +8,7 @@ export type AttachmentId =
   | 'long-barrel' | 'short-barrel'
   | 'vertical-grip' | 'laser'
   | 'extended-mag' | 'fast-mag'
+  | 'canted-sight' | 'tactical-stock'
 
 /** Moltiplicatori applicati alle statistiche dell'arma (1 = invariato). */
 export interface AttachmentModifiers {
@@ -51,6 +52,8 @@ export const ATTACHMENTS: Record<AttachmentId, AttachmentDefinition> = {
   laser: { id: 'laser', slot: 'underbarrel', name: 'PUNTATORE LASER', description: 'Dispersione dal fianco −30%.', modifiers: { hipSpread: 0.7 }, unlockMastery: 12 },
   'extended-mag': { id: 'extended-mag', slot: 'magazine', name: 'CARICATORE ESTESO', description: '+50% colpi, ricarica +15% tempo.', modifiers: { magazine: 1.5, reload: 1.15 }, unlockMastery: 6 },
   'fast-mag': { id: 'fast-mag', slot: 'magazine', name: 'CARICATORE RAPIDO', description: 'Ricarica −25%.', modifiers: { reload: 0.75 }, unlockMastery: 14 },
+  'canted-sight': { id: 'canted-sight', slot: 'optic', name: 'MIRINO LATERALE', description: 'Mirino inclinato senza ingrandimento: dispersione dal fianco −20%, in mira −10%.', modifiers: { hipSpread: 0.8, adsSpread: 0.9 }, adsFov: 56, categories: ['assault', 'smg', 'shotgun', 'lmg', 'sniper', 'launcher'], unlockMastery: 7 },
+  'tactical-stock': { id: 'tactical-stock', slot: 'stock', name: 'CALCIO TATTICO', description: 'Rinculo −20%, mobilità −3%.', modifiers: { recoilVertical: 0.8, recoilHorizontal: 0.8, mobility: 0.97 }, unlockMastery: 5 },
 }
 
 export const ATTACHMENT_SLOT_LABELS: Record<AttachmentSlot, string> = {
@@ -59,6 +62,7 @@ export const ATTACHMENT_SLOT_LABELS: Record<AttachmentSlot, string> = {
   barrel: 'CANNA',
   underbarrel: 'SOTTOCANNA',
   magazine: 'CARICATORE',
+  stock: 'CALCIO',
 }
 
 export function isAttachmentCompatible(weapon: WeaponDefinition, attachment: AttachmentDefinition): boolean {

@@ -108,6 +108,8 @@ export const STATION_COSTS: Record<PurchasableWeapon | 'ammo' | 'medkit' | 'box'
   'xr-1': 28,
   'mg-3x': 24,
   'hc-50': 14,
+  'xb-9': 24,
+  'gl-40': 30,
   box: MYSTERY_BOX_COST,
   ammo: 3,
   medkit: 4,
@@ -147,6 +149,8 @@ export const FIELD_ATTACHMENTS: Record<PurchasableWeapon, AttachmentSelection> =
   'xr-1': { optic: 'scope-4x', muzzle: 'compensator', magazine: 'fast-mag' },
   'mg-3x': { optic: 'holo', underbarrel: 'vertical-grip', magazine: 'fast-mag' },
   'hc-50': { optic: 'red-dot', magazine: 'extended-mag' },
+  'xb-9': { optic: 'canted-sight', stock: 'tactical-stock' },
+  'gl-40': { optic: 'red-dot', stock: 'tactical-stock' },
 }
 
 const weapon = (id: string, weaponId: PurchasableWeapon, x: number, y: number, z: number): StationDefinition => ({
