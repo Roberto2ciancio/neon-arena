@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import type { CollisionObstacle } from './collision'
 import { CROUCH_HEIGHT, findMantleLedge, hasHeadroom, MANTLE_MAX_HEIGHT, moveBody, STAND_HEIGHT } from './world'
 import type { Body } from './world'
+import { DASH_DURATION, DASH_SPEED, GLIDE_FALL_SPEED, GRAPPLE_MAX_TIME, GRAPPLE_SPEED, JETPACK_CEILING, JETPACK_FUEL, JETPACK_MAX_RISE, JETPACK_THRUST, SLAM_SPEED, WALL_JUMP_OUT, WALL_JUMP_UP, WALL_RUN_DURATION, WALL_RUN_MIN_SPEED } from './mobility'
 
 export const PLAYER_RADIUS = 0.42
 const STAND_EYE = 1.65
@@ -43,6 +44,14 @@ export interface ControllerInput {
   crouch: boolean
   /** Mira, fuoco e ricarica impediscono lo scatto. */
   busy: boolean
+  /** Salto tenuto premuto (propulsore e planata). */
+  jumpHeld?: boolean
+}
+
+export interface ControllerFrame {
+  landingSpeed: number
+  /** Lo schianto ha toccato terra in questo frame. */
+  slamLanded?: boolean
 }
 
 export interface ControllerEnvironment {
@@ -76,6 +85,22 @@ export class PlayerController {
   private mantleDuration = MANTLE_BASE_DURATION
   private lastGroundY = 0
   private baseSpeed = 6
+  // --- Moduli di mobilità (solo modalità Zombie; nel TCT restano spenti) ---
+  wallRunEnabled = false
+  jetpackEnabled = false
+  /** Secondi di corsa sui muri senza limite (potenziamento dopo un'uccisione multipla). */
+  wallRunBoost = 0
+  jetpackFuel = JETPACK_FUEL
+  private dashTimer = 0
+  private readonly dashVelocity = new THREE.Vector3()
+  private wallRunTime = 0
+  private wallRunActive = false
+  private readonly wallNormal = new THREE.Vector3()
+  private grappleTimer = 0
+  private readonly grappleTarget = new THREE.Vector3()
+  private slamming = false
+  /** Inclinazione della visuale verso il lato opposto al muro durante la corsa. */
+  private wallTilt = 0
   private readonly mantleFrom = new THREE.Vector3()
   private readonly mantleTo = new THREE.Vector3()
   private readonly slideDirection = new THREE.Vector3()
@@ -104,6 +129,30 @@ export class PlayerController {
   /** Avanzamento 0–1 del rotolamento, per la rotazione della visuale. */
   get rollProgress(): number {
     return this.rollTimer > 0 ? 1 - this.rollTimer / ROLL_DURATION : 0
+  }
+
+  get dashing(): boolean {
+    return this.dashTimer > 0
+  }
+
+  get wallRunning(): boolean {
+    return this.wallRunActive
+  }
+
+  get grappling(): boolean {
+    return this.grappleTimer > 0
+  }
+
+  get slamActive(): boolean {
+    return this.slamming
+  }
+
+  /** Lato del muro durante la corsa (-1 sinistra, 1 destra, 0 nessuno) per inclinare la visuale. */
+  wallSide(yaw: number): number {
+    if (!this.wallRunActive) return 0
+    const rightX = Math.cos(yaw)
+    const rightZ = -Math.sin(yaw)
+    return this.wallNormal.x * rightX + this.wallNormal.z * rightZ > 0 ? -1 : 1
   }
 
   get height(): number {
@@ -137,12 +186,25 @@ export class PlayerController {
     this.rollTimer = 0
     this.mantleTimer = 0
     this.lastGroundY = y
+    this.cancelModules()
+    this.jetpackFuel = JETPACK_FUEL
+    this.wallRunBoost = 0
     this.eyeOffset = STAND_EYE
     this.smoothY = y
   }
 
   jump(solids: readonly CollisionObstacle[]): boolean {
     if (this.mantling) return false
+    if (this.wallRunActive) {
+      // Salto dal muro: verso l'esterno e in alto, conservando la corsa lungo il muro.
+      const along = this.velocity.clone().projectOnPlane(this.wallNormal).setY(0)
+      this.velocity.copy(along).addScaledVector(this.wallNormal, WALL_JUMP_OUT)
+      this.body.velocityY = WALL_JUMP_UP
+      this.wallRunActive = false
+      this.wallRunTime = 0
+      this.jumpBuffer = 0
+      return true
+    }
     if (!this.body.grounded && this.coyoteTimer <= 0) {
       // In aria: il salto resta memorizzato per un attimo e parte all'atterraggio.
       this.jumpBuffer = JUMP_BUFFER
@@ -165,6 +227,86 @@ export class PlayerController {
     this.coyoteTimer = 0
     this.jumpBuffer = 0
     return true
+  }
+
+  /** Secondo salto in aria (doppio salto). */
+  airJump(speed: number): boolean {
+    if (this.body.grounded || this.mantling || this.grappling) return false
+    this.body.velocityY = speed
+    this.jumpBuffer = 0
+    this.slamming = false
+    return true
+  }
+
+  /** Scatto nella direzione data (orizzontale). */
+  startDash(direction: THREE.Vector3): boolean {
+    if (this.mantling) return false
+    const flat = direction.clone().setY(0)
+    if (flat.lengthSq() < 0.0001) return false
+    this.dashVelocity.copy(flat.normalize()).multiplyScalar(DASH_SPEED)
+    this.dashTimer = DASH_DURATION
+    this.slideTimer = 0
+    this.wallRunActive = false
+    this.grappleTimer = 0
+    return true
+  }
+
+  /** Picchiata verso il basso, solo in aria. */
+  startSlam(): boolean {
+    if (this.body.grounded || this.mantling || this.slamming) return false
+    this.slamming = true
+    this.dashTimer = 0
+    this.grappleTimer = 0
+    this.wallRunActive = false
+    this.velocity.multiplyScalar(0.2)
+    this.body.velocityY = -SLAM_SPEED
+    return true
+  }
+
+  /** Rampino: tira verso il punto agganciato. */
+  startGrapple(point: THREE.Vector3): boolean {
+    if (this.mantling) return false
+    this.grappleTarget.copy(point)
+    this.grappleTimer = GRAPPLE_MAX_TIME
+    this.dashTimer = 0
+    this.slideTimer = 0
+    this.wallRunActive = false
+    this.slamming = false
+    this.body.grounded = false
+    return true
+  }
+
+  cancelModules(): void {
+    this.dashTimer = 0
+    this.grappleTimer = 0
+    this.wallRunActive = false
+    this.wallRunTime = 0
+    this.slamming = false
+  }
+
+  /** Muro accanto (a sinistra o a destra della direzione di corsa) alto abbastanza per correrci. */
+  private findWall(solids: readonly CollisionObstacle[]): THREE.Vector3 | null {
+    const position = this.body.position
+    const speed = Math.hypot(this.velocity.x, this.velocity.z)
+    if (speed < 0.1) return null
+    const dirX = this.velocity.x / speed
+    const dirZ = this.velocity.z / speed
+    const reach = PLAYER_RADIUS + 0.25
+    for (const side of [-1, 1]) {
+      // Perpendicolare alla corsa.
+      const x = position.x + -dirZ * side * reach
+      const z = position.z + dirX * side * reach
+      for (const { box } of solids) {
+        if (box.min.y > position.y + 0.3 || box.max.y < position.y + 1.5) continue
+        if (x < box.min.x || x > box.max.x || z < box.min.z || z > box.max.z) continue
+        const closestX = THREE.MathUtils.clamp(position.x, box.min.x, box.max.x)
+        const closestZ = THREE.MathUtils.clamp(position.z, box.min.z, box.max.z)
+        const normal = new THREE.Vector3(position.x - closestX, 0, position.z - closestZ)
+        if (normal.lengthSq() < 0.0001) normal.set(dirZ * side, 0, -dirX * side)
+        return normal.normalize()
+      }
+    }
+    return null
   }
 
   /** Cerca un bordo davanti e, se raggiungibile, avvia la salita. */
@@ -214,15 +356,18 @@ export class PlayerController {
     return true
   }
 
-  update(delta: number, input: ControllerInput, yaw: number, environment: ControllerEnvironment): { landingSpeed: number } {
+  update(delta: number, input: ControllerInput, yaw: number, environment: ControllerEnvironment): ControllerFrame {
     this.baseSpeed = environment.speed
     this.slideCooldown = Math.max(0, this.slideCooldown - delta)
     this.landingSlow = Math.max(0, this.landingSlow - delta)
     this.rollTimer = Math.max(0, this.rollTimer - delta)
     this.jumpBuffer = Math.max(0, this.jumpBuffer - delta)
+    this.wallRunBoost = Math.max(0, this.wallRunBoost - delta)
     if (this.body.grounded) {
       this.coyoteTimer = COYOTE_TIME
       this.lastGroundY = this.body.position.y
+      this.jetpackFuel = JETPACK_FUEL
+      this.wallRunTime = 0
       if (this.jumpBuffer > 0) this.jump(environment.solids)
     } else {
       this.coyoteTimer = Math.max(0, this.coyoteTimer - delta)
@@ -241,7 +386,30 @@ export class PlayerController {
     if (wish.lengthSq() > 1) wish.normalize()
     this.moving = wish.lengthSq() > 0
 
-    if (this.sliding) {
+    const dashing = this.dashTimer > 0
+    const grappling = this.grappleTimer > 0
+    if (dashing) {
+      this.dashTimer = Math.max(0, this.dashTimer - delta)
+      this.velocity.copy(this.dashVelocity)
+    } else if (grappling) {
+      this.grappleTimer = Math.max(0, this.grappleTimer - delta)
+      const toTarget = this.grappleTarget.clone().sub(this.body.position)
+      toTarget.y -= 1
+      const length = toTarget.length()
+      if (length > 0.001) {
+        toTarget.divideScalar(length)
+        this.velocity.set(toTarget.x, 0, toTarget.z).multiplyScalar(GRAPPLE_SPEED)
+        // La gravità di questo passo viene compensata, così la traiettoria resta dritta.
+        this.body.velocityY = toTarget.y * GRAPPLE_SPEED + 18 * delta
+      }
+      if (length < 1.4) this.grappleTimer = 0
+    } else if (this.wallRunActive) {
+      const along = this.velocity.clone().projectOnPlane(this.wallNormal).setY(0)
+      const speed = Math.max(along.length(), environment.speed * SPRINT_MULTIPLIER)
+      if (along.lengthSq() > 0.0001) this.velocity.copy(along.normalize().multiplyScalar(speed))
+      // Spinta leggera verso il muro per restarci attaccati.
+      this.velocity.addScaledVector(this.wallNormal, -0.6)
+    } else if (this.sliding) {
       this.slideTimer = Math.max(0, this.slideTimer - delta)
       const progress = 1 - this.slideTimer / SLIDE_DURATION
       const speed = environment.speed * THREE.MathUtils.lerp(SLIDE_BOOST, CROUCH_MULTIPLIER + 0.3, progress * progress)
@@ -265,8 +433,40 @@ export class PlayerController {
       this.velocity.lerp(target, 1 - Math.exp(-delta * acceleration))
     }
 
-    const result = moveBody(this.body, this.velocity.clone().multiplyScalar(delta), delta, PLAYER_RADIUS, this.height, environment.solids, environment.arenaLimit)
+    // Propulsore: con il salto tenuto in aria spinge verso l'alto fino a un tetto, poi plana.
+    if (this.jetpackEnabled && !this.body.grounded && input.jumpHeld && !dashing && !grappling && !this.slamming) {
+      const belowCeiling = this.body.position.y < this.lastGroundY + JETPACK_CEILING
+      if (this.jetpackFuel > 0 && belowCeiling) {
+        this.jetpackFuel = Math.max(0, this.jetpackFuel - delta)
+        this.body.velocityY = Math.min(JETPACK_MAX_RISE, this.body.velocityY + JETPACK_THRUST * delta)
+      } else if (this.body.velocityY < -GLIDE_FALL_SPEED) {
+        this.body.velocityY = -GLIDE_FALL_SPEED
+      }
+    }
+    if (this.wallRunActive) {
+      // Sul muro si scende piano (prima quasi in piano, poi sempre più giù); la spinta del salto resta.
+      const progress = this.wallRunBoost > 0 ? 0 : this.wallRunTime / WALL_RUN_DURATION
+      const floor = THREE.MathUtils.lerp(0.6, -1.6, progress)
+      if (this.body.velocityY < floor) this.body.velocityY = floor + 18 * delta
+    }
+    // Durante lo scatto in aria la gravità è compensata: traiettoria orizzontale.
+    if (dashing && !this.body.grounded) this.body.velocityY = 18 * delta
+
+    const result: ControllerFrame = moveBody(this.body, this.velocity.clone().multiplyScalar(delta), delta, PLAYER_RADIUS, this.height, environment.solids, environment.arenaLimit)
     if (!this.body.grounded && this.sliding) this.slideTimer = 0
+    if (dashing) {
+      // Finito lo scatto resta un po' di slancio, non tutta la velocità.
+      if (this.dashTimer <= 0) this.velocity.multiplyScalar(0.4)
+    }
+    if (grappling && this.grappleTimer <= 0) {
+      this.body.velocityY = Math.max(this.body.velocityY, 3)
+      this.velocity.multiplyScalar(0.5)
+    }
+    if (this.slamming && (this.body.grounded || result.landingSpeed > 0)) {
+      this.slamming = false
+      result.slamLanded = true
+    }
+    this.updateWallRun(delta, input, environment.solids)
     // Saltando contro un bordo raggiungibile ci si tira su.
     if (!this.body.grounded && input.forward > 0 && this.body.velocityY < 4) this.tryMantle(yaw, environment.solids)
     if (result.landingSpeed > HARD_LANDING_SPEED) {
@@ -277,8 +477,26 @@ export class PlayerController {
         this.landingSlow = HARD_LANDING_SLOW
       }
     }
+    this.wallTilt = this.wallSide(yaw)
     this.updateCamera(delta, input, result.landingSpeed)
     return result
+  }
+
+  private updateWallRun(delta: number, input: ControllerInput, solids: readonly CollisionObstacle[]): void {
+    if (!this.wallRunEnabled || this.body.grounded || this.dashing || this.grappling || this.slamming || this.mantling) {
+      this.wallRunActive = false
+      return
+    }
+    const speed = Math.hypot(this.velocity.x, this.velocity.z)
+    const timeLeft = this.wallRunBoost > 0 || this.wallRunTime < WALL_RUN_DURATION
+    const wall = input.forward > 0 && timeLeft && speed >= WALL_RUN_MIN_SPEED ? this.findWall(solids) : null
+    if (!wall) {
+      this.wallRunActive = false
+      return
+    }
+    this.wallNormal.copy(wall)
+    this.wallRunActive = true
+    this.wallRunTime += delta
   }
 
   private updateCamera(delta: number, input: ControllerInput, landingSpeed: number): void {
@@ -296,7 +514,7 @@ export class PlayerController {
     const horizontalSpeed = Math.hypot(this.velocity.x, this.velocity.z)
     if (this.body.grounded && !this.sliding && horizontalSpeed > 0.5) this.bobPhase += delta * horizontalSpeed * 1.45
     this.strafe = THREE.MathUtils.lerp(this.strafe, input.right, 1 - Math.exp(-delta * 8))
-    const targetRoll = -this.strafe * 0.014 + (this.sliding ? 0.075 : 0)
+    const targetRoll = -this.strafe * 0.014 + (this.sliding ? 0.075 : 0) + this.wallTilt * 0.13
     this.roll = THREE.MathUtils.lerp(this.roll, targetRoll, 1 - Math.exp(-delta * 9))
   }
 
@@ -321,6 +539,7 @@ export function readMovementInput(keys: ReadonlySet<string>, busy: boolean): Con
     sprint: keys.has('ShiftLeft') || keys.has('ShiftRight'),
     crouch: keys.has('KeyC'),
     busy,
+    jumpHeld: keys.has('Space'),
   }
 }
 

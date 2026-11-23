@@ -4,6 +4,8 @@ import { CAMOS, DEFAULT_COSMETICS, isCosmeticUnlocked, normalizeCosmetics } from
 import type { CamoId, Cosmetics } from './cosmetics'
 import { EQUIPMENT } from './equipment'
 import type { GadgetId, LethalId, TacticalId } from './equipment'
+import { DEFAULT_MOBILITY, isMobilityId, MOBILITY } from './mobility'
+import type { MobilityId } from './mobility'
 import type { KeyValueStorage } from './progression'
 import { MELEE_WEAPONS, WEAPONS } from './weapons'
 import type { AttachmentSlot, MeleeDefinition, MeleeId, WeaponId } from './weapons'
@@ -34,6 +36,8 @@ export interface Loadout {
   lethal: LethalId
   tactical: TacticalId
   gadget: GadgetId
+  /** Modulo di mobilità (tasto B), solo nella modalità Zombie. */
+  mobility: MobilityId
   attachments: Partial<Record<WeaponId, AttachmentSelection>>
   camos: Partial<Record<WeaponId, CamoId>>
 }
@@ -74,6 +78,8 @@ export interface ResolvedLoadout {
   lethal: LethalId
   tactical: TacticalId
   gadget: GadgetId
+  /** Nel TCT è sempre null: i moduli restano fuori dal competitivo. */
+  mobility: MobilityId | null
   camos: Partial<Record<WeaponId, CamoId>>
   attachments: Partial<Record<WeaponId, AttachmentSelection>>
   /** Livelli applicati (vuoto nel TCT per non alterare l'equilibrio fra giocatori). */
@@ -88,6 +94,7 @@ export const DEFAULT_LOADOUT: Loadout = {
   lethal: 'frag',
   tactical: 'flashbang',
   gadget: 'turret',
+  mobility: DEFAULT_MOBILITY,
   attachments: {},
   camos: {},
 }
@@ -231,6 +238,7 @@ export function normalizeLoadout(value: unknown, level: number, mastery: Partial
     lethal: pick(source.lethal, equipmentFor('lethal'), DEFAULT_LOADOUT.lethal),
     tactical: pick(source.tactical, equipmentFor('tactical'), DEFAULT_LOADOUT.tactical),
     gadget: pick(source.gadget, equipmentFor('gadget'), DEFAULT_LOADOUT.gadget),
+    mobility: pick(source.mobility, (id) => isMobilityId(id) && MOBILITY[id].unlockLevel <= level, DEFAULT_LOADOUT.mobility),
     attachments,
     camos,
   }
@@ -318,7 +326,7 @@ export function syncActiveClass(state: ArmoryState): ArmoryState {
   return { ...state, classes: state.classes.map((entry, index) => index === state.activeClass ? { ...entry, loadout: state.loadout } : entry) }
 }
 
-export function resolveLoadout(loadout: Loadout, cosmetics: Cosmetics, weaponLevels: Partial<Record<WeaponId, number>> = {}): ResolvedLoadout {
+export function resolveLoadout(loadout: Loadout, cosmetics: Cosmetics, weaponLevels: Partial<Record<WeaponId, number>> = {}, withMobility = true): ResolvedLoadout {
   return {
     primary: resolveWeapon(WEAPONS[loadout.primary], loadout.attachments[loadout.primary], { level: weaponLevels[loadout.primary] }),
     secondary: resolveWeapon(WEAPONS[loadout.secondary], loadout.attachments[loadout.secondary], { level: weaponLevels[loadout.secondary] }),
@@ -326,6 +334,7 @@ export function resolveLoadout(loadout: Loadout, cosmetics: Cosmetics, weaponLev
     lethal: loadout.lethal,
     tactical: loadout.tactical,
     gadget: loadout.gadget,
+    mobility: withMobility ? loadout.mobility : null,
     camos: loadout.camos,
     attachments: loadout.attachments,
     weaponLevels,

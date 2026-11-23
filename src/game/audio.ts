@@ -7,6 +7,7 @@ export type SoundName =
   | 'shoot' | 'enemyShoot' | 'hit' | 'headshot' | 'kill' | 'damage' | 'dash' | 'pickup' | 'upgrade'
   | 'dry' | 'reloadOut' | 'reloadIn' | 'shell' | 'melee' | 'meleeHit' | 'switch' | 'explosion'
   | 'groan' | 'groanBig' | 'powerUp' | 'reloadRack' | 'shellLoad' | 'heartbeat' | 'heal' | 'acidCharge' | 'headPop' | 'bodyFall' | 'execution' | 'combo' | 'lastRound'
+  | 'airJump' | 'slam' | 'grapple' | 'jetpack'
 
 /** Voci contemporanee massime: oltre, i suoni nuovi vengono saltati per non saturare CPU e mix. */
 const MAX_VOICES = 48
@@ -155,6 +156,21 @@ export class GameAudio {
         break
       case 'dash':
         this.noise({ type: 'bandpass', frequency: 500, gain: 0.22, decay: 0.22, q: 0.9, sweepTo: 1800 }, options)
+        break
+      case 'airJump':
+        this.noise({ type: 'bandpass', frequency: 900, gain: 0.18, decay: 0.14, q: 1.2, sweepTo: 2200 }, options)
+        this.tone(330, 660, 0.1, 'triangle', 0.05, options)
+        break
+      case 'slam':
+        this.noise({ type: 'lowpass', frequency: 700, gain: 0.9, decay: 0.45, sweepTo: 90 }, { ...options, reverb: 0.4 })
+        this.tone(110, 34, 0.4, 'sine', 0.7, options)
+        break
+      case 'grapple':
+        this.click(2200, 0.03, options)
+        this.noise({ type: 'bandpass', frequency: 1800, gain: 0.16, decay: 0.3, q: 4, sweepTo: 700 }, { ...options, delay: 0.03 })
+        break
+      case 'jetpack':
+        this.noise({ type: 'lowpass', frequency: 520, gain: 0.25, decay: 0.18 }, options)
         break
       case 'melee':
         this.noise({ type: 'bandpass', frequency: 2400, gain: 0.3, decay: 0.2, q: 1.1, sweepTo: 600 }, options)

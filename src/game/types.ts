@@ -34,6 +34,16 @@ export interface PlayerStats {
   secondWind: number
   /** Danno assorbito dallo scudo energetico prima di ricaricarsi. */
   energyShield: number
+  /** Modulo di mobilità equipaggiato ('' se nessuno): decide quali potenziamenti escono. */
+  mobilityModule: string
+  /** Cariche in più del modulo ("Doppia carica"). */
+  mobilityCharges: number
+  /** Secondi di ricarica del modulo tolti a ogni uccisione ("Ricarica cinetica"). */
+  mobilityKillRecharge: number
+  /** Atterraggi pesanti e schianti esplodono ferendo gli zombie vicini. */
+  explosiveLanding: number
+  /** Secondi di corsa sui muri senza limite dopo un'uccisione multipla. */
+  wallRunFrenzy: number
 }
 
 export interface MetaBonuses {
@@ -80,6 +90,8 @@ export interface HudData {
   enemiesRemaining: number
   /** Letale (G), tattico (Q) e gadget (T) con il tempo di ricarica residuo. */
   equipment: { key: string; name: string; cooldown: number }[]
+  /** Modulo di mobilità (solo Zombie). */
+  mobility?: { key: string; name: string; charges: number; maxCharges: number; progress: number; cooldown: number; fuel?: number; active: boolean; /** Si attiva con il tasto (scatto, schianto, rampino). */ usesKey: boolean }
   /** Arma bianca impugnata. */
   melee: boolean
   /** Mira con ottica ad alto ingrandimento: sovrimpressione del mirino. */

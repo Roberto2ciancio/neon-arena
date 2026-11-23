@@ -211,6 +211,43 @@ export const UPGRADE_DEFINITIONS: readonly UpgradeDefinition[] = [
     isAvailable: (stats) => stats.energyShield < 50,
     apply: (stats) => { stats.energyShield += 25 },
   },
+  {
+    id: 'double-charge',
+    tag: 'MOBILITÀ',
+    name: 'DOPPIA CARICA',
+    description: '+1 carica del modulo di mobilità.',
+    icon: '⇉',
+    isAvailable: (stats) => stats.mobilityModule !== '' && stats.mobilityModule !== 'wall-run' && stats.mobilityModule !== 'jetpack' && stats.mobilityCharges < 1,
+    apply: (stats) => { stats.mobilityCharges += 1 },
+  },
+  {
+    id: 'kinetic-recharge',
+    tag: 'MOBILITÀ',
+    name: 'RICARICA CINETICA',
+    description: 'Ogni uccisione accorcia di 0,6 s la ricarica del modulo di mobilità.',
+    icon: '↻',
+    isAvailable: (stats) => ['dash', 'slam', 'grapple'].includes(stats.mobilityModule) && stats.mobilityKillRecharge === 0,
+    apply: (stats) => { stats.mobilityKillRecharge = 0.6 },
+  },
+  {
+    id: 'explosive-landing',
+    tag: 'MOBILITÀ // RARO',
+    name: 'ATTERRAGGIO ESPLOSIVO',
+    description: 'Gli atterraggi pesanti esplodono e feriscono gli zombie vicini; lo schianto fa il 50% di danno in più.',
+    icon: '✹',
+    rarity: 'rare',
+    isAvailable: (stats) => stats.mobilityModule !== '' && stats.explosiveLanding === 0,
+    apply: (stats) => { stats.explosiveLanding = 1 },
+  },
+  {
+    id: 'wall-frenzy',
+    tag: 'MOBILITÀ',
+    name: 'CORSA SENZA FINE',
+    description: 'Dopo un’uccisione multipla (3 in combo) corri sui muri senza limite per 10 secondi.',
+    icon: '⫽',
+    isAvailable: (stats) => stats.mobilityModule === 'wall-run' && stats.wallRunFrenzy === 0,
+    apply: (stats) => { stats.wallRunFrenzy = 10 },
+  },
 ]
 
 export const FIRST_LEVEL_XP = 90
@@ -247,6 +284,11 @@ export function createBaseStats(bonuses: MetaBonuses = { vitality: 0, power: 0, 
     luck: 1,
     secondWind: 0,
     energyShield: 0,
+    mobilityModule: '',
+    mobilityCharges: 0,
+    mobilityKillRecharge: 0,
+    explosiveLanding: 0,
+    wallRunFrenzy: 0,
   }
 }
 

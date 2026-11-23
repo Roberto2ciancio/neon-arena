@@ -4,6 +4,7 @@ import type { CollisionObstacle } from './collision'
 import { COYOTE_TIME, HARD_LANDING_SPEED, JUMP_BUFFER, MANTLE_MAX_HEIGHT, PlayerController, SLIDE_HOP_CAP } from './PlayerController'
 import type { ControllerInput } from './PlayerController'
 import { findMantleLedge } from './world'
+import { DASH_DURATION, DASH_SPEED, DOUBLE_JUMP_SPEED, GLIDE_FALL_SPEED, GRAPPLE_MAX_TIME, JETPACK_CEILING, JETPACK_FUEL, WALL_JUMP_OUT, WALL_JUMP_UP, WALL_RUN_DURATION } from './mobility'
 
 const solid = (id: string, min: [number, number, number], max: [number, number, number]): CollisionObstacle => ({
   id,
@@ -174,5 +175,102 @@ describe('scivolata e atterraggi', () => {
     const roll = land(true)
     expect(roll.controller.landingSlow).toBe(0)
     expect(roll.controller.rolling).toBe(true)
+  })
+})
+
+describe('moduli di mobilità (fisica)', () => {
+  it('doppio salto: solo in aria', () => {
+    const controller = new PlayerController()
+    controller.reset(0, 0, 0)
+    expect(controller.airJump(DOUBLE_JUMP_SPEED)).toBe(false)
+    controller.jump([])
+    run(controller, 0.4, idle)
+    expect(controller.airJump(DOUBLE_JUMP_SPEED)).toBe(true)
+    expect(controller.body.velocityY).toBeCloseTo(DOUBLE_JUMP_SPEED)
+  })
+
+  it('scatto: copre circa 3,8 m in un istante senza cadere', () => {
+    const controller = new PlayerController()
+    controller.reset(0, 2, 0)
+    controller.body.grounded = false
+    controller.startDash(new THREE.Vector3(1, 0, 0))
+    expect(controller.dashing).toBe(true)
+    run(controller, DASH_DURATION, idle)
+    expect(controller.position.x).toBeGreaterThan(3.2)
+    expect(controller.position.y).toBeGreaterThan(1.95)
+    run(controller, 0.05, idle)
+    expect(controller.dashing).toBe(false)
+    expect(Math.hypot(controller.velocity.x, controller.velocity.z)).toBeLessThan(DASH_SPEED * 0.6)
+  })
+
+  it('corsa sui muri: resta in quota accanto al muro, finisce dopo 1,5 s, il salto stacca dal muro', () => {
+    // Muro lungo alla sinistra (x < -0.6), si corre verso -z.
+    const wall = [solid('wall', [-2, 0, -40], [-0.6, 6, 10])]
+    const make = (enabled: boolean) => {
+      const controller = new PlayerController()
+      controller.wallRunEnabled = enabled
+      controller.reset(0, 0, 0)
+      run(controller, 0.5, sprint, wall)
+      controller.jump(wall)
+      return controller
+    }
+    const runner = make(true)
+    const faller = make(false)
+    run(runner, 0.9, sprint, wall)
+    run(faller, 0.9, sprint, wall)
+    expect(runner.wallRunning).toBe(true)
+    expect(runner.position.y).toBeGreaterThan(faller.position.y + 0.5)
+    run(runner, WALL_RUN_DURATION, sprint, wall)
+    expect(runner.wallRunning).toBe(false)
+
+    const jumper = make(true)
+    run(jumper, 0.4, sprint, wall)
+    expect(jumper.wallRunning).toBe(true)
+    expect(jumper.jump(wall)).toBe(true)
+    expect(jumper.velocity.x).toBeGreaterThan(WALL_JUMP_OUT * 0.8)
+    expect(jumper.body.velocityY).toBeCloseTo(WALL_JUMP_UP)
+  })
+
+  it('schianto: picchiata verso il basso che segnala l’impatto', () => {
+    const controller = new PlayerController()
+    controller.reset(0, 0, 0)
+    expect(controller.startSlam()).toBe(false)
+    controller.jump([])
+    run(controller, 0.2, idle)
+    expect(controller.startSlam()).toBe(true)
+    let landed = false
+    for (let time = 0; time < 1 && !landed; time += STEP) landed = controller.update(STEP, idle, 0, environment()).slamLanded === true
+    expect(landed).toBe(true)
+    expect(controller.body.grounded).toBe(true)
+  })
+
+  it('rampino: tira verso il punto agganciato', () => {
+    const controller = new PlayerController()
+    controller.reset(0, 0, 0)
+    controller.startGrapple(new THREE.Vector3(0, 6, -15))
+    expect(controller.grappling).toBe(true)
+    run(controller, GRAPPLE_MAX_TIME, idle)
+    expect(controller.grappling).toBe(false)
+    expect(controller.position.z).toBeLessThan(-12)
+    expect(controller.position.y).toBeGreaterThan(3)
+  })
+
+  it('propulsore: sale tenendo premuto il salto fino a un tetto, poi plana; il serbatoio torna a terra', () => {
+    const controller = new PlayerController()
+    controller.jetpackEnabled = true
+    controller.reset(0, 0, 0)
+    controller.jump([])
+    const hold: ControllerInput = { ...idle, jumpHeld: true }
+    let highest = 0
+    run(controller, 2, hold, [], () => { highest = Math.max(highest, controller.position.y) })
+    expect(highest).toBeGreaterThan(2.5)
+    expect(highest).toBeLessThan(JETPACK_CEILING + 1.4)
+    expect(controller.jetpackFuel).toBe(0)
+    // Planata: la caduta resta lenta finché si tiene il salto.
+    expect(controller.body.velocityY).toBeGreaterThanOrEqual(-GLIDE_FALL_SPEED - 0.5)
+    run(controller, 4, idle)
+    expect(controller.body.grounded).toBe(true)
+    run(controller, 0.05, idle)
+    expect(controller.jetpackFuel).toBe(JETPACK_FUEL)
   })
 })

@@ -838,6 +838,47 @@ test('saltando contro una cassa ci si tira su (mantling)', async ({ page }) => {
   expect(errors).toEqual([])
 })
 
+test('il modulo di mobilità scelto in armeria funziona in partita (scatto)', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  await page.addInitScript(() => {
+    if (!window.localStorage.getItem('neon-arena:armory:v1')) window.localStorage.setItem('neon-arena:armory:v1', JSON.stringify({ level: 8, xp: 0 }))
+    window.localStorage.setItem('neon-arena:graphics:v1', 'low')
+  })
+  await page.goto('/')
+  await page.getByRole('button', { name: 'ARMERIA' }).click()
+  await page.locator('[data-armory-tab="equipment"]').click()
+  // Il rampino (livello 24) è bloccato, lo scatto (livello 6) no.
+  await expect(page.locator('.armory-item', { hasText: 'RAMPINO' })).toBeDisabled()
+  await page.locator('.armory-item', { hasText: 'SCATTO' }).click()
+  await expect(page.locator('.armory-equipped', { hasText: 'SCATTO' })).toBeVisible()
+  await page.getByRole('button', { name: 'CHIUDI' }).click()
+  await page.locator('[data-map="district-zero"]').click()
+  await page.getByRole('button', { name: 'INIZIA RUN' }).click()
+  await expect(page.locator('#app')).toHaveAttribute('data-state', 'playing')
+  await expect(page.locator('#mobility-name')).toHaveText('SCATTO')
+  await expect(page.locator('#mobility-status')).toHaveText('2/2')
+  const start = await page.evaluate(() => {
+    const game = (window as any).__neonArena.game
+    game.clearEntities()
+    game.activePowerUps.set('barrier', 999)
+    // Guardando verso +x in uno spazio libero dal centro della mappa.
+    game.debugPlace(0, 0, 12, -Math.PI / 2, 0)
+    return { x: game.controller.position.x, z: game.controller.position.z }
+  })
+  await page.keyboard.press('KeyB')
+  await expect.poll(() => page.evaluate((start) => {
+    const position = (window as any).__neonArena.game.controller.position
+    return Math.hypot(position.x - start.x, position.z - start.z)
+  }, start), { timeout: 2000 }).toBeGreaterThan(2.5)
+  await expect(page.locator('#mobility-status')).toHaveText('1/2')
+  // Senza cariche il tasto non fa nulla; la ricarica riporta le cariche.
+  await page.keyboard.press('KeyB')
+  await expect(page.locator('#mobility-status')).toHaveText(/^\d+s$/)
+  await expect(page.locator('#mobility-status')).toHaveText('1/2', { timeout: 6000 })
+  expect(errors).toEqual([])
+})
+
 test('la classifica globale mostra schede, K/D con partite e profilo pubblico', async ({ page }) => {
   const errors: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))

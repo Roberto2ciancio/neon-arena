@@ -84,6 +84,12 @@ export class NavigationGraph {
     return findArea(point, this.areas)
   }
 
+  /** Quota del piano calpestabile sotto il punto (0 sul terreno). */
+  areaHeightOf(point: Point3): number {
+    const id = this.areaOf(point)
+    return this.areas.find((area) => area.id === id)?.y ?? 0
+  }
+
   /** Vero se il punto è a metà di una rampa: conviene finirla prima di ricalcolare il percorso. */
   isOnStairs(point: Point3): boolean {
     return this.areas.some((area) => area.holes.some((hole) =>

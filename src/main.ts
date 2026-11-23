@@ -36,6 +36,7 @@ import type { PlayerSave } from './game/accountSave'
 import { CAMOS, COSMETIC_CATALOG } from './game/cosmetics'
 import type { CosmeticOption } from './game/cosmetics'
 import { EQUIPMENT } from './game/equipment'
+import { JETPACK_FUEL, MOBILITY } from './game/mobility'
 import { MELEE_WEAPONS } from './game/weapons'
 import type { GameState, HudData, RunResult, TctHudData } from './game/types'
 
@@ -253,6 +254,31 @@ function renderCoopHud(coop: HudData['coop']): void {
   }))
 }
 
+let mobilityProgress = -1
+
+/** Modulo di mobilità: cariche, ricarica o serbatoio del propulsore. */
+function renderMobilityHud(mobility: HudData['mobility']): void {
+  const box = hudEl('mobility-hud')
+  box.classList.toggle('hidden', !mobility)
+  if (!mobility) return
+  setText(hudEl('mobility-name'), mobility.name)
+  const status = hudEl('mobility-status')
+  let text: string
+  if (mobility.fuel !== undefined) text = mobility.fuel >= JETPACK_FUEL ? 'PIENO' : `${Math.round((mobility.fuel / JETPACK_FUEL) * 100)}%`
+  else if (mobility.name === MOBILITY['wall-run'].name) text = mobility.active ? 'IN CORSA' : 'PASSIVO'
+  else if (mobility.charges > 0) text = mobility.maxCharges > 1 ? `${mobility.charges}/${mobility.maxCharges}` : 'PRONTO'
+  else text = mobility.cooldown > 0 ? `${Math.ceil(mobility.cooldown)}s` : 'A TERRA'
+  setText(status, text)
+  status.classList.toggle('cooldown', mobility.charges === 0 || (mobility.fuel !== undefined && mobility.fuel <= 0))
+  box.classList.toggle('active', mobility.active)
+  const progress = mobility.fuel !== undefined ? mobility.fuel / JETPACK_FUEL : mobility.progress
+  const rounded = Math.round(progress * 100) / 100
+  if (rounded !== mobilityProgress) {
+    mobilityProgress = rounded
+    box.style.setProperty('--progress', String(rounded))
+  }
+}
+
 let powerUpsKey = ''
 
 function renderPowerUps(powerUps: HudData['powerUps']): void {
@@ -371,6 +397,7 @@ function updateHud(data: HudData): void {
     setText(status, entry.cooldown > 0 ? `${Math.ceil(entry.cooldown)}s` : 'PRONTA')
     status.classList.toggle('cooldown', entry.cooldown > 0)
   })
+  renderMobilityHud(data.mobility)
   const doorPrompt = hudEl('door-prompt')
   doorPrompt.classList.toggle('hidden', !data.interaction || currentState !== 'playing')
   doorPrompt.classList.toggle('denied', data.interaction?.denied ?? false)
@@ -678,6 +705,7 @@ function unlocksAt(level: number): string[] {
   for (const weapon of Object.values(WEAPONS)) if (weapon.unlockLevel === level) names.push(weapon.shortName)
   for (const melee of Object.values(MELEE_WEAPONS)) if (melee.unlockLevel === level) names.push(melee.name)
   for (const item of Object.values(EQUIPMENT)) if (item.unlockLevel === level) names.push(item.name)
+  for (const module of Object.values(MOBILITY)) if (module.unlockLevel === level && level > 1) names.push(`MODULO ${module.name}`)
   for (const camo of CAMOS) if (camo.unlockLevel === level) names.push(`MIMETICA ${camo.name}`)
   for (const options of Object.values(COSMETIC_CATALOG) as (readonly CosmeticOption<string>[])[]) {
     for (const option of options) if (option.unlockLevel === level && option.unlockLevel > 1 && !names.includes(option.name)) names.push(option.name)
@@ -712,7 +740,7 @@ function grantXp(amount: number): string {
 
 /** I livelli delle armi valgono solo in Zombie: nel TCT tutti hanno le stesse statistiche. */
 function currentLoadout(mode: 'zombies' | 'tct' = 'zombies') {
-  return resolveLoadout(armory.loadout, armory.cosmetics, mode === 'zombies' ? armory.weaponLevels : {})
+  return resolveLoadout(armory.loadout, armory.cosmetics, mode === 'zombies' ? armory.weaponLevels : {}, mode === 'zombies')
 }
 
 function completeRun(result: RunResult): void {

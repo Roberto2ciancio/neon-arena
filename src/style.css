@@ -151,6 +151,10 @@ kbd { display: inline-block; color: #aab4cb; font-family: 'Chakra Petch', sans-s
 .equipment-hud span { color: #8a93ad; font-family: 'Chakra Petch', sans-serif; font-size: 8px; letter-spacing: 0.12em; }
 .equipment-hud strong { color: var(--cyan); font-family: 'Chakra Petch', sans-serif; font-size: 10px; font-weight: 500; }
 .equipment-hud strong.cooldown { color: #ffd166; }
+.equipment-hud > .mobility-hud { position: relative; overflow: hidden; }
+.equipment-hud > .mobility-hud.hidden { display: none; }
+.mobility-hud i { position: absolute; left: 0; bottom: 0; height: 2px; width: 100%; background: var(--cyan); transform-origin: left; transform: scaleX(var(--progress, 1)); transition: transform 0.1s linear; }
+.mobility-hud.active { border-color: var(--cyan); box-shadow: 0 0 12px rgba(88, 245, 229, 0.35); }
 .weapon-hud { position: absolute; z-index: 4; right: 38px; bottom: 68px; display: flex; flex-direction: column; align-items: flex-end; pointer-events: none; }
 .weapon-hud > div { display: flex; align-items: baseline; gap: 8px; }
 .weapon-hud strong { font-family: 'Chakra Petch', sans-serif; font-size: 48px; font-weight: 500; line-height: 1; }
@@ -574,6 +578,7 @@ kbd { display: inline-block; color: #aab4cb; font-family: 'Chakra Petch', sans-s
 .touch-lethal { top: 38%; }
 .touch-tactical { top: calc(38% + 54px); }
 .touch-gadget { top: calc(38% + 108px); }
+.touch-mobility { right: calc(150px + env(safe-area-inset-right)); bottom: calc(150px + env(safe-area-inset-bottom)); width: 52px; height: 52px; font-size: 18px; }
 .touch-pause { top: calc(10px + env(safe-area-inset-top)); left: 50%; width: 44px; height: 44px; margin-left: -22px; font-size: 13px; }
 
 /* In modalità touch spariscono suggerimenti da tastiera e riquadri che finirebbero sotto i pollici. */

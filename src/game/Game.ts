@@ -41,7 +41,9 @@ import type { NavigationGraph } from './navigation'
 import type { NavPoint } from './structures'
 import { getGroundHeight, moveBody, resolveBodyCollisions, steerBody } from './world'
 import type { Body } from './world'
-import { getRollDip, PlayerController, readMovementInput } from './PlayerController'
+import { getRollDip, HARD_LANDING_SPEED, PlayerController, readMovementInput } from './PlayerController'
+import { createMobilityState, DASH_INVULNERABILITY, DOUBLE_JUMP_SPEED, getMaxCharges, getOutOfReachDamage, getRechargeProgress, getSlamDamage, GRAPPLE_RANGE, isZombieReachable, MOBILITY, MOBILITY_KEY, MOBILITY_KEY_LABEL, OUT_OF_REACH_GRACE, OUT_OF_REACH_WARNING, rechargeOnKill, refillOnGround, SLAM_RADIUS, tickMobility, useMobility } from './mobility'
+import type { MobilityModifiers, MobilityState } from './mobility'
 import { WeaponHandler } from './WeaponHandler'
 import type { ActiveSlot } from './WeaponHandler'
 import { DEFAULT_LOADOUT, resolveLoadout } from './armory'
@@ -312,6 +314,12 @@ export class Game implements TouchTarget {
   private spawnTimer = 0
   private waveActive = false
   private waveBreak = 0
+  /** Modulo di mobilità equipaggiato (null senza modulo). */
+  private mobility: MobilityState | null = null
+  /** Secondi passati fermi su una superficie che nessuno zombie raggiunge. */
+  private outOfReachTime = 0
+  private outOfReachTick = 0
+  private jetpackSoundTimer = 0
   private cameraShake = 0
   /** Spinta della visuale dovuta allo sparo (0–1) e verso casuale dell'inclinazione. */
   private firePunch = 0
@@ -641,6 +649,7 @@ export class Game implements TouchTarget {
     this.nextEnemyId = 1
     this.nextPowerId = 1
     this.stats = createBaseStats(bonuses)
+    this.setupMobility()
     this.health = this.stats.maxHealth
     this.score = 0
     this.wave = 0
@@ -802,6 +811,7 @@ export class Game implements TouchTarget {
     if (!this.isRunActive() || !this.currentUpgradeIds.includes(upgradeId)) return
     const previousMaxHealth = this.stats.maxHealth
     this.stats = applyUpgrade(this.stats, upgradeId)
+    if (upgradeId === 'double-charge' && this.mobility) this.mobility = { ...this.mobility, charges: this.mobility.charges + 1 }
     this.weapons.reloadMultiplier = this.stats.reloadTime
     this.shield = this.stats.energyShield
     this.chosenUpgrades.set(upgradeId, (this.chosenUpgrades.get(upgradeId) ?? 0) + 1)
@@ -1158,6 +1168,8 @@ export class Game implements TouchTarget {
       arenaLimit: this.map.arenaLimit,
     })
     if (result.landingSpeed > 7) this.cameraShake = Math.max(this.cameraShake, Math.min(0.3, (result.landingSpeed - 7) * 0.05))
+    this.updateMobility(delta, result.landingSpeed, result.slamLanded === true)
+    this.updateOutOfReach(delta)
 
     const frameInput = { aiming: this.aiming, crouched: this.controller.crouched, blocked: this.controller.sprinting || this.controller.mantling || this.coopStatus !== 'alive' || this.state !== 'playing', fireRateMultiplier: (this.stats.fireRate / 8.5) * (this.activePowerUps.has('rapid-fire') ? 1.6 : 1) }
     const frame = this.weapons.update(delta, frameInput)
@@ -2204,6 +2216,11 @@ export class Game implements TouchTarget {
     // Combo: uccisioni ravvicinate aumentano i crediti fino a ×2.
     const combo = registerComboKill(this.combo)
     this.combo = combo.state
+    if (this.mobility) this.mobility = rechargeOnKill(this.mobility, this.mobilityModifiers)
+    if (this.stats.wallRunFrenzy > 0 && this.mobility?.id === 'wall-run' && combo.state.count === 3) {
+      this.controller.wallRunBoost = this.stats.wallRunFrenzy
+      this.events.onNotice?.('CORSA SENZA FINE', `Corri sui muri senza limite per ${this.stats.wallRunFrenzy} secondi.`, 0x58f5e5)
+    }
     if (combo.announcement) {
       this.events.onCombo?.(combo.announcement, combo.state.count)
       this.audio.play('combo')
@@ -3067,6 +3084,17 @@ export class Game implements TouchTarget {
         name: EQUIPMENT[this.loadout[slot]].name,
         cooldown: this.cooldowns[slot],
       })),
+      mobility: this.mobility ? {
+        key: MOBILITY_KEY_LABEL,
+        name: MOBILITY[this.mobility.id].name,
+        charges: this.mobility.charges,
+        maxCharges: getMaxCharges(this.mobility.id, this.mobilityModifiers),
+        progress: getRechargeProgress(this.mobility, this.mobilityModifiers),
+        cooldown: this.mobility.cooldown,
+        fuel: this.mobility.id === 'jetpack' ? this.controller.jetpackFuel : undefined,
+        active: this.controller.dashing || this.controller.wallRunning || this.controller.grappling || this.controller.slamActive,
+        usesKey: MOBILITY[this.mobility.id].trigger === 'key',
+      } : undefined,
       interaction: (() => {
         const downed = this.findRevivable()
         if (this.coopStatus !== 'alive') return null
@@ -3195,7 +3223,161 @@ export class Game implements TouchTarget {
     if (event.code === 'KeyG') this.useEquipment('lethal')
     if (event.code === 'KeyQ') this.useEquipment('tactical')
     if (event.code === 'KeyT') this.useEquipment('gadget')
-    if (event.code === 'Space' && !event.repeat) this.controller.jump(this.obstacles)
+    if (event.code === 'Space' && !event.repeat) this.jump()
+    if (event.code === MOBILITY_KEY && !event.repeat) this.activateMobility()
+  }
+
+  // --- Moduli di mobilità ----------------------------------------------------------------
+  private get mobilityModifiers(): MobilityModifiers {
+    return { extraCharges: this.stats.mobilityCharges, killRecharge: this.stats.mobilityKillRecharge }
+  }
+
+  private setupMobility(): void {
+    const id = this.loadout.mobility
+    this.stats.mobilityModule = id ?? ''
+    this.mobility = id ? createMobilityState(id) : null
+    this.controller.wallRunEnabled = id === 'wall-run'
+    this.controller.jetpackEnabled = id === 'jetpack'
+    this.outOfReachTime = 0
+    this.outOfReachTick = 0
+  }
+
+  private jump(): void {
+    if (this.coopStatus !== 'alive') return
+    if (this.controller.jump(this.obstacles)) return
+    if (this.mobility?.id === 'double-jump') this.tryAirJump()
+  }
+
+  private tryAirJump(): boolean {
+    if (!this.mobility || this.controller.body.grounded || this.controller.mantling) return false
+    const next = useMobility(this.mobility)
+    if (!next || !this.controller.airJump(DOUBLE_JUMP_SPEED)) return false
+    this.mobility = next
+    this.audio.play('airJump')
+    this.spawnBurst(this.player, 0x58f5e5, 8)
+    return true
+  }
+
+  /** Tasto del modulo (B). */
+  private activateMobility(): void {
+    const state = this.mobility
+    if (!state || this.coopStatus !== 'alive' || this.state !== 'playing') return
+    if (state.id === 'double-jump') {
+      this.tryAirJump()
+      return
+    }
+    if (MOBILITY[state.id].trigger !== 'key') return
+    const next = useMobility(state)
+    if (!next) {
+      this.audio.play('dry')
+      return
+    }
+    if (state.id === 'dash') {
+      const input = readMovementInput(this.keys, false)
+      const forward = THREE.MathUtils.clamp(input.forward + this.touchMoveY, -1, 1)
+      const right = THREE.MathUtils.clamp(input.right + this.touchMoveX, -1, 1)
+      const direction = new THREE.Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw))
+      if (Math.abs(forward) > 0.1 || Math.abs(right) > 0.1) {
+        direction.multiplyScalar(forward).addScaledVector(new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw)), right)
+      }
+      if (!this.controller.startDash(direction)) return
+      this.invulnerability = Math.max(this.invulnerability, DASH_INVULNERABILITY)
+      this.audio.play('dash')
+      if (!this.reducedMotion) this.firePunch = Math.min(1, this.firePunch + 0.6)
+    } else if (state.id === 'slam') {
+      if (!this.controller.startSlam()) {
+        this.audio.play('dry')
+        return
+      }
+      this.audio.play('dash')
+    } else if (state.id === 'grapple') {
+      const origin = this.camera.position.clone()
+      const direction = this.camera.getWorldDirection(new THREE.Vector3())
+      const distance = raycastObstacles(origin, direction, GRAPPLE_RANGE, this.obstacles)
+      if (distance === null || distance > GRAPPLE_RANGE || distance < 1.5) {
+        this.audio.play('dry')
+        return
+      }
+      const point = origin.addScaledVector(direction, distance - 0.3)
+      if (!this.controller.startGrapple(point)) return
+      this.audio.play('grapple')
+    }
+    this.mobility = next
+  }
+
+  private updateMobility(delta: number, landingSpeed: number, slamLanded: boolean): void {
+    if (!this.mobility) return
+    const modifiers = this.mobilityModifiers
+    this.mobility = tickMobility(this.mobility, delta, modifiers)
+    if (this.controller.body.grounded) this.mobility = refillOnGround(this.mobility, modifiers)
+    if (slamLanded) {
+      this.slamBlast(SLAM_RADIUS, this.stats.explosiveLanding > 0 ? 1.5 : 1)
+    } else if (this.stats.explosiveLanding > 0 && landingSpeed > HARD_LANDING_SPEED) {
+      this.slamBlast(SLAM_RADIUS * 0.75, 0.6)
+    }
+    if (this.mobility.id === 'jetpack' && this.controller.jetpackFuel > 0 && !this.controller.body.grounded && this.keys.has('Space')) {
+      this.jetpackSoundTimer -= delta
+      if (this.jetpackSoundTimer <= 0) {
+        this.audio.play('jetpack')
+        this.jetpackSoundTimer = 0.16
+      }
+    } else {
+      this.jetpackSoundTimer = 0
+    }
+  }
+
+  /** Schianto: onda d'urto ai piedi che ferisce e allontana gli zombie vicini. */
+  private slamBlast(radius: number, bonus: number): void {
+    const origin = this.player.clone()
+    this.effects.explosion(origin.clone().setY(origin.y + 0.4), radius, 0x58f5e5, origin.y)
+    this.audio.play('slam')
+    this.cameraShake = Math.max(this.cameraShake, 0.35)
+    for (const enemy of this.enemies) {
+      if (enemy.health <= 0 || enemy.spawnTimer > 0) continue
+      const distance = enemy.body.position.distanceTo(origin)
+      if (distance > radius) continue
+      const damage = getSlamDamage(distance * (SLAM_RADIUS / radius), bonus) * (this.stats.damage / 20)
+      this.dealDamage(enemy, this.scaleDamage(enemy, damage * this.executionBonus(enemy)))
+      this.recordHit(enemy, 'explosion', null, null, origin)
+      const push = enemy.body.position.clone().sub(origin).setY(0)
+      if (push.lengthSq() > 0.0001) enemy.knockback.addScaledVector(push.normalize(), enemy.kind === 'brute' ? 2 : 9)
+      enemy.hitFlash = 0.12
+      enemy.flinch = 1
+      enemy.stunTimer = Math.max(enemy.stunTimer, enemy.kind === 'brute' ? 0.2 : 0.6)
+    }
+  }
+
+  /**
+   * Zone fuori portata: chi resta su una superficie che nessuno zombie può raggiungere viene
+   * avvisato e poi perde integrità, così i moduli non creano rifugi inattaccabili.
+   */
+  private updateOutOfReach(delta: number): void {
+    const controller = this.controller
+    if (this.waveBreak > 0 || this.coopStatus !== 'alive') {
+      this.outOfReachTime = 0
+      return
+    }
+    // In aria o durante la salita il conteggio resta sospeso (saltare sul posto non lo azzera).
+    if (!controller.body.grounded || controller.mantling) return
+    const position = controller.body.position
+    if (isZombieReachable(position.y, this.navigation.areaHeightOf(position))) {
+      this.outOfReachTime = 0
+      return
+    }
+    const before = this.outOfReachTime
+    this.outOfReachTime += delta
+    if (before < OUT_OF_REACH_WARNING && this.outOfReachTime >= OUT_OF_REACH_WARNING) {
+      this.events.onNotice?.('FUORI PORTATA', `Gli zombie non ti raggiungono: scendi entro ${Math.round(OUT_OF_REACH_GRACE - OUT_OF_REACH_WARNING)} secondi o perderai integrità.`, 0xff8f3a)
+    }
+    if (this.outOfReachTime < OUT_OF_REACH_GRACE) {
+      this.outOfReachTick = 0
+      return
+    }
+    this.outOfReachTick -= delta
+    if (this.outOfReachTick <= 0) {
+      this.outOfReachTick = 1
+      this.damagePlayer(getOutOfReachDamage(this.outOfReachTime, this.stats.maxHealth))
+    }
   }
 
   /** Rotella del mouse: scorre primaria, secondaria e arma bianca. */

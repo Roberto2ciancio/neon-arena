@@ -57,6 +57,8 @@ Criteri di chiusura: test unitari su `PlayerController` (altezze massime del man
 
 ## Fase C — Moduli di mobilità nella build
 
+> **Stato (2026-11-23): fatta** — vedi il diario. Restano aperti la posa dei compagni co-op e la mira assistita del rampino.
+
 Proposta: un nuovo spazio nell'armeria, **MODULO DI MOBILITÀ**, uno per classe, accanto a letale, tattico e gadget. Ogni modulo ha un tasto (sul telefono un pulsante in più) e una ricarica; alcuni potenziamenti della run lo migliorano. Si sbloccano con il livello come le armi.
 
 | Modulo | Cosa fa | Uso nelle ondate | Note |

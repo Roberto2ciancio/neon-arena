@@ -99,3 +99,38 @@ describe('potenziamenti aggiuntivi', () => {
     expect(rollPowerUp('walker', justAbove, new Set(), 1.5)).not.toBeNull()
   })
 })
+
+describe('potenziamenti della mobilità', () => {
+  const offered = (module: string) => {
+    const stats = { ...createBaseStats(), mobilityModule: module }
+    const ids = new Set<string>()
+    for (let seed = 0; seed < 400; seed += 1) {
+      let value = seed / 400
+      for (const choice of getUpgradeChoices(stats, () => { value = (value * 9301 + 0.4927) % 1; return value }, 3)) ids.add(choice.id)
+    }
+    return ids
+  }
+
+  it('escono solo con un modulo adatto', () => {
+    const none = offered('')
+    for (const id of ['double-charge', 'kinetic-recharge', 'explosive-landing', 'wall-frenzy']) expect(none.has(id)).toBe(false)
+    const dash = offered('dash')
+    expect(dash.has('double-charge')).toBe(true)
+    expect(dash.has('kinetic-recharge')).toBe(true)
+    expect(dash.has('wall-frenzy')).toBe(false)
+    const wall = offered('wall-run')
+    expect(wall.has('wall-frenzy')).toBe(true)
+    expect(wall.has('double-charge')).toBe(false)
+  })
+
+  it('applicano cariche, ricarica e atterraggio esplosivo una sola volta', () => {
+    let stats = { ...createBaseStats(), mobilityModule: 'slam' }
+    stats = applyUpgrade(stats, 'double-charge')
+    stats = applyUpgrade(stats, 'kinetic-recharge')
+    stats = applyUpgrade(stats, 'explosive-landing')
+    expect(stats.mobilityCharges).toBe(1)
+    expect(stats.mobilityKillRecharge).toBeGreaterThan(0)
+    expect(stats.explosiveLanding).toBe(1)
+    for (const id of ['double-charge', 'kinetic-recharge', 'explosive-landing']) expect(UPGRADE_BY_ID.get(id)!.isAvailable(stats)).toBe(false)
+  })
+})

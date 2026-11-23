@@ -13,6 +13,7 @@ export type TouchAction =
   | 'lethal'
   | 'tactical'
   | 'gadget'
+  | 'mobility'
   | 'swap'
   | 'pause'
 
@@ -34,6 +35,7 @@ export const TOUCH_ACTION_KEYS: Partial<Record<TouchAction, string>> = {
   lethal: 'KeyG',
   tactical: 'KeyQ',
   gadget: 'KeyT',
+  mobility: 'KeyB',
 }
 
 /** Il pollice si muove meno del mouse: un pixel di trascinamento vale un po' di più. */

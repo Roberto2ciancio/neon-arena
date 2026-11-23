@@ -8,6 +8,7 @@ import { CAMOS, COSMETIC_CATALOG, COSMETIC_LABELS, isCosmeticUnlocked } from './
 import type { CosmeticOption, Cosmetics, CosmeticSlot } from './game/cosmetics'
 import { EQUIPMENT, GADGET_ORDER, LETHAL_ORDER, TACTICAL_ORDER } from './game/equipment'
 import type { EquipmentId, EquipmentSlot } from './game/equipment'
+import { MOBILITY, MOBILITY_KEY_LABEL, MOBILITY_ORDER } from './game/mobility'
 import { CATEGORY_LABELS, MELEE_ORDER, MELEE_WEAPONS, PRIMARY_WEAPONS, SECONDARY_WEAPONS, WEAPONS } from './game/weapons'
 import type { AttachmentSlot, WeaponId } from './game/weapons'
 
@@ -359,6 +360,12 @@ export class ArmoryScreen {
         this.list.append(this.item(definition.name, `${definition.description} Ricarica ${definition.cooldown}s.`, definition.unlockLevel, loadout[section.slot] === id, () => this.update({ [section.slot]: id } as Partial<Loadout>)))
       }
     }
+    this.list.append(element('span', 'armory-group', `MODULO DI MOBILITÀ // TASTO ${MOBILITY_KEY_LABEL} // SOLO ZOMBIE`))
+    for (const id of MOBILITY_ORDER) {
+      const module = MOBILITY[id]
+      const recharge = module.cooldown > 0 ? ` Ricarica ${module.cooldown}s.` : ''
+      this.list.append(this.item(`${module.icon} ${module.name}`, `${module.description}${recharge}`, module.unlockLevel, loadout.mobility === id, () => this.update({ mobility: id })))
+    }
     this.showPreview({ kind: 'character', cosmetics: this.state.cosmetics })
     this.info.append(element('h3', undefined, 'EQUIPAGGIAMENTO'))
     for (const section of sections) {
@@ -367,6 +374,11 @@ export class ArmoryScreen {
       row.append(element('kbd', undefined, section.key), element('strong', undefined, definition.name), element('small', undefined, definition.description))
       this.info.append(row)
     }
+    const module = MOBILITY[loadout.mobility]
+    const row = element('div', 'armory-equipped')
+    row.append(element('kbd', undefined, MOBILITY_KEY_LABEL), element('strong', undefined, module.name), element('small', undefined, module.description))
+    this.info.append(row)
+    this.info.append(element('p', 'armory-meta', 'Il modulo di mobilità vale solo nella modalità Zombie (anche in squadra); nel TCT resta spento.'))
   }
 
   private renderAppearance(): void {

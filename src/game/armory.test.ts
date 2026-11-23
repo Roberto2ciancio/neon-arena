@@ -142,3 +142,17 @@ describe('prestigio e classi', () => {
     expect(loadArmory(storage).classes.map((entry) => entry.loadout.primary)).toEqual(['ak-74r', 'ar-07', 'smg-9', 'ar-07', 'ar-07'])
   })
 })
+
+describe('modulo di mobilità nel loadout', () => {
+  it('parte dal doppio salto, rifiuta moduli bloccati o sconosciuti e resta spento nel TCT', () => {
+    expect(DEFAULT_LOADOUT.mobility).toBe('double-jump')
+    const locked = normalizeArmory({ level: 5, loadout: { mobility: 'jetpack' } })
+    expect(locked.loadout.mobility).toBe('double-jump')
+    const unknown = normalizeArmory({ level: 50, loadout: { mobility: 'teletrasporto' } })
+    expect(unknown.loadout.mobility).toBe('double-jump')
+    const unlocked = normalizeArmory({ level: 30, loadout: { mobility: 'jetpack' } })
+    expect(unlocked.loadout.mobility).toBe('jetpack')
+    expect(resolveLoadout(unlocked.loadout, DEFAULT_COSMETICS).mobility).toBe('jetpack')
+    expect(resolveLoadout(unlocked.loadout, DEFAULT_COSMETICS, {}, false).mobility).toBeNull()
+  })
+})

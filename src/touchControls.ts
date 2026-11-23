@@ -47,6 +47,7 @@ const BUTTONS: ButtonSpec[] = [
   { action: 'lethal', label: 'G', className: 'touch-lethal', aria: 'Letale' },
   { action: 'tactical', label: 'Q', className: 'touch-tactical', aria: 'Tattico' },
   { action: 'gadget', label: 'T', className: 'touch-gadget', aria: 'Gadget' },
+  { action: 'mobility', label: '⇈', className: 'touch-mobility', aria: 'Modulo di mobilità' },
   { action: 'pause', label: 'II', className: 'touch-pause', aria: 'Pausa' },
 ]
 
@@ -135,6 +136,12 @@ export class TouchControls {
       button.classList.toggle('cooldown', entry.cooldown > 0)
       setSmall(button, entry.cooldown > 0 ? `${Math.ceil(entry.cooldown)}` : '')
     })
+    const mobility = this.buttons.get('mobility')!
+    mobility.classList.toggle('hidden', !data.mobility?.usesKey)
+    if (data.mobility) {
+      mobility.classList.toggle('cooldown', data.mobility.charges === 0)
+      setSmall(mobility, data.mobility.maxCharges > 1 ? String(data.mobility.charges) : data.mobility.charges === 0 && data.mobility.cooldown > 0 ? `${Math.ceil(data.mobility.cooldown)}` : '')
+    }
     this.buttons.get('aim')!.classList.toggle('active', data.aiming)
     this.buttons.get('melee')!.classList.toggle('available', data.execution === true)
     this.buttons.get('reload')!.classList.toggle('alert', !data.melee && data.ammo === 0)

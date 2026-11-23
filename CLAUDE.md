@@ -4,8 +4,8 @@ FPS browser in Three.js + TypeScript (Vite): modalità Zombie (anche co-op 2–4
 
 ## Stato attuale
 
-- Ultime attività: Fase A (soddisfazione delle uccisioni), Fase B (movimento e aggancio ai bordi a 2,7 m), Fase F (classifica globale). Ultima verifica: 251 unit e 18/18 E2E verdi.
-- Piani: `docs/roadmap-futura.md` (Fasi 9–14) e `docs/piano-grafica-movimento.md` (fasi C, D ed E ancora da fare).
+- Ultime attività: Fase C (moduli di mobilità, tasto B, solo Zombie), Fase B (movimento e aggancio ai bordi a 2,7 m), Fase F (classifica globale). Ultima verifica: 271 unit e 19/19 E2E verdi.
+- Piani: `docs/roadmap-futura.md` (Fasi 9–14) e `docs/piano-grafica-movimento.md` (fasi D ed E ancora da fare).
 - Storico completo delle attività: `docs/diario-integrazione.md`. Leggilo solo quando serve il contesto di una scelta passata.
 - Dal 2026-11-23 il progetto è sviluppato solo da Claude: Kimi non ci lavora più. Le assegnazioni a Kimi nei documenti di roadmap vanno considerate di Claude.
 
