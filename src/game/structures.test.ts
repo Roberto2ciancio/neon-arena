@@ -2,12 +2,12 @@ import * as THREE from 'three'
 import { describe, expect, it } from 'vitest'
 import type { CollisionObstacle } from './collision'
 import { MAPS } from './maps'
-import { createDoorSolid, createNavigation, createStaticSolids, getMapStructures } from './mapGeometry'
+import { createDoorSolid, createNavigation, createStaticSolids, getMapStructures, getMapUnderground } from './mapGeometry'
 import { advanceWaypoints, NavigationGraph } from './navigation'
 import { expandStructures, FLOOR_HEIGHT, GROUND_AREA } from './structures'
 import type { BuildingDefinition, NavPoint } from './structures'
 import { getTeamSpawn } from './tctRules'
-import { getGroundHeight, moveBody, resolveBodyCollisions, STAND_HEIGHT, steerBody } from './world'
+import { getGroundHeight, moveBody, resolveBodyCollisions, setTerrainPits, STAND_HEIGHT, steerBody } from './world'
 import type { Body } from './world'
 
 const HOUSE: BuildingDefinition = { id: 'house', kind: 'building', x: 0, z: 0, width: 10, depth: 9, floors: 2, doors: ['south', 'east'], style: 'brick' }
@@ -95,6 +95,7 @@ describe('mappe', () => {
       const solids = createStaticSolids(map)
       const doors = map.doors.map(createDoorSolid)
       const all = [...solids, ...doors]
+      setTerrainPits(all, getMapUnderground(map).pits)
 
       it('ha identificatori unici e geometria dentro i confini', () => {
         const ids = [...map.obstacles.map((obstacle) => obstacle.id), ...map.buildings.map((building) => building.id), ...map.doors.map((door) => door.id), ...map.stations.map((station) => station.id)]

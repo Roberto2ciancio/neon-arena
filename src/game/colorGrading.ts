@@ -27,6 +27,7 @@ const GRADES: Record<string, ColorGrade> = {
   'port-09': { lift: [0.0, 0.012, 0.018], gain: [0.98, 1.0, 1.03], saturation: 0.98, contrast: 1.03, vignette: 0.28 },
   // Laboratorio infestato: verde malato.
   'lab-21': { lift: [0.005, 0.025, 0.0], gain: [0.95, 1.05, 0.92], saturation: 1.02, contrast: 1.07, vignette: 0.36 },
+  'metro-07': { lift: [0.02, 0.01, 0.0], gain: [1.06, 0.98, 0.88], saturation: 0.98, contrast: 1.08, vignette: 0.4 },
 }
 
 export function getColorGrade(mapId: string): ColorGrade {

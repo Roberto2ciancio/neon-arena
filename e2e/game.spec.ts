@@ -1529,3 +1529,42 @@ test('il tutorial guida la prima partita e si può disattivare', async ({ page }
   await expect(hint).toBeHidden()
   expect(errors).toEqual([])
 })
+
+test('Metro 7: si scende a piedi nel mezzanino sotterraneo e si risale', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  await page.addInitScript(() => {
+    window.localStorage.setItem('neon-arena:graphics:v1', 'low')
+    window.localStorage.setItem('neon-arena:tutorial:v1', JSON.stringify({ seen: [], enabled: false }))
+  })
+  await page.goto('/')
+  await page.locator('[data-map="metro-07"]').click()
+  await page.getByRole('button', { name: 'INIZIA RUN' }).click()
+  await expect(page.locator('#app')).toHaveAttribute('data-state', 'playing')
+  await expect(page.locator('#map-name')).toHaveText('METRO 7')
+  type Debug = { game: { debugPlace: (x: number, y: number, z: number, yaw: number, pitch: number) => void; controller: { body: { position: { x: number; y: number; z: number } } } } }
+  const feetY = () => page.evaluate(() => (window as unknown as { __neonArena: Debug }).__neonArena.game.controller.body.position.y)
+  // In cima alla scala nord, rivolti a sud (verso cui si scende).
+  await page.evaluate(() => (window as unknown as { __neonArena: Debug }).__neonArena.game.debugPlace(-10, 0, -8, Math.PI, 0))
+  await page.keyboard.down('KeyW')
+  try {
+    await expect.poll(feetY, { timeout: 15000 }).toBeLessThan(-4)
+  } finally {
+    await page.keyboard.up('KeyW')
+  }
+  // Nel mezzanino il pavimento regge: non si cade oltre e non si torna su da soli.
+  await page.waitForTimeout(500)
+  expect(await feetY()).toBeCloseTo(-4.2, 1)
+  // Si risale dalla stessa scala camminando verso nord.
+  await page.evaluate(() => (window as unknown as { __neonArena: Debug }).__neonArena.game.debugPlace(-10, -4.2, 1, 0, 0))
+  await page.keyboard.down('KeyW')
+  try {
+    await expect.poll(feetY, { timeout: 15000 }).toBeGreaterThan(-0.2)
+  } finally {
+    await page.keyboard.up('KeyW')
+  }
+  await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: 'TERMINA RUN' }).click()
+  await expect(page.locator('#app')).toHaveAttribute('data-state', 'menu')
+  expect(errors).toEqual([])
+})

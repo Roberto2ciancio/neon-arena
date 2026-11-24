@@ -1,3 +1,4 @@
+import type { UndergroundDefinition } from './underground'
 import { MYSTERY_BOX_COST } from './mysteryBox'
 import { getDoorPoints, DOOR_OPENING } from './structures'
 import type { BuildingDefinition, Side } from './structures'
@@ -24,6 +25,8 @@ export interface MapDoorDefinition {
   cost: number
   /** Porta montata nell'ingresso di un edificio: blocca il relativo collegamento di navigazione. */
   building?: { id: string; side: Side }
+  /** Cancello in cima a una scala del sottosuolo (indice dell'ingresso). */
+  underground?: { id: string; entrance: number }
 }
 
 export type StationKind = 'weapon' | 'ammo' | 'medkit' | 'box'
@@ -86,6 +89,8 @@ export interface MapDefinition {
   extraction: { x: number; z: number }
   /** Generatore da riattivare (solo alcune mappe). */
   generator?: { x: number; z: number }
+  /** Livelli sotterranei raggiungibili dalle scale (es. metropolitana). */
+  underground?: readonly UndergroundDefinition[]
 }
 
 export type PurchasableWeapon = Exclude<WeaponId, 'ar-07' | 'p-12'>
@@ -538,4 +543,89 @@ export const LAB_21: MapDefinition = {
   ],
 }
 
-export const MAPS = [STATION_13, DEPOT_06, DISTRICT_ZERO, PORT_09, LAB_21] as const
+// ---------------------------------------------------------------------------
+// Metro 7: piazza notturna con un mezzanino della metropolitana sotto la strada.
+// ---------------------------------------------------------------------------
+
+const METRO_BUILDINGS: BuildingDefinition[] = [
+  { id: 'metro-office', name: 'BIGLIETTERIA', kind: 'building', x: -24, z: -21, width: 12, depth: 9, floors: 2, doors: ['south', 'east'], style: 'concrete' },
+  { id: 'hotel', name: 'HOTEL CENTRALE', kind: 'building', x: 22, z: -21, width: 12, depth: 10, floors: 3, doors: ['south'], style: 'glass' },
+  { id: 'car-park', kind: 'tower', x: -25, z: 21, width: 8, depth: 8, floors: 2, doors: [], style: 'industrial' },
+  { id: 'pharmacy', name: 'FARMACIA', kind: 'building', x: 22, z: 22, width: 10, depth: 8, floors: 1, doors: ['north'], style: 'brick' },
+]
+
+/** Mezzanino della metropolitana: tre scale dalla piazza, quella est chiusa da un cancello. */
+const METRO_CONCOURSE: UndergroundDefinition = {
+  id: 'metro',
+  name: 'MEZZANINO',
+  minX: -16,
+  maxX: 16,
+  minZ: -7,
+  maxZ: 7,
+  depth: 4.2,
+  entrances: [
+    { x: -10, z: -6.4, direction: 'south' },
+    { x: 10, z: 6.4, direction: 'north' },
+    { x: 15.4, z: 0, direction: 'west' },
+  ],
+  props: [
+    { x: -3, z: -1, width: 5, depth: 0.5, height: 1.1 },
+    { x: 12, z: -5, width: 2, depth: 2, height: 1.3 },
+    { x: -6, z: 4.6, width: 3, depth: 0.7, height: 0.6 },
+    { x: 4, z: -4.8, width: 3, depth: 0.7, height: 0.6 },
+  ],
+}
+
+export const METRO_07: MapDefinition = {
+  id: 'metro-07',
+  extraction: { x: 30, z: -6 },
+  name: 'Metro 7',
+  // Lampioni al sodio: notte arancione, aria ferma con braci.
+  theme: {
+    background: 0x0d0806, fog: 0x2a1a10, fogDensity: 0.012, skyTop: 0x0a0604, skyHorizon: 0x3a2010, skyGlow: 0xff8a2a,
+    hemisphereSky: 0xffd8b0, hemisphereGround: 0x140c08, keyLight: 0xffc890, keyIntensity: 2.8, rimLight: 0xff7a3a, rimIntensity: 1,
+    ground: ['#2a2826', '#3c3935'], weather: 'none', particles: 0xffb070,
+  },
+  arenaLimit: 40,
+  playerSpawn: { x: 0, z: 26 },
+  enemySpawnRadius: 39,
+  buildings: METRO_BUILDINGS,
+  underground: [METRO_CONCOURSE],
+  obstacles: [
+    { id: 'bus', x: 0, z: -14, width: 10, height: 3, depth: 2.6, style: 'car' },
+    { id: 'taxi-west', x: -7, z: 13, width: 2.2, height: 1.5, depth: 4.4, style: 'car' },
+    { id: 'taxi-east', x: 29, z: 4, width: 4.4, height: 1.5, depth: 2.2, style: 'car' },
+    { id: 'planter-west', x: -4, z: 0, width: 3, height: 0.9, depth: 3, style: 'cover' },
+    { id: 'planter-east', x: 4, z: 1, width: 3, height: 0.9, depth: 3, style: 'cover' },
+    { id: 'newsstand', x: -29, z: -6, width: 2.4, height: 2.4, depth: 2, style: 'container' },
+    { id: 'barrier-north', x: 12, z: -12, width: 5, height: 1, depth: 0.5, style: 'cover' },
+    { id: 'barrier-south', x: -14, z: 12, width: 5, height: 1, depth: 0.5, style: 'cover' },
+    { id: 'tram-shelter', x: 8, z: 15, width: 6, height: 2.6, depth: 0.4, style: 'wall' },
+    { id: 'roadworks', x: -32, z: 8, width: 0.4, height: 1.2, depth: 5, style: 'cover' },
+    ...crateStack('crates-hotel', 30, -12),
+    ...crateStack('crates-plaza', -20, 4, false),
+    ...barrels('barrels-office', -14, -16),
+    ...barrels('barrels-pharmacy', 12, 26),
+    ...cornerPillars(38, 7),
+  ],
+  doors: [
+    { id: 'metro-gate', x: 15.85, z: 0, width: 0.36, depth: 2.6, height: 2.5, cost: 12, underground: { id: 'metro', entrance: 2 } },
+    buildingDoor('pharmacy-door', METRO_BUILDINGS[3]!, 'north', 10),
+  ],
+  stations: [
+    weapon('station-taxi', 'smg-9', -4, 0, 18),
+    weapon('station-bus', 'sg-6', 6, 0, -18),
+    weapon('station-shelter', 'ap-18', 8, 0, 12),
+    weapon('station-office', 'r-44', -18, 0, -12),
+    weapon('station-hotel', 'dmr-3', 22, 0, -12),
+    weapon('station-car-park', 'vx-45', -25, 0, 12),
+    weapon('station-platform', 'lmg-75', 0, -4.2, 5.6),
+    weapon('station-turnstiles', 'ak-74r', -12, -4.2, 1),
+    { ...weapon('station-vault', 'br-3', 22, 0, 22), premium: true },
+    { id: 'station-box', kind: 'box', x: 6, y: -4.2, z: -2.4, cost: STATION_COSTS.box },
+    { id: 'station-ammo', kind: 'ammo', x: -2, y: -4.2, z: 4.4, cost: STATION_COSTS.ammo },
+    { id: 'station-medkit', kind: 'medkit', x: 16, y: 0, z: 10, cost: STATION_COSTS.medkit },
+  ],
+}
+
+export const MAPS = [STATION_13, DEPOT_06, DISTRICT_ZERO, PORT_09, LAB_21, METRO_07] as const

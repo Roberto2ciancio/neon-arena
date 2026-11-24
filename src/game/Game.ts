@@ -69,7 +69,7 @@ import { createNavigation } from './mapGeometry'
 import { advanceWaypoints } from './navigation'
 import type { NavigationGraph } from './navigation'
 import type { NavPoint } from './structures'
-import { getGroundHeight, moveBody, resolveBodyCollisions, steerBody } from './world'
+import { getGroundHeight, isStreetLevel, moveBody, resolveBodyCollisions, steerBody } from './world'
 import type { Body } from './world'
 import { getRollDip, HARD_LANDING_SPEED, PlayerController, readMovementInput } from './PlayerController'
 import { createMobilityState, DASH_INVULNERABILITY, DOUBLE_JUMP_SPEED, getMaxCharges, getOutOfReachDamage, getRechargeProgress, getSlamDamage, GRAPPLE_RANGE, isZombieReachable, MOBILITY, MOBILITY_KEY, OUT_OF_REACH_GRACE, OUT_OF_REACH_WARNING, rechargeOnKill, refillOnGround, SLAM_RADIUS, tickMobility, useMobility } from './mobility'
@@ -1319,7 +1319,7 @@ export class Game implements TouchTarget {
       point.x = THREE.MathUtils.clamp(point.x, -this.map.arenaLimit + 1, this.map.arenaLimit - 1)
       point.z = THREE.MathUtils.clamp(point.z, -this.map.arenaLimit + 1, this.map.arenaLimit - 1)
       resolveBodyCollisions(point, radius, 1.8, this.obstacles)
-      if (getGroundHeight(point.x, point.z, 0, radius, this.obstacles) > 0) continue
+      if (!isStreetLevel(point.x, point.z, radius, this.obstacles)) continue
       candidates.push(point)
     }
     const preferred = candidates.filter((point) => {
@@ -3316,7 +3316,7 @@ export class Game implements TouchTarget {
     }
     this.lorePickups = []
     const isFree = (x: number, z: number) => {
-      if (getGroundHeight(x, z, 0, 0.8, this.obstacles) > 0 || this.navigation.areaHeightOf({ x, y: 0, z }) > 0) return false
+      if (!isStreetLevel(x, z, 0.8, this.obstacles) || this.navigation.areaHeightOf({ x, y: 0, z }) > 0) return false
       const point = new THREE.Vector3(x, 0, z)
       resolveBodyCollisions(point, 0.8, 1, this.obstacles)
       return point.distanceTo(new THREE.Vector3(x, 0, z)) < 0.01
@@ -3552,7 +3552,7 @@ export class Game implements TouchTarget {
       const distance = SUPPLY_CRATE.minDistance + Math.random() * (SUPPLY_CRATE.maxDistance - SUPPLY_CRATE.minDistance)
       const point = new THREE.Vector3(this.player.x + Math.cos(angle) * distance, 0, this.player.z + Math.sin(angle) * distance)
       if (Math.abs(point.x) > this.map.arenaLimit - 2 || Math.abs(point.z) > this.map.arenaLimit - 2) continue
-      if (getGroundHeight(point.x, point.z, 0, 0.8, this.obstacles) > 0 || this.navigation.areaHeightOf(point) > 0) continue
+      if (!isStreetLevel(point.x, point.z, 0.8, this.obstacles) || this.navigation.areaHeightOf(point) > 0) continue
       const check = point.clone()
       resolveBodyCollisions(check, 0.8, 1, this.obstacles)
       if (check.distanceTo(point) > 0.01) continue

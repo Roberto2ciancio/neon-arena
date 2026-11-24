@@ -47,6 +47,7 @@ export const CHALLENGE_MAPS: readonly { id: string; name: string }[] = [
   { id: 'district-zero', name: 'DISTRETTO ZERO' },
   { id: 'port-09', name: 'PORTO 09' },
   { id: 'lab-21', name: 'LAB 21' },
+  { id: 'metro-07', name: 'METRO 7' },
 ]
 
 const CATEGORY_NAMES: Record<WeaponCategory, string> = {

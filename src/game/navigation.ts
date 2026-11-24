@@ -19,6 +19,7 @@ export function findArea(point: Point3, areas: readonly NavArea[]): string {
   for (const area of areas) {
     if (point.x < area.minX || point.x > area.maxX || point.z < area.minZ || point.z > area.maxZ) continue
     if (area.y > point.y + AREA_ABOVE_TOLERANCE) continue
+    if (area.maxY !== undefined && point.y > area.maxY) continue
     if (area.holes.some((hole) => point.x > hole.minX && point.x < hole.maxX && point.z > hole.minZ && point.z < hole.maxZ)) continue
     if (!best || area.y > best.y) best = area
   }
@@ -84,7 +85,7 @@ export class NavigationGraph {
     return findArea(point, this.areas)
   }
 
-  /** Quota del piano calpestabile sotto il punto (0 sul terreno). */
+  /** Quota del piano calpestabile sotto il punto (0 sul terreno, negativa nel sottosuolo). */
   areaHeightOf(point: Point3): number {
     const id = this.areaOf(point)
     return this.areas.find((area) => area.id === id)?.y ?? 0

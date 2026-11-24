@@ -71,6 +71,8 @@ export interface NavArea {
   maxZ: number
   /** Vani scala: chi ci si trova sopra sta ancora salendo dal livello inferiore. */
   holes: { minX: number; maxX: number; minZ: number; maxZ: number }[]
+  /** Quota oltre cui il punto non appartiene più all'area (sottosuolo: sopra c'è la strada). */
+  maxY?: number
 }
 
 export interface NavPoint {

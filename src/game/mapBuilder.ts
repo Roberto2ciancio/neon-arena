@@ -7,7 +7,7 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
 import type { CollisionObstacle } from './collision'
 import type { MapDefinition, MapDoorDefinition } from './maps'
-import { createDoorSolid, createStaticSolids, getMapStructures } from './mapGeometry'
+import { createDoorSolid, createStaticSolids, getMapStructures, getMapUnderground } from './mapGeometry'
 import { createIndustrialMaterialMaps } from './textures'
 import { addMapDetails } from './mapDetails'
 import { addStructureMeshes, createSky, createSkyline } from './structureRendering'
@@ -30,6 +30,33 @@ export interface BuiltMap {
   /** Coperture basse abbattibili dagli zombie: istanza e matrice originale per ripristinarle. */
   covers: Map<string, { mesh: THREE.InstancedMesh; index: number; matrix: THREE.Matrix4 }>
   theme: MapTheme
+}
+
+/**
+ * Terreno: un quadrato, forato dove le scale scendono nel sottosuolo (altrimenti coprirebbe
+ * il vano). Il piano è disegnato in XY e ruotato a terra dal chiamante.
+ */
+function createGroundGeometry(size: number, openings: readonly { minX: number; maxX: number; minZ: number; maxZ: number }[]): THREE.BufferGeometry {
+  if (openings.length === 0) return new THREE.PlaneGeometry(size, size)
+  const half = size / 2
+  const shape = new THREE.Shape([new THREE.Vector2(-half, -half), new THREE.Vector2(half, -half), new THREE.Vector2(half, half), new THREE.Vector2(-half, half)])
+  for (const opening of openings) {
+    // Dopo la rotazione di -90° su X, la y del piano diventa -z del mondo.
+    shape.holes.push(new THREE.Path([
+      new THREE.Vector2(opening.minX, -opening.maxZ), new THREE.Vector2(opening.maxX, -opening.maxZ),
+      new THREE.Vector2(opening.maxX, -opening.minZ), new THREE.Vector2(opening.minX, -opening.minZ),
+    ]))
+  }
+  const geometry = new THREE.ShapeGeometry(shape)
+  // UV come il PlaneGeometry (0–1 sul quadrato), così la texture del terreno resta uguale.
+  const position = geometry.attributes.position!
+  const uv = new Float32Array(position.count * 2)
+  for (let index = 0; index < position.count; index += 1) {
+    uv[index * 2] = (position.getX(index) + half) / size
+    uv[index * 2 + 1] = (position.getY(index) + half) / size
+  }
+  geometry.setAttribute('uv', new THREE.BufferAttribute(uv, 2))
+  return geometry
 }
 
 /**
@@ -136,6 +163,9 @@ function createBarrelTexture(): THREE.CanvasTexture {
 export function buildMap(map: MapDefinition): BuiltMap {
   const group = new THREE.Group()
   const obstacles = createStaticSolids(map)
+  const underground = getMapUnderground(map)
+  const inOpening = (x: number, z: number, margin: number) => underground.openings.some((opening) =>
+    x > opening.minX - margin && x < opening.maxX + margin && z > opening.minZ - margin && z < opening.maxZ + margin)
   const doors: BuiltDoor[] = []
   const extent = map.arenaLimit + 6
 
@@ -167,7 +197,7 @@ export function buildMap(map: MapDefinition): BuiltMap {
   // Con la pioggia l'asfalto è bagnato: meno ruvido, riflette il cielo e le insegne.
   const wet = theme.weather === 'rain' || theme.weather === 'drizzle'
   const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(groundSize, groundSize),
+    createGroundGeometry(groundSize, underground.openings),
     new THREE.MeshStandardMaterial({ color: 0x8996a8, map: groundMaps.map, normalMap: groundMaps.normalMap, normalScale: new THREE.Vector2(0.65, 0.65), roughnessMap: groundMaps.roughnessMap, roughness: wet ? 0.58 : 0.85, metalness: 0.35, envMapIntensity: wet ? 1.2 : 1 }),
   )
   ground.receiveShadow = true
@@ -180,6 +210,7 @@ export function buildMap(map: MapDefinition): BuiltMap {
   for (let index = 0; index < Math.round(map.arenaLimit / (wet ? 1.3 : 2.5)); index += 1) {
     const angle = index * 2.399
     const radius = map.arenaLimit * (0.25 + ((index * 37) % 70) / 100)
+    if (inOpening(Math.cos(angle) * radius, Math.sin(angle) * radius, 2.5)) continue
     const geometry = new THREE.CircleGeometry(0.8 + (index % 4) * 0.45, 20)
     geometry.scale(1.6, 1, 1)
     geometry.rotateX(-Math.PI / 2)
@@ -193,11 +224,14 @@ export function buildMap(map: MapDefinition): BuiltMap {
     mesh.receiveShadow = true
     group.add(mesh)
   }
-  const grid = new THREE.GridHelper(map.arenaLimit * 2 + 1, Math.round(map.arenaLimit * 1.4), 0x376474, 0x243345)
-  grid.position.y = -0.025
-  grid.material.transparent = true
-  grid.material.opacity = 0.12
-  group.add(grid)
+  // La griglia attraverserebbe i vani scala del sottosuolo: solo sulle mappe senza.
+  if (underground.openings.length === 0) {
+    const grid = new THREE.GridHelper(map.arenaLimit * 2 + 1, Math.round(map.arenaLimit * 1.4), 0x376474, 0x243345)
+    grid.position.y = -0.025
+    grid.material.transparent = true
+    grid.material.opacity = 0.12
+    group.add(grid)
+  }
 
   const boundaryMaterial = new THREE.MeshStandardMaterial({ color: 0x8295a4, map: wallMaps.map, normalMap: wallMaps.normalMap, normalScale: new THREE.Vector2(0.55, 0.55), roughnessMap: wallMaps.roughnessMap, roughness: 0.75, metalness: 0.45 })
   const boundaryGlow = new THREE.MeshStandardMaterial({ color: 0x58f5e5, emissive: 0x24c9b7, emissiveIntensity: 1.4 })

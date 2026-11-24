@@ -20,17 +20,56 @@ export interface MoveResult {
   landingSpeed: number
 }
 
+/** Zona del terreno più bassa di quota 0 (sottosuolo): il pavimento implicito è a `floorY`. */
+export interface TerrainPit {
+  minX: number
+  maxX: number
+  minZ: number
+  maxZ: number
+  floorY: number
+}
+
+/**
+ * Fosse del terreno associate alla lista dei solidi di una mappa: ogni partita (Zombie, TCT)
+ * ha la sua lista, quindi niente stato globale condiviso fra mappe diverse.
+ */
+const terrainPits = new WeakMap<readonly CollisionObstacle[], readonly TerrainPit[]>()
+
+export function setTerrainPits(solids: readonly CollisionObstacle[], pits: readonly TerrainPit[]): void {
+  if (pits.length > 0) terrainPits.set(solids, pits)
+  else terrainPits.delete(solids)
+}
+
+/** Quota del terreno nudo (senza solidi): 0, o il fondo della fossa che contiene il punto. */
+export function getTerrainHeight(x: number, z: number, solids: readonly CollisionObstacle[]): number {
+  const pits = terrainPits.get(solids)
+  if (!pits) return 0
+  for (const pit of pits) {
+    if (x >= pit.minX && x <= pit.maxX && z >= pit.minZ && z <= pit.maxZ) return pit.floorY
+  }
+  return 0
+}
+
+/**
+ * Vero se il punto è sul piano stradale (quota ~0, non su un ostacolo né in un'apertura del
+ * sottosuolo): dove si possono far comparire zombie, casse e registrazioni.
+ */
+export function isStreetLevel(x: number, z: number, radius: number, solids: readonly CollisionObstacle[]): boolean {
+  return Math.abs(getGroundHeight(x, z, 0, radius, solids)) < 0.15
+}
+
 function overlapsFootprint(box: THREE.Box3, x: number, z: number, radius: number): boolean {
   return x + radius > box.min.x && x - radius < box.max.x && z + radius > box.min.z && z - radius < box.max.z
 }
 
 /**
  * Altezza del pavimento sotto il corpo: il piano più alto la cui sommità è raggiungibile
- * dai piedi attuali con un gradino. Il terreno della mappa è a quota 0.
+ * dai piedi attuali con un gradino. Il terreno della mappa è a quota 0 (più in basso nelle
+ * fosse del sottosuolo).
  */
 export function getGroundHeight(x: number, z: number, feetY: number, radius: number, solids: readonly CollisionObstacle[]): number {
   const footprint = radius * 0.55
-  let ground = 0
+  let ground = getTerrainHeight(x, z, solids)
   for (const { box } of solids) {
     if (box.max.y > feetY + STEP_HEIGHT || box.max.y <= ground) continue
     if (overlapsFootprint(box, x, z, footprint)) ground = box.max.y
