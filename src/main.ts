@@ -39,8 +39,10 @@ import { EQUIPMENT } from './game/equipment'
 import { JETPACK_FUEL, MOBILITY } from './game/mobility'
 import { LORE, loadFoundLore, saveFoundLore } from './game/lore'
 import { CHANGELOG, getUnseenEntries, loadSeenChangelog, markChangelogSeen } from './game/changelog'
-import { assignKey, createDefaultBindings, getActionKeyLabel, getActiveBindings, getKeyLabel, isAssignableCode, isDefaultBindings, KEY_ACTIONS, loadBindings, saveBindings, setActiveBindings } from './game/keyBindings'
+import { assignKey, createDefaultBindings, getActionKeyLabel, getActiveBindings, getKeyLabel, isAssignableCode, isDefaultBindings, KEY_ACTIONS, loadBindings, remapKeyEvent, saveBindings, setActiveBindings } from './game/keyBindings'
 import type { KeyAction } from './game/keyBindings'
+import { createTutorialSave, loadTutorial, saveTutorial, TutorialTracker } from './game/tutorial'
+import type { TutorialObservation } from './game/tutorial'
 import { GAME_MODE_IDS, GAME_MODES, isGameMode, isRanked } from './game/gameModes'
 import type { GameMode } from './game/gameModes'
 import { createDailyRun, getUtcDayKey, loadDailyBest, recordDailyScore } from './game/dailyRun'
@@ -105,12 +107,29 @@ let waveBannerTimer = 0
 let damageFlashTimer = 0
 let hitmarkerTimer = 0
 let qualityNoticeTimer = 0
+// Stato del tutorial: dichiarato prima del gioco, che notifica subito lo stato iniziale.
+let tutorialSave = createTutorialSave(loadTutorial(window.localStorage), progress.runs > 0 || armory.level > 1)
+saveTutorial(window.localStorage, tutorialSave)
+let tutorial = createTracker()
+let tutorialUpgradeOpen = false
+let tutorialLastHud = 0
+let tutorialLastAmmo: { weapon: string; ammo: number } | null = null
+const tutorialPressed = new Set<KeyAction>()
+const TUTORIAL_KEYS = new Map(KEY_ACTIONS.map((action) => [action.defaultCode, action.id]))
+TUTORIAL_KEYS.set('ArrowUp', 'forward').set('ArrowDown', 'back').set('ArrowLeft', 'left').set('ArrowRight', 'right')
+
 const automaticQuality = new AutomaticQuality()
 
 const game = new Game(byId('scene'), {
   onStateChange: updateState,
-  onHud: updateHud,
-  onUpgrade: showUpgradeChoices,
+  onHud: (data) => {
+    updateHud(data)
+    updateTutorial(data)
+  },
+  onUpgrade: (choices, pending) => {
+    tutorialUpgradeOpen = choices.length > 0
+    showUpgradeChoices(choices, pending)
+  },
   onRunEnd: completeRun,
   onWave: showWaveBanner,
   onDamage: flashDamage,
@@ -191,6 +210,13 @@ function applyGraphicsQuality(quality: GraphicsQuality, notify = false): void {
 }
 
 function updateState(state: GameState): void {
+  if (state === 'menu' || (state === 'playing' && currentState === 'menu')) {
+    // Partita nuova o finita: suggerimento a metà e stato di lettura ripartono puliti.
+    tutorial.reset()
+    tutorialLastAmmo = null
+    tutorialUpgradeOpen = false
+    byId('tutorial-hint').classList.add('hidden')
+  }
   currentState = state
   if (state !== 'playing') automaticQuality.reset()
   app.dataset.state = state
@@ -1257,6 +1283,84 @@ byId<HTMLButtonElement>('key-reset').addEventListener('click', () => {
 })
 renderKeyBindings()
 renderKeyLabels()
+
+// --- Tutorial della prima partita ----------------------------------------------------------
+function createTracker(): TutorialTracker {
+  return new TutorialTracker(tutorialSave.seen, getActionKeyLabel, (seen) => {
+    tutorialSave = { ...tutorialSave, seen }
+    saveTutorial(window.localStorage, tutorialSave)
+  })
+}
+
+window.addEventListener('keydown', (event) => {
+  if (currentState !== 'playing' || selectedMode === 'tct') return
+  const action = TUTORIAL_KEYS.get(remapKeyEvent(event).code)
+  if (action) tutorialPressed.add(action)
+})
+
+function hideTutorialHint(): void {
+  byId('tutorial-hint').classList.add('hidden')
+}
+
+/** Aggiorna il suggerimento del tutorial con i dati dell'HUD (solo modalità Zombie). */
+function updateTutorial(data: HudData): void {
+  const now = performance.now()
+  const dt = tutorialLastHud > 0 ? Math.min(0.5, (now - tutorialLastHud) / 1000) : 0
+  tutorialLastHud = now
+  if (!tutorialSave.enabled || tutorial.finished || currentState !== 'playing' || data.tct) {
+    tutorialPressed.clear()
+    hideTutorialHint()
+    return
+  }
+  const fired = tutorialLastAmmo !== null && tutorialLastAmmo.weapon === data.weaponName && data.ammo < tutorialLastAmmo.ammo && !data.reloading
+  tutorialLastAmmo = { weapon: data.weaponName, ammo: data.ammo }
+  const observation: TutorialObservation = {
+    pressed: tutorialPressed,
+    fired,
+    ammoRatio: data.magazineSize > 0 ? data.ammo / data.magazineSize : 1,
+    reloading: data.reloading,
+    interaction: data.interaction !== null,
+    upgradeOpen: tutorialUpgradeOpen,
+    mobility: Boolean(data.mobility),
+    equipment: data.equipment.length > 0,
+    wave: data.wave,
+    waveBreak: data.waveBreak > 0,
+    miniboss: Boolean(data.boss?.miniboss),
+    boss: Boolean(data.boss && !data.boss.miniboss),
+    objective: Boolean(data.objective),
+    waveEvent: Boolean(data.waveEvent),
+    execution: Boolean(data.execution),
+    coop: Boolean(data.coop && data.coop.team.length > 1),
+  }
+  const hint = tutorial.update(observation, dt)
+  tutorialPressed.clear()
+  const element = byId('tutorial-hint')
+  if (!hint) {
+    hideTutorialHint()
+    return
+  }
+  if (element.dataset.step !== hint.id) {
+    element.dataset.step = hint.id
+    byId('tutorial-step').textContent = `${hint.step}/${hint.total}`
+    byId('tutorial-title').textContent = hint.title
+    byId('tutorial-text').textContent = hint.text
+  }
+  element.classList.remove('hidden')
+}
+
+byId<HTMLInputElement>('tutorial-enabled').checked = tutorialSave.enabled
+byId<HTMLInputElement>('tutorial-enabled').addEventListener('change', (event) => {
+  tutorialSave = { ...tutorialSave, enabled: (event.target as HTMLInputElement).checked }
+  saveTutorial(window.localStorage, tutorialSave)
+  if (!tutorialSave.enabled) hideTutorialHint()
+})
+byId<HTMLButtonElement>('tutorial-restart').addEventListener('click', () => {
+  tutorialSave = { seen: [], enabled: true }
+  saveTutorial(window.localStorage, tutorialSave)
+  tutorial = createTracker()
+  byId<HTMLInputElement>('tutorial-enabled').checked = true
+  byId('tutorial-restart').textContent = 'TUTORIAL AZZERATO: RIPARTE ALLA PROSSIMA PARTITA'
+})
 
 // --- Novità --------------------------------------------------------------------------------
 /** Voci non ancora viste, calcolate all'apertura: restano evidenziate finché la pagina è aperta. */
