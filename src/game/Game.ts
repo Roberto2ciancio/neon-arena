@@ -1,3 +1,6 @@
+import { createSurfaceLookup, getGroundSolidId, StepTracker } from './footsteps'
+import type { Surface } from './footsteps'
+import { getMusicIntensity, MusicEngine, smoothIntensity } from './music'
 import { getActionKeyLabel, remapKeyEvent } from './keyBindings'
 import type { GameKeyEvent } from './keyBindings'
 import { DEFAULT_THEME } from './maps'
@@ -52,7 +55,7 @@ import { gunshotProfileForRemote } from './coop/coopAudio'
 import { getLowHealthWarning, getMedkitDropChance, getPassiveRegen, MEDKIT_PICKUP_HEAL, MEDKIT_PICKUP_LIFETIME } from './healing'
 import { FIELD_TIERS, getFieldTier, getFieldWeaponCost, rollStationWeapons } from './fieldWeapons'
 import * as THREE from 'three'
-import { GameAudio } from './audio'
+import { GameAudio, getMusicOutput } from './audio'
 import { RenderPipeline } from './RenderPipeline'
 import { getHurtAberration } from './colorGrading'
 import { getGaitPose } from './gait'
@@ -343,6 +346,13 @@ export class Game implements TouchTarget {
   private readonly powerPickups: PowerUpPickup[] = []
   private readonly activePowerUps = new Map<PowerUpId, number>()
   private readonly audio = new GameAudio()
+  /** Passi del giocatore: superficie dalla mappa, ritmo dalla distanza percorsa. */
+  private readonly steps = new StepTracker()
+  private surfaceAt: (solidId: string | null) => Surface = () => 'concrete'
+  private readonly lastFootPosition = new THREE.Vector3()
+  /** Musica dinamica: segue l'intensità della partita. */
+  private readonly music = new MusicEngine(getMusicOutput)
+  private musicIntensity = 0
   private readonly enemies: Enemy[] = []
   private readonly enemyPool = new Map<EnemyKind, EnemyModel[]>()
   private pathBudget = 0
@@ -734,6 +744,7 @@ export class Game implements TouchTarget {
       }
     })
     this.map = map
+    this.surfaceAt = createSurfaceLookup(map)
     const theme = map.theme ?? DEFAULT_THEME
     this.pipeline.setColorGrade(map.id)
     this.pipeline.setEnvironmentTheme(theme)
@@ -1046,7 +1057,47 @@ export class Game implements TouchTarget {
     this.renderer.domElement.remove()
   }
 
+  /** Passo sulla superficie sotto i piedi (pozza acida, cassa, container, suolo della mappa). */
+  private updateFootsteps(landingSpeed: number): void {
+    const position = this.controller.body.position
+    const distance = Math.hypot(position.x - this.lastFootPosition.x, position.z - this.lastFootPosition.z)
+    this.lastFootPosition.copy(position)
+    // Teletrasporti (rampino, inizio run): niente raffica di passi.
+    if (distance > 2) return
+    const step = this.steps.update({
+      distance,
+      grounded: this.controller.body.grounded,
+      sprinting: this.controller.sprinting,
+      crouched: this.controller.crouched,
+      sliding: this.controller.sliding,
+      landingSpeed,
+    })
+    if (!step) return
+    const surface = this.inAcid ? 'acid' : this.surfaceAt(getGroundSolidId(position.x, position.z, position.y, 0.45, this.obstacles))
+    this.audio.footstep(surface, step.volume, step.landing)
+  }
+
+  private updateMusic(delta: number): void {
+    if (this.state !== 'playing') return
+    if (this.audio.isMuted) {
+      this.music.stop()
+      return
+    }
+    if (!this.music.isPlaying) this.music.start()
+    let nearby = 0
+    let boss = false
+    for (const enemy of this.enemies) {
+      if (isBoss(enemy.kind)) boss = true
+      if (enemy.body.position.distanceToSquared(this.controller.body.position) < 400) nearby += 1
+    }
+    const waveBreak = this.waveBreak > 0
+    const target = getMusicIntensity({ nearbyEnemies: nearby, healthRatio: this.health / Math.max(1, this.stats.maxHealth), wave: this.wave, waveBreak, boss })
+    this.musicIntensity = smoothIntensity(this.musicIntensity, target, delta)
+    this.music.setIntensity(this.musicIntensity, boss, waveBreak)
+  }
+
   private setState(state: GameState): void {
+    if (state !== 'playing') this.music.stop()
     this.state = state
     this.pipeline.setCompositing(state !== 'menu')
     this.weapons.setVisible(state !== 'menu')
@@ -1429,6 +1480,7 @@ export class Game implements TouchTarget {
       arenaLimit: this.map.arenaLimit,
     })
     if (result.landingSpeed > 7) this.cameraShake = Math.max(this.cameraShake, Math.min(0.3, (result.landingSpeed - 7) * 0.05))
+    this.updateFootsteps(result.landingSpeed)
     this.updateMobility(delta, result.landingSpeed, result.slamLanded === true)
     this.updateOutOfReach(delta)
 
@@ -4379,6 +4431,7 @@ export class Game implements TouchTarget {
     animateEmbers(this.mapContent.embers, delta)
     this.updatePlayer(delta)
     if (!this.isRunActive()) return
+    this.updateMusic(delta)
     if (this.coopRole === 'client') {
       this.updateReplicas(delta)
     } else {

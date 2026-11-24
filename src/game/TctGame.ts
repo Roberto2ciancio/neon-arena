@@ -1,3 +1,5 @@
+import { createSurfaceLookup, getGroundSolidId, StepTracker } from './footsteps'
+import type { Surface } from './footsteps'
 import { remapKeyEvent } from './keyBindings'
 import type { GameKeyEvent } from './keyBindings'
 import { shouldSprint, TOUCH_ACTION_KEYS, TOUCH_LOOK_SCALE } from './touchInput'
@@ -114,6 +116,9 @@ export class TctGame implements TouchTarget {
   private readonly renderer: THREE.WebGLRenderer
   private readonly pipeline: RenderPipeline
   private readonly audio = new GameAudio()
+  private readonly steps = new StepTracker()
+  private surfaceAt: (solidId: string | null) => Surface = () => 'concrete'
+  private readonly lastFootPosition = new THREE.Vector3()
   private readonly keys = new Set<string>()
   private readonly controller = new PlayerController()
   private readonly player = this.controller.body.position
@@ -374,6 +379,7 @@ export class TctGame implements TouchTarget {
       }
     })
     this.map = map
+    this.surfaceAt = createSurfaceLookup(map)
     const theme = map.theme ?? DEFAULT_THEME
     this.pipeline.setColorGrade(map.id)
     this.pipeline.setEnvironmentTheme(theme)
@@ -708,11 +714,12 @@ export class TctGame implements TouchTarget {
       if (shouldSprint(this.touchMoveX, this.touchMoveY)) input.sprint = true
     }
     const weapon = this.weapons.current
-    this.controller.update(delta, input, this.yaw, {
+    const movement = this.controller.update(delta, input, this.yaw, {
       speed: 7 * (weapon?.moveMultiplier ?? 1.1) * (this.stunTimer > 0 ? 0.45 : 1),
       solids: this.obstacles,
       arenaLimit: this.map.arenaLimit,
     })
+    this.updateFootsteps(movement.landingSpeed)
     this.localTarget.height = this.controller.height
     const frameInput = { aiming: this.aiming, crouched: this.controller.crouched, blocked: !controllable || this.controller.sprinting || this.controller.mantling }
     const frame = this.weapons.update(delta, frameInput)
@@ -1088,6 +1095,23 @@ export class TctGame implements TouchTarget {
     if (event.code === 'KeyT') this.useEquipment('gadget')
     if (event.code === 'Space' && !event.repeat) this.controller.jump(this.obstacles)
     if (event.code === 'KeyC' && !event.repeat) this.controller.pressCrouch()
+  }
+
+  /** Passo del giocatore locale sulla superficie sotto i piedi. */
+  private updateFootsteps(landingSpeed: number): void {
+    const position = this.controller.body.position
+    const distance = Math.hypot(position.x - this.lastFootPosition.x, position.z - this.lastFootPosition.z)
+    this.lastFootPosition.copy(position)
+    if (distance > 2 || !this.alive) return
+    const step = this.steps.update({
+      distance,
+      grounded: this.controller.body.grounded,
+      sprinting: this.controller.sprinting,
+      crouched: this.controller.crouched,
+      sliding: this.controller.sliding,
+      landingSpeed,
+    })
+    if (step) this.audio.footstep(this.surfaceAt(getGroundSolidId(position.x, position.z, position.y, 0.45, this.obstacles)), step.volume, step.landing)
   }
 
   /** Rotella del mouse: scorre primaria, secondaria e arma bianca. */

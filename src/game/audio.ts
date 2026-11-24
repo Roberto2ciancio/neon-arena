@@ -2,6 +2,7 @@ import { getGunSoundProfile, jitterPitch } from './gunSounds'
 import type { GunSoundProfile } from './gunSounds'
 import { getSpatialSound } from './spatialAudio'
 import type { AudioPosition, SpatialSound } from './spatialAudio'
+import type { Surface } from './footsteps'
 
 export type SoundName =
   | 'shoot' | 'enemyShoot' | 'hit' | 'headshot' | 'kill' | 'damage' | 'dash' | 'pickup' | 'upgrade'
@@ -12,26 +13,44 @@ export type SoundName =
 /** Voci contemporanee massime: oltre, i suoni nuovi vengono saltati per non saturare CPU e mix. */
 const MAX_VOICES = 48
 const VOLUME_KEY = 'neon-arena:volume:v1'
+const MUSIC_VOLUME_KEY = 'neon-arena:music-volume:v1'
 
 interface AudioGraph {
   context: AudioContext
   master: GainNode
   reverb: GainNode
+  /** Bus della musica: ha un volume suo, poi passa dal volume generale. */
+  music: GainNode
   noise: AudioBuffer
 }
 
 /** Un solo AudioContext condiviso da Zombie e TCT, con compressore e riverbero comuni. */
 let graph: AudioGraph | null = null
-let masterVolume = readVolume()
+let masterVolume = readLevel(VOLUME_KEY, 0.8)
+let musicVolume = readLevel(MUSIC_VOLUME_KEY, 0.5)
 let activeVoices = 0
 
-function readVolume(): number {
+function readLevel(key: string, fallback: number): number {
   try {
-    const value = Number(window.localStorage.getItem(VOLUME_KEY))
-    return Number.isFinite(value) && window.localStorage.getItem(VOLUME_KEY) !== null ? Math.min(1, Math.max(0, value)) : 0.8
+    const stored = window.localStorage.getItem(key)
+    const value = Number(stored)
+    return stored !== null && Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : fallback
   } catch {
-    return 0.8
+    return fallback
   }
+}
+
+function storeLevel(key: string, value: number): void {
+  try {
+    window.localStorage.setItem(key, String(value))
+  } catch {
+    // Archivio non disponibile: il valore vale solo per questa sessione.
+  }
+}
+
+/** Uscita per la musica dinamica (null finché l'audio non è stato avviato da un gesto). */
+export function getMusicOutput(): { context: AudioContext; destination: AudioNode; noise: AudioBuffer } | null {
+  return graph ? { context: graph.context, destination: graph.music, noise: graph.noise } : null
 }
 
 function createGraph(): AudioGraph {
@@ -64,7 +83,10 @@ function createGraph(): AudioGraph {
   const noise = context.createBuffer(1, context.sampleRate, context.sampleRate)
   const samples = noise.getChannelData(0)
   for (let index = 0; index < samples.length; index += 1) samples[index] = Math.random() * 2 - 1
-  return { context, master, reverb, noise }
+  const music = context.createGain()
+  music.gain.value = musicVolume
+  music.connect(master)
+  return { context, master, reverb, music, noise }
 }
 
 interface VoiceOptions {
@@ -75,6 +97,8 @@ interface VoiceOptions {
 
 export class GameAudio {
   private muted = false
+  /** Piede del prossimo passo (alterna l'altezza del suono). */
+  private stepSide = 1
 
   get isMuted(): boolean {
     return this.muted
@@ -87,12 +111,19 @@ export class GameAudio {
   /** Volume generale 0–1, condiviso da tutte le modalità e salvato sul dispositivo. */
   static setMasterVolume(volume: number): void {
     masterVolume = Math.min(1, Math.max(0, volume))
-    try {
-      window.localStorage.setItem(VOLUME_KEY, String(masterVolume))
-    } catch {
-      // Archivio non disponibile: il volume vale solo per questa sessione.
-    }
+    storeLevel(VOLUME_KEY, masterVolume)
     if (graph) graph.master.gain.setTargetAtTime(masterVolume, graph.context.currentTime, 0.02)
+  }
+
+  /** Volume della musica 0–1 (0 = spenta), salvato sul dispositivo. */
+  static setMusicVolume(volume: number): void {
+    musicVolume = Math.min(1, Math.max(0, volume))
+    storeLevel(MUSIC_VOLUME_KEY, musicVolume)
+    if (graph) graph.music.gain.setTargetAtTime(musicVolume, graph.context.currentTime, 0.05)
+  }
+
+  static get musicVolume(): number {
+    return musicVolume
   }
 
   static get masterVolume(): number {
@@ -121,6 +152,63 @@ export class GameAudio {
       // Otturatore o pompa: due scatti metallici.
       this.click(1700, 0.05, { spatial, delay: profile.actionDelay })
       this.click(1100, 0.06, { spatial, delay: profile.actionDelay + 0.12 })
+    }
+  }
+
+  /**
+   * Passo del giocatore sulla superficie indicata. `volume` 0–1 (accovacciato, camminata,
+   * corsa); l'atterraggio aggiunge un colpo sordo. I passi alternano leggermente l'altezza.
+   */
+  footstep(surface: Surface, volume: number, landing = false): void {
+    if (!this.ready()) return
+    this.stepSide = -this.stepSide
+    const pitch = (1 + this.stepSide * 0.04) * jitterPitch(0.06)
+    const level = Math.max(0.05, Math.min(1, volume)) * 0.55
+    const options = { reverb: surface === 'tile' || surface === 'metal' ? 0.18 : 0.06 }
+    switch (surface) {
+      case 'concrete':
+        this.noise({ type: 'lowpass', frequency: 1100 * pitch, gain: 0.32 * level, decay: 0.07 }, options)
+        this.tone(120 * pitch, 70, 0.06, 'sine', 0.16 * level, options)
+        break
+      case 'wet':
+        // Suola su asfalto bagnato: schiocco più uno spruzzo che scende.
+        this.noise({ type: 'lowpass', frequency: 900 * pitch, gain: 0.22 * level, decay: 0.06 }, options)
+        this.noise({ type: 'bandpass', frequency: 2600 * pitch, gain: 0.24 * level, decay: 0.16, q: 1.3, sweepTo: 900 }, { ...options, delay: 0.015 })
+        break
+      case 'gravel':
+        // Ghiaia: tanti piccoli scricchiolii ravvicinati.
+        for (let grain = 0; grain < 3; grain += 1) {
+          this.noise({ type: 'bandpass', frequency: (2200 + grain * 700) * pitch, gain: 0.16 * level, decay: 0.05, q: 2.2 }, { ...options, delay: grain * 0.018 })
+        }
+        this.tone(95 * pitch, 60, 0.06, 'sine', 0.1 * level, options)
+        break
+      case 'dirt':
+        this.noise({ type: 'lowpass', frequency: 700 * pitch, gain: 0.28 * level, decay: 0.1 }, options)
+        this.noise({ type: 'highpass', frequency: 3500, gain: 0.05 * level, decay: 0.08 }, options)
+        break
+      case 'metal':
+        // Lamiera: colpo e risonanza metallica breve.
+        this.noise({ type: 'bandpass', frequency: 1800 * pitch, gain: 0.26 * level, decay: 0.08, q: 1.6 }, options)
+        this.tone(410 * pitch, 395 * pitch, 0.22, 'triangle', 0.07 * level, options)
+        this.tone(1230 * pitch, 1200 * pitch, 0.14, 'sine', 0.035 * level, options)
+        break
+      case 'wood':
+        this.noise({ type: 'bandpass', frequency: 650 * pitch, gain: 0.3 * level, decay: 0.08, q: 1.8 }, options)
+        this.tone(190 * pitch, 150, 0.09, 'triangle', 0.12 * level, options)
+        break
+      case 'tile':
+        this.noise({ type: 'highpass', frequency: 1800 * pitch, gain: 0.2 * level, decay: 0.04 }, options)
+        this.tone(160 * pitch, 90, 0.05, 'sine', 0.12 * level, options)
+        break
+      case 'acid':
+        // Pozza acida: sciacquio e sfrigolio.
+        this.noise({ type: 'bandpass', frequency: 1200 * pitch, gain: 0.3 * level, decay: 0.2, q: 1.1, sweepTo: 400 }, options)
+        this.noise({ type: 'highpass', frequency: 5000, gain: 0.08 * level, decay: 0.3 }, { ...options, delay: 0.04 })
+        break
+    }
+    if (landing) {
+      this.noise({ type: 'lowpass', frequency: 400, gain: 0.45 * level, decay: 0.16 }, options)
+      this.tone(85, 38, 0.16, 'sine', 0.35 * level, options)
     }
   }
 

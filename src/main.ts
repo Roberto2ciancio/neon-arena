@@ -1798,6 +1798,14 @@ volumeInput.addEventListener('input', () => {
   byId<HTMLOutputElement>('volume-value').textContent = `${Math.round(GameAudio.masterVolume * 100)}%`
 })
 
+const musicInput = byId<HTMLInputElement>('music-volume')
+musicInput.value = String(GameAudio.musicVolume)
+byId<HTMLOutputElement>('music-volume-value').textContent = `${Math.round(GameAudio.musicVolume * 100)}%`
+musicInput.addEventListener('input', () => {
+  GameAudio.setMusicVolume(Number(musicInput.value))
+  byId<HTMLOutputElement>('music-volume-value').textContent = `${Math.round(GameAudio.musicVolume * 100)}%`
+})
+
 soundButton.addEventListener('click', () => {
   const current = activeGame()
   current.setAudioMuted(!current.isAudioMuted)
