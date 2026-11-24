@@ -110,6 +110,15 @@ h1 span { color: transparent; -webkit-text-stroke: 1.5px var(--violet); text-sha
 .controls-card { margin-top: 20px; padding-top: 17px; border-top: 1px solid var(--line); }
 .controls-card > .hud-label { display: block; margin-bottom: 10px; }
 .controls-card div { display: grid; grid-template-columns: 140px 1fr; align-items: center; min-height: 28px; color: #858da4; font-size: 10px; }
+.controls-card .settings-hint { margin: 0 0 10px; }
+.controls-card .secondary-button { width: 100%; margin-top: 8px; }
+.key-bindings { display: block !important; margin-bottom: 12px; }
+.key-bindings h4 { margin: 12px 0 4px; color: #7d859c; font-family: 'Chakra Petch', sans-serif; font-size: 9px; letter-spacing: 0.14em; }
+.key-bindings .key-row { display: grid; grid-template-columns: 1fr 110px; align-items: center; gap: 8px; min-height: 30px; color: #a5adc4; font-size: 11px; }
+.key-row button { min-height: 28px; padding: 0 8px; color: #eef1fb; border: 1px solid var(--line); background: #0c1020; font-family: 'Chakra Petch', sans-serif; font-size: 11px; letter-spacing: 0.06em; cursor: pointer; }
+.key-row button:hover, .key-row button:focus-visible { border-color: var(--cyan); outline: none; }
+.key-row button.listening { color: var(--cyan); border-color: var(--cyan); background: var(--cyan-soft); }
+.key-row button.changed { color: var(--cyan); }
 kbd { display: inline-block; color: #aab4cb; font-family: 'Chakra Petch', sans-serif; font-size: 9px; font-weight: 500; letter-spacing: 0.05em; }
 
 .hud { position: absolute; z-index: 4; top: 94px; left: 38px; right: 38px; display: grid; grid-template-columns: 280px 1fr 220px; align-items: start; pointer-events: none; }

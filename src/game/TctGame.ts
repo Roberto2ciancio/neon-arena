@@ -1,3 +1,5 @@
+import { remapKeyEvent } from './keyBindings'
+import type { GameKeyEvent } from './keyBindings'
 import { shouldSprint, TOUCH_ACTION_KEYS, TOUCH_LOOK_SCALE } from './touchInput'
 import type { TouchAction, TouchTarget } from './touchInput'
 import { WEAPON_XP } from './armory'
@@ -326,8 +328,8 @@ export class TctGame implements TouchTarget {
   destroy(): void {
     cancelAnimationFrame(this.animationId)
     window.removeEventListener('resize', this.resize)
-    window.removeEventListener('keydown', this.onKeyDown)
-    window.removeEventListener('keyup', this.onKeyUp)
+    window.removeEventListener('keydown', this.onPhysicalKeyDown)
+    window.removeEventListener('keyup', this.onPhysicalKeyUp)
     window.removeEventListener('wheel', this.onWheel)
     window.removeEventListener('blur', this.onBlur)
     window.removeEventListener('mouseup', this.onMouseButtonUp)
@@ -1062,7 +1064,11 @@ export class TctGame implements TouchTarget {
     this.camera.updateProjectionMatrix()
   }
 
-  private readonly onKeyDown = (event: KeyboardEvent): void => {
+  /** Tastiera reale: il tasto premuto viene tradotto nel codice dell'azione assegnata. */
+  private readonly onPhysicalKeyDown = (event: KeyboardEvent): void => this.onKeyDown(remapKeyEvent(event))
+  private readonly onPhysicalKeyUp = (event: KeyboardEvent): void => this.onKeyUp(remapKeyEvent(event))
+
+  private readonly onKeyDown = (event: GameKeyEvent): void => {
     if (!this.active) return
     if (event.code === 'Escape') {
       if (this.state === 'playing') this.pause()
@@ -1099,7 +1105,7 @@ export class TctGame implements TouchTarget {
     return true
   }
 
-  private readonly onKeyUp = (event: KeyboardEvent): void => {
+  private readonly onKeyUp = (event: GameKeyEvent): void => {
     this.keys.delete(event.code)
   }
 
@@ -1208,8 +1214,8 @@ export class TctGame implements TouchTarget {
 
   private bindEvents(): void {
     window.addEventListener('resize', this.resize)
-    window.addEventListener('keydown', this.onKeyDown)
-    window.addEventListener('keyup', this.onKeyUp)
+    window.addEventListener('keydown', this.onPhysicalKeyDown)
+    window.addEventListener('keyup', this.onPhysicalKeyUp)
     window.addEventListener('wheel', this.onWheel, { passive: true })
     window.addEventListener('blur', this.onBlur)
     window.addEventListener('mouseup', this.onMouseButtonUp)

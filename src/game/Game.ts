@@ -1,3 +1,5 @@
+import { getActionKeyLabel, remapKeyEvent } from './keyBindings'
+import type { GameKeyEvent } from './keyBindings'
 import { DEFAULT_THEME } from './maps'
 import { GoreSystem } from './gore'
 import { chooseFallStyle, createCombo, createFeats, getRunMedals, EXECUTION_CREDITS, EXECUTION_HEAL_SHARE, EXECUTION_HINT_RANGE, FALL_DURATION, FALL_STYLES, getBloodColor, getBloodCount, getComboMultiplier, getDeathImpulse, getHitStop, HIT_STOP_TIME_SCALE, isExecutable, normalizeGore, PART_HEAD, PART_LEFT_ARM, PART_LEFT_LEG, PART_RIGHT_ARM, PART_RIGHT_LEG, registerComboKill, rollDismemberment, tickCombo } from './killFeel'
@@ -67,7 +69,7 @@ import type { NavPoint } from './structures'
 import { getGroundHeight, moveBody, resolveBodyCollisions, steerBody } from './world'
 import type { Body } from './world'
 import { getRollDip, HARD_LANDING_SPEED, PlayerController, readMovementInput } from './PlayerController'
-import { createMobilityState, DASH_INVULNERABILITY, DOUBLE_JUMP_SPEED, getMaxCharges, getOutOfReachDamage, getRechargeProgress, getSlamDamage, GRAPPLE_RANGE, isZombieReachable, MOBILITY, MOBILITY_KEY, MOBILITY_KEY_LABEL, OUT_OF_REACH_GRACE, OUT_OF_REACH_WARNING, rechargeOnKill, refillOnGround, SLAM_RADIUS, tickMobility, useMobility } from './mobility'
+import { createMobilityState, DASH_INVULNERABILITY, DOUBLE_JUMP_SPEED, getMaxCharges, getOutOfReachDamage, getRechargeProgress, getSlamDamage, GRAPPLE_RANGE, isZombieReachable, MOBILITY, MOBILITY_KEY, OUT_OF_REACH_GRACE, OUT_OF_REACH_WARNING, rechargeOnKill, refillOnGround, SLAM_RADIUS, tickMobility, useMobility } from './mobility'
 import type { MobilityModifiers, MobilityState } from './mobility'
 import { WeaponHandler } from './WeaponHandler'
 import type { ActiveSlot } from './WeaponHandler'
@@ -1018,8 +1020,8 @@ export class Game implements TouchTarget {
   destroy(): void {
     cancelAnimationFrame(this.animationId)
     window.removeEventListener('resize', this.resize)
-    window.removeEventListener('keydown', this.onKeyDown)
-    window.removeEventListener('keyup', this.onKeyUp)
+    window.removeEventListener('keydown', this.onPhysicalKeyDown)
+    window.removeEventListener('keyup', this.onPhysicalKeyUp)
     window.removeEventListener('wheel', this.onWheel)
     window.removeEventListener('blur', this.onBlur)
     window.removeEventListener('mouseup', this.onMouseButtonUp)
@@ -4342,7 +4344,7 @@ export class Game implements TouchTarget {
         return { name: getZombieStats(boss.kind, 1).name.toUpperCase(), health: Math.max(0, boss.health / boss.maxHealth), phase: getBossPhase(boss.health, boss.maxHealth), exposed: boss.coreExposedTimer > 0 }
       })(),
       mobility: this.mobility ? {
-        key: MOBILITY_KEY_LABEL,
+        key: getActionKeyLabel('mobility'),
         name: MOBILITY[this.mobility.id].name,
         charges: this.mobility.charges,
         maxCharges: getMaxCharges(this.mobility.id, this.mobilityModifiers),
@@ -4462,7 +4464,11 @@ export class Game implements TouchTarget {
     this.camera.updateProjectionMatrix()
   }
 
-  private readonly onKeyDown = (event: KeyboardEvent): void => {
+  /** Tastiera reale: il tasto premuto viene tradotto nel codice dell'azione assegnata. */
+  private readonly onPhysicalKeyDown = (event: KeyboardEvent): void => this.onKeyDown(remapKeyEvent(event))
+  private readonly onPhysicalKeyUp = (event: KeyboardEvent): void => this.onKeyUp(remapKeyEvent(event))
+
+  private readonly onKeyDown = (event: GameKeyEvent): void => {
     if (event.code === 'Escape') {
       if (this.state === 'playing') this.pause()
       else if (this.state === 'paused') this.resume()
@@ -4659,7 +4665,7 @@ export class Game implements TouchTarget {
     return true
   }
 
-  private readonly onKeyUp = (event: KeyboardEvent): void => {
+  private readonly onKeyUp = (event: GameKeyEvent): void => {
     this.keys.delete(event.code)
   }
 
@@ -4980,8 +4986,8 @@ export class Game implements TouchTarget {
 
   private bindEvents(): void {
     window.addEventListener('resize', this.resize)
-    window.addEventListener('keydown', this.onKeyDown)
-    window.addEventListener('keyup', this.onKeyUp)
+    window.addEventListener('keydown', this.onPhysicalKeyDown)
+    window.addEventListener('keyup', this.onPhysicalKeyUp)
     window.addEventListener('wheel', this.onWheel, { passive: true })
     window.addEventListener('blur', this.onBlur)
     window.addEventListener('mouseup', this.onMouseButtonUp)

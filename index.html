@@ -55,8 +55,8 @@
       </section>
 
       <div id="combat-footer" class="combat-footer hidden">
-        <div class="controls-hint"><kbd>WASD</kbd> MOVIMENTO <span>·</span> <kbd>MOUSE</kbd> VISUALE <span>·</span> <kbd>CLICK</kbd> FUOCO <span>·</span> <kbd>R</kbd> RICARICA</div>
-        <div class="sprint-status"><kbd>SHIFT</kbd><span>SCATTO</span><kbd>SPAZIO</kbd><span>SALTO</span></div>
+        <div class="controls-hint"><kbd data-key-label="forward,left,back,right">WASD</kbd> MOVIMENTO <span>·</span> <kbd>MOUSE</kbd> VISUALE <span>·</span> <kbd>CLICK</kbd> FUOCO <span>·</span> <kbd data-key-label="reload">R</kbd> RICARICA</div>
+        <div class="sprint-status"><kbd data-key-label="sprint">SHIFT</kbd><span>SCATTO</span><kbd data-key-label="jump">SPAZIO</kbd><span>SALTO</span></div>
         <button id="pause-button" class="icon-button" type="button">ESC // PAUSA</button>
       </div>
 
@@ -74,10 +74,10 @@
         <div class="boss-track"><i id="boss-fill"></i><b style="left: 33.3%"></b><b style="left: 66.6%"></b></div>
       </div>
       <div id="equipment-hud" class="equipment-hud hidden" aria-label="Equipaggiamenti">
-        <div><kbd>G</kbd><span id="lethal-name">GRANATA</span><strong id="grenade-status">PRONTA</strong></div>
-        <div><kbd>Q</kbd><span id="tactical-name">FLASHBANG</span><strong id="tactical-status">PRONTA</strong></div>
-        <div><kbd>T</kbd><span id="gadget-name">TORRETTA</span><strong id="turret-status">PRONTA</strong></div>
-        <div id="mobility-hud" class="mobility-hud hidden"><kbd>B</kbd><span id="mobility-name">DOPPIO SALTO</span><strong id="mobility-status">PRONTO</strong><i id="mobility-bar" aria-hidden="true"></i></div>
+        <div><kbd data-key-label="lethal">G</kbd><span id="lethal-name">GRANATA</span><strong id="grenade-status">PRONTA</strong></div>
+        <div><kbd data-key-label="tactical">Q</kbd><span id="tactical-name">FLASHBANG</span><strong id="tactical-status">PRONTA</strong></div>
+        <div><kbd data-key-label="gadget">T</kbd><span id="gadget-name">TORRETTA</span><strong id="turret-status">PRONTA</strong></div>
+        <div id="mobility-hud" class="mobility-hud hidden"><kbd data-key-label="mobility">B</kbd><span id="mobility-name">DOPPIO SALTO</span><strong id="mobility-status">PRONTO</strong><i id="mobility-bar" aria-hidden="true"></i></div>
       </div>
       <aside id="upgrade-panel" class="upgrade-panel hidden" aria-live="polite" aria-labelledby="upgrade-title">
         <header><strong id="upgrade-title">LIVELLO SU</strong><span id="upgrade-pending"></span></header>
@@ -91,12 +91,12 @@
       </div>
       <div id="scope-overlay" class="scope-overlay hidden" aria-hidden="true"><i></i></div>
       <div id="flash-overlay" class="flash-overlay" aria-hidden="true"></div>
-      <div id="door-prompt" class="door-prompt hidden"><kbd>E</kbd><span id="door-prompt-text">APRI PORTA</span></div>
+      <div id="door-prompt" class="door-prompt hidden"><kbd data-key-label="interact">E</kbd><span id="door-prompt-text">APRI PORTA</span></div>
       <div id="crosshair" class="crosshair hidden" aria-hidden="true"><i></i><i></i><i></i><i></i><b></b></div>
       <div id="hitmarker" class="hitmarker" aria-hidden="true">×</div>
       <div id="combo-meter" class="combo-meter hidden" aria-live="off"><strong id="combo-count">×2</strong><span id="combo-multiplier">CREDITI ×1,05</span><i id="combo-timer"></i></div>
       <div id="combo-callout" class="combo-callout hidden" aria-live="polite"></div>
-      <div id="execution-prompt" class="execution-prompt hidden"><kbd>F</kbd><span>ESECUZIONE</span></div>
+      <div id="execution-prompt" class="execution-prompt hidden"><kbd data-key-label="melee">F</kbd><span>ESECUZIONE</span></div>
       <div id="damage-numbers-layer" class="damage-numbers-layer" aria-hidden="true"></div>
       <div id="respawn-banner" class="respawn-banner hidden">RIENTRO IN COMBATTIMENTO</div>
 
@@ -357,17 +357,15 @@
           <div class="drawer-section" data-drawer-panel="controls">
             <div class="controls-card">
             <span class="hud-label">COMANDI</span>
-            <div><kbd>W A S D / MOUSE</kbd><span>Movimento e visuale</span></div>
+            <p class="settings-hint">Clicca un tasto e premi quello nuovo (ESC annulla). Se il tasto è già usato da un'altra azione, le due si scambiano.</p>
+            <div id="key-bindings" class="key-bindings"></div>
+            <div><kbd>MOUSE</kbd><span>Visuale</span></div>
             <div><kbd>CLICK SX / DX</kbd><span>Fuoco / mira</span></div>
-            <div><kbd>R / SHIFT / SPAZIO</kbd><span>Ricarica / scatto / salto</span></div>
-            <div><kbd>1 / 2 / 3 · ROTELLA</kbd><span>Primaria / secondaria / arma bianca</span></div>
-            <div><kbd>F</kbd><span>Attacco rapido corpo a corpo</span></div>
-            <div><kbd>G / Q / T</kbd><span>Letale / tattico / gadget</span></div>
-            <div><kbd>B</kbd><span>Modulo di mobilità (solo Zombie)</span></div>
-            <div><kbd>C</kbd><span>Accovacciati, in scatto scivola</span></div>
-            <div><kbd>Z / X / V</kbd><span>Scegli un potenziamento al level up</span></div>
-            <div><kbd>E</kbd><span>Porte e postazioni</span></div>
+            <div><kbd>ROTELLA</kbd><span>Cambia arma</span></div>
+            <div><kbd>FRECCE / SHIFT DX</kbd><span>Movimento e scatto (sempre attivi)</span></div>
             <div><kbd>ESC</kbd><span>Pausa</span></div>
+            <p id="key-status" class="settings-hint" aria-live="polite"></p>
+            <button id="key-reset" class="secondary-button" type="button">RIPRISTINA I TASTI PREDEFINITI</button>
           </div>
           </div>
         </div>

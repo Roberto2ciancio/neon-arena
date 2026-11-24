@@ -39,6 +39,8 @@ import { EQUIPMENT } from './game/equipment'
 import { JETPACK_FUEL, MOBILITY } from './game/mobility'
 import { LORE, loadFoundLore, saveFoundLore } from './game/lore'
 import { CHANGELOG, getUnseenEntries, loadSeenChangelog, markChangelogSeen } from './game/changelog'
+import { assignKey, createDefaultBindings, getActionKeyLabel, getActiveBindings, getKeyLabel, isAssignableCode, isDefaultBindings, KEY_ACTIONS, loadBindings, saveBindings, setActiveBindings } from './game/keyBindings'
+import type { KeyAction } from './game/keyBindings'
 import { GAME_MODE_IDS, GAME_MODES, isGameMode, isRanked } from './game/gameModes'
 import type { GameMode } from './game/gameModes'
 import { createDailyRun, getUtcDayKey, loadDailyBest, recordDailyScore } from './game/dailyRun'
@@ -560,7 +562,7 @@ function updateTctOverlay(data: TctHudData): void {
   byId('ally-markers').replaceChildren(...markers)
 }
 
-const UPGRADE_KEY_LABELS = ['Z', 'X', 'V']
+const UPGRADE_KEY_ACTIONS: readonly KeyAction[] = ['upgrade1', 'upgrade2', 'upgrade3']
 
 function showUpgradeChoices(ids: string[], pending: number): void {
   const buttons: HTMLButtonElement[] = []
@@ -572,7 +574,7 @@ function showUpgradeChoices(ids: string[], pending: number): void {
     button.className = 'upgrade-choice'
     button.title = upgrade.description
     button.innerHTML = `
-      <span class="upgrade-key">${UPGRADE_KEY_LABELS[index] ?? ''}</span>
+      <span class="upgrade-key">${UPGRADE_KEY_ACTIONS[index] ? getActionKeyLabel(UPGRADE_KEY_ACTIONS[index]!) : ''}</span>
       <span class="upgrade-icon" aria-hidden="true">${upgrade.icon}</span>
       <span><strong>${upgrade.name}</strong><small>${upgrade.description}</small></span>
     `
@@ -1159,6 +1161,102 @@ function renderRunCards(): void {
     ? `${runCards.length} ${runCards.length === 1 ? 'carta' : 'carte'} · frammenti ed esperienza ×${getRewardMultiplier(runCards).toLocaleString('it-IT')}`
     : 'Facoltative: più difficile, più frammenti ed esperienza'
 }
+
+// --- Tasti ----------------------------------------------------------------------------------
+setActiveBindings(loadBindings(window.localStorage))
+const KEY_GROUP_TITLES: Record<string, string> = { movimento: 'MOVIMENTO', combattimento: 'COMBATTIMENTO', armi: 'ARMI E POTENZIAMENTI' }
+let listeningAction: KeyAction | null = null
+
+/** Aggiorna i tasti mostrati nell'HUD e nei suggerimenti. */
+function renderKeyLabels(): void {
+  document.querySelectorAll<HTMLElement>('[data-key-label]').forEach((element) => {
+    const actions = (element.dataset.keyLabel ?? '').split(',') as KeyAction[]
+    const labels = actions.map((action) => getActionKeyLabel(action))
+    element.textContent = labels.every((label) => label.length === 1) ? labels.join('') : labels.join(' ')
+  })
+}
+
+function renderKeyBindings(): void {
+  const container = byId('key-bindings')
+  const bindings = getActiveBindings()
+  container.replaceChildren()
+  let group = ''
+  for (const action of KEY_ACTIONS) {
+    if (action.group !== group) {
+      group = action.group
+      const title = document.createElement('h4')
+      title.textContent = KEY_GROUP_TITLES[group] ?? group
+      container.append(title)
+    }
+    const row = document.createElement('div')
+    row.className = 'key-row'
+    const name = document.createElement('span')
+    name.textContent = action.label
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.dataset.keyAction = action.id
+    const listening = listeningAction === action.id
+    button.className = `${listening ? 'listening' : ''}${bindings[action.id] !== action.defaultCode ? ' changed' : ''}`.trim()
+    button.textContent = listening ? 'PREMI UN TASTO' : getKeyLabel(bindings[action.id])
+    button.setAttribute('aria-label', `${action.label}: ${getKeyLabel(bindings[action.id])}. Premi per cambiare`)
+    button.addEventListener('click', () => {
+      listeningAction = listeningAction === action.id ? null : action.id
+      byId('key-status').textContent = listeningAction ? `Premi il nuovo tasto per «${action.label}».` : ''
+      renderKeyBindings()
+      container.querySelector<HTMLButtonElement>(`[data-key-action="${action.id}"]`)?.focus()
+    })
+    row.append(name, button)
+    container.append(row)
+  }
+  byId<HTMLButtonElement>('key-reset').disabled = isDefaultBindings(bindings)
+}
+
+function applyBindings(next: ReturnType<typeof getActiveBindings>, message: string): void {
+  setActiveBindings(next)
+  saveBindings(window.localStorage, next)
+  byId('key-status').textContent = message
+  renderKeyBindings()
+  renderKeyLabels()
+}
+
+// In ascolto del nuovo tasto: fase di cattura, così ESC annulla senza chiudere il pannello.
+window.addEventListener('keydown', (event) => {
+  if (!listeningAction) return
+  // Pannello chiuso nel frattempo: l'ascolto si annulla e il tasto torna al gioco.
+  if (byId('menu-drawer').classList.contains('hidden')) {
+    listeningAction = null
+    return
+  }
+  event.preventDefault()
+  event.stopImmediatePropagation()
+  const action = KEY_ACTIONS.find((entry) => entry.id === listeningAction)!
+  listeningAction = null
+  if (event.code === 'Escape') {
+    byId('key-status').textContent = 'Modifica annullata.'
+    renderKeyBindings()
+    return
+  }
+  if (!isAssignableCode(event.code)) {
+    byId('key-status').textContent = `Il tasto ${getKeyLabel(event.code)} non si può assegnare.`
+    renderKeyBindings()
+    return
+  }
+  const before = getActiveBindings()
+  const swapped = KEY_ACTIONS.find((entry) => entry.id !== action.id && before[entry.id] === event.code)
+  const next = assignKey(before, action.id, event.code)
+  if (!next) return
+  applyBindings(next, swapped
+    ? `«${action.label}» ora usa ${getKeyLabel(event.code)}; «${swapped.label}» passa a ${getKeyLabel(before[action.id])}.`
+    : `«${action.label}» ora usa ${getKeyLabel(event.code)}.`)
+  byId('key-bindings').querySelector<HTMLButtonElement>(`[data-key-action="${action.id}"]`)?.focus()
+}, { capture: true })
+
+byId<HTMLButtonElement>('key-reset').addEventListener('click', () => {
+  listeningAction = null
+  applyBindings(createDefaultBindings(), 'Tasti predefiniti ripristinati.')
+})
+renderKeyBindings()
+renderKeyLabels()
 
 // --- Novità --------------------------------------------------------------------------------
 /** Voci non ancora viste, calcolate all'apertura: restano evidenziate finché la pagina è aperta. */
