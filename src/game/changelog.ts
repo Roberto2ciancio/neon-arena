@@ -21,6 +21,18 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: readonly ChangelogEntry[] = [
   {
+    id: '2026-11-24-metro',
+    date: '24 novembre 2026',
+    title: 'Metro 7, tutorial e audio nuovo',
+    items: [
+      { name: 'Nuova mappa: Metro 7', text: 'Una piazza di notte con un mezzanino della metropolitana sotto la strada: tre scale per scendere (una dietro un cancello) e armi al piano di sotto.', where: 'Menu > 2 // SCEGLI L’ARENA > METRO 7' },
+      { name: 'Passi e musica', text: 'I passi cambiano con la superficie (asfalto bagnato, ghiaia, metallo, legno) e la musica cresce con l’orda, la vita bassa e i boss.', where: 'Impostazioni > MUSICA per il volume' },
+      { name: 'Tasti personalizzabili', text: 'Ogni azione può avere il tasto che preferisci; se è già usato, le due azioni si scambiano.', where: 'Menu > COMANDI' },
+      { name: 'Tutorial', text: 'Alla prima partita compaiono suggerimenti quando servono. Puoi rivederlo da capo.', where: 'Impostazioni > RIVEDI IL TUTORIAL' },
+      { name: 'Account', text: 'Recupero della password, cambio di email e password, eliminazione dell’account con tutti i dati online.', where: 'Account > PASSWORD DIMENTICATA? oppure GESTISCI ACCOUNT' },
+    ],
+  },
+  {
     id: '2026-11-23-gameplay',
     date: '23 novembre 2026',
     title: 'Partite mai uguali',

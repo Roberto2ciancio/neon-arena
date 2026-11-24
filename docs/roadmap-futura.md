@@ -15,9 +15,9 @@ Obiettivo: nessun giocatore può alterare dati altrui e gli account sono complet
 |---|---|---|
 | Chiudere le policy anonime di `profiles` e `leaderboard`: oggi chiunque abbia la chiave pubblica può aggiornare qualsiasi profilo e inviare punteggi arbitrari | C | Spostare profilo e classifica sugli account (`auth.uid()`), lasciare agli ospiti solo la classifica locale |
 | Validare i risultati di classifica lato server (Edge Function con limiti di plausibilità: punteggio per ondata, durata minima della run) | C | I punteggi online non sono certificati finché manca il server autorevole |
-| Recupero password e cambio email nella schermata account | C | Endpoint `recover` di Supabase Auth; Site URL già configurato |
+| Recupero password e cambio email nella schermata account | C | ✔ 2026-11-24 (anche cambio password) |
 | Accesso con Google o GitHub (OAuth) | C + U | L'utente crea le app OAuth e inserisce le chiavi nella dashboard Supabase |
-| Eliminazione account e dati (GDPR) | C | Il `cascade` su `player_saves` è già presente |
+| Eliminazione account e dati (GDPR) | C | ✔ 2026-11-24: funzione `delete_my_account` |
 | SMTP esterno per le email di conferma | U | Il servizio integrato di Supabase invia poche email all'ora |
 
 **Conclusa quando:** l'advisor di sicurezza Supabase non segnala nulla, i test RLS (lettura e scrittura di dati altrui rifiutate) sono automatizzati e la registrazione è provata con un'email reale.
@@ -71,7 +71,7 @@ Obiettivo: aggiungere contenuti senza toccare file da 1.800 righe.
 | Obiettivi in modalità Zombie: riattivare il generatore di Stazione 13, evacuazione finale | C | Già previsti nella visione originale di `ROADMAP.md` |
 | Fasi del Bruto (carica, colpo a terra, nucleo esposto) e un nuovo boss per Distretto Zero | C | |
 | Zombie che si arrampicano su coperture basse e sfondano porte acquistate | C | Si appoggia a `navigation.ts` |
-| Quarta mappa con interni estesi e un livello sotterraneo | C | Il generatore di strutture va esteso ai livelli negativi |
+| Quarta mappa con interni estesi e un livello sotterraneo | C | ✔ METRO 7 (2026-11-24): mezzanino sotterraneo con tre scale, `underground.ts` |
 | Sfide giornaliere e settimanali con ricompense estetiche | C | Richiedono la validazione server della Fase 9 |
 | Nuove armi: lanciagranate e balestra; accessori: mirino laterale e calcio | C | |
 
@@ -79,10 +79,10 @@ Obiettivo: aggiungere contenuti senza toccare file da 1.800 righe.
 
 | Punto | Resp. | Note |
 |---|---|---|
-| Effetti sonori campionati, musica dinamica e passi diversi per superficie | C | Oggi l'audio è sintetizzato con WebAudio |
-| Rimappatura dei tasti e sensibilità separata in mira | C | |
+| Effetti sonori campionati, musica dinamica e passi diversi per superficie | C | ✔ 2026-11-24 musica dinamica e passi per superficie (sintetizzati); restano gli effetti campionati |
+| Rimappatura dei tasti e sensibilità separata in mira | C | ✔ 2026-11-24: menu COMANDI, `keyBindings.ts` |
 | Supporto gamepad | C | API Gamepad del browser |
-| Tutorial interattivo alla prima partita | C | Il benvenuto del menu ne è il punto d'ingresso |
+| Tutorial interattivo alla prima partita | C | ✔ 2026-11-24: suggerimenti contestuali, `tutorial.ts` |
 | Traduzione inglese dell'interfaccia | C | Raccogliere i testi in un file di traduzioni |
 | PWA installabile con gioco offline in modalità ospite | K | Il manifest esiste già |
 
