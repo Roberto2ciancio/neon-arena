@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { AccountSaves, mergeSaves, normalizeSave } from './accountSave'
 import type { PlayerSave } from './accountSave'
 import { createDefaultArmory, normalizeArmory } from './armory'
-import { AUTH_STORAGE_KEY, AuthError, mapAuthError, SupabaseAuth } from './auth'
+import { AUTH_STORAGE_KEY, AuthError, mapAuthError, parseAuthRedirect, SupabaseAuth } from './auth'
 import { createDefaultProgress } from './progression'
 
 function memoryStorage() {
@@ -64,6 +64,83 @@ describe('accesso con account', () => {
     const result = await auth.signUp('nova@example.com', 'segreta1')
     expect(result.needsConfirmation).toBe(true)
     expect(auth.session).toBeNull()
+  })
+})
+
+describe('gestione dell’account', () => {
+  type Call = { url: string; method: string; body: string | undefined; auth: string | undefined }
+  function recordingAuth(respond: (call: Call) => Response = () => jsonResponse(200, sessionBody())) {
+    const calls: Call[] = []
+    const storage = memoryStorage()
+    const auth = new SupabaseAuth('https://demo.supabase.co', 'anon', storage, async (input, init) => {
+      const headers = (init?.headers ?? {}) as Record<string, string>
+      const call = { url: String(input), method: init?.method ?? 'GET', body: init?.body as string | undefined, auth: headers.Authorization }
+      calls.push(call)
+      return respond(call)
+    }, () => 1000)
+    return { auth, calls, storage }
+  }
+
+  it('legge i link email di Supabase e ignora gli altri frammenti', () => {
+    expect(parseAuthRedirect('#access_token=a&refresh_token=r&expires_in=600&type=recovery')).toEqual({ accessToken: 'a', refreshToken: 'r', expiresIn: 600, type: 'recovery' })
+    expect(parseAuthRedirect('#access_token=a&refresh_token=r&type=strano')).toMatchObject({ type: null, expiresIn: 3600 })
+    expect(parseAuthRedirect('#error=access_denied&error_code=otp_expired')).toEqual({ error: 'link-expired' })
+    expect(parseAuthRedirect('#sezione')).toBeNull()
+    expect(parseAuthRedirect('')).toBeNull()
+  })
+
+  it('chiede il link di recupero con l’indirizzo di ritorno', async () => {
+    const { auth, calls } = recordingAuth(() => jsonResponse(200, {}))
+    await auth.requestPasswordReset(' nova@example.com ', 'https://gioco.example/neon/')
+    expect(calls[0]!.url).toBe('https://demo.supabase.co/auth/v1/recover?redirect_to=https%3A%2F%2Fgioco.example%2Fneon%2F')
+    expect(JSON.parse(calls[0]!.body!)).toEqual({ email: 'nova@example.com' })
+    await expect(auth.requestPasswordReset('non-email', 'x')).rejects.toMatchObject({ code: 'invalid-email' })
+  })
+
+  it('completa l’accesso dal link di recupero e salva la nuova password', async () => {
+    const { auth, calls, storage } = recordingAuth((call) => call.url.endsWith('/auth/v1/user') && call.method === 'GET'
+      ? jsonResponse(200, { id: 'user-1', email: 'nova@example.com' })
+      : jsonResponse(200, { id: 'user-1' }))
+    const result = await auth.completeRedirect('#access_token=tok&refresh_token=ref&expires_in=3600&type=recovery')
+    expect(result).toEqual({ type: 'recovery', error: null })
+    expect(calls[0]!.auth).toBe('Bearer tok')
+    expect(JSON.parse(storage.data[AUTH_STORAGE_KEY]!).user.email).toBe('nova@example.com')
+    await auth.updatePassword('nuova-segreta')
+    expect(calls[1]).toMatchObject({ url: 'https://demo.supabase.co/auth/v1/user', method: 'PUT', auth: 'Bearer tok' })
+    await expect(auth.updatePassword('123')).rejects.toMatchObject({ code: 'weak-password' })
+  })
+
+  it('segnala un link scaduto senza salvare la sessione', async () => {
+    const { auth } = recordingAuth(() => jsonResponse(401, { msg: 'invalid JWT' }))
+    expect(await auth.completeRedirect('#error=access_denied&error_code=otp_expired')).toEqual({ type: null, error: 'link-expired' })
+    expect(await auth.completeRedirect('#access_token=tok&refresh_token=ref&type=recovery')).toEqual({ type: 'recovery', error: 'link-expired' })
+    expect(auth.session).toBeNull()
+  })
+
+  it('cambia email solo da connesso e verso un indirizzo diverso', async () => {
+    const { auth, calls } = recordingAuth()
+    await expect(auth.requestEmailChange('altra@example.com', 'https://x/')).rejects.toMatchObject({ code: 'signed-out' })
+    await auth.signIn('nova@example.com', 'segreta1')
+    await expect(auth.requestEmailChange('NOVA@example.com', 'https://x/')).rejects.toMatchObject({ code: 'same-email' })
+    await auth.requestEmailChange('altra@example.com', 'https://x/')
+    expect(calls.at(-1)).toMatchObject({ method: 'PUT', auth: 'Bearer access-1' })
+    expect(calls.at(-1)!.url).toBe('https://demo.supabase.co/auth/v1/user?redirect_to=https%3A%2F%2Fx%2F')
+  })
+
+  it('elimina l’account con la funzione del database e disconnette', async () => {
+    const { auth, calls, storage } = recordingAuth((call) => call.url.includes('/rpc/') ? new Response(null, { status: 204 }) : jsonResponse(200, sessionBody()))
+    await auth.signIn('nova@example.com', 'segreta1')
+    await auth.deleteAccount()
+    expect(calls.at(-1)).toMatchObject({ url: 'https://demo.supabase.co/rest/v1/rpc/delete_my_account', method: 'POST', auth: 'Bearer access-1' })
+    expect(auth.session).toBeNull()
+    expect(storage.data[AUTH_STORAGE_KEY]).toBe('null')
+  })
+
+  it('non disconnette se l’eliminazione fallisce', async () => {
+    const { auth } = recordingAuth((call) => call.url.includes('/rpc/') ? jsonResponse(500, { message: 'errore' }) : jsonResponse(200, sessionBody()))
+    await auth.signIn('nova@example.com', 'segreta1')
+    await expect(auth.deleteAccount()).rejects.toBeInstanceOf(AuthError)
+    expect(auth.session).not.toBeNull()
   })
 })
 

@@ -156,7 +156,28 @@ begin
   insert into rls_results values ('F: armi della comunità (aggregate)', n || ' righe (atteso 1)');
   select count(*) into n from public.leaderboard;
   insert into rls_results values ('F: anon legge le run direttamente', n || ' righe visibili (atteso 0 dopo global_stats_close_reads)');
+  begin
+    perform public.delete_my_account();
+    insert into rls_results values ('Account: anon elimina un account', 'ACCETTATO (male)');
+  exception when others then insert into rls_results values ('Account: anon elimina un account', 'rifiutato: ' || sqlerrm); end;
   reset role;
+
+  -- L'account elimina sé stesso: spariscono utente e dati collegati, l'altro account resta.
+  perform set_config('request.jwt.claims', json_build_object('sub', me, 'role', 'authenticated')::text, true);
+  set local role authenticated;
+  begin
+    perform public.delete_my_account();
+    insert into rls_results values ('Account: elimina il proprio account', 'eseguito');
+  exception when others then insert into rls_results values ('Account: elimina il proprio account', 'RIFIUTATO (male): ' || sqlerrm); end;
+  reset role;
+  perform set_config('request.jwt.claims', '', true);
+  select count(*) into n from auth.users where id = me;
+  insert into rls_results values ('Account: utente eliminato', n || ' righe (atteso 0)');
+  select count(*) into n from auth.users where id = other;
+  insert into rls_results values ('Account: l''altro account resta', n || ' righe (atteso 1)');
+  select (select count(*) from public.leaderboard where player_id = me) + (select count(*) from public.tct_matches where player_id = me)
+    + (select count(*) from public.leaderboard_privacy where user_id = me) + (select count(*) from public.accounts where user_id = me) into n;
+  insert into rls_results values ('Account: dati collegati eliminati', n || ' righe (atteso 0)');
 
   delete from auth.users where id in (me, other);
 end $$;

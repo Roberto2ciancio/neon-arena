@@ -24,7 +24,7 @@ export interface AuthSession {
   user: AuthUser
 }
 
-export type AuthErrorCode = 'invalid-credentials' | 'email-taken' | 'weak-password' | 'invalid-email' | 'email-not-confirmed' | 'rate-limited' | 'network' | 'unavailable'
+export type AuthErrorCode = 'invalid-credentials' | 'email-taken' | 'weak-password' | 'invalid-email' | 'email-not-confirmed' | 'rate-limited' | 'network' | 'unavailable' | 'link-expired' | 'same-password' | 'same-email' | 'signed-out'
 
 export const AUTH_ERROR_MESSAGES: Record<AuthErrorCode, string> = {
   'invalid-credentials': 'Email o password non corretti.',
@@ -35,6 +35,46 @@ export const AUTH_ERROR_MESSAGES: Record<AuthErrorCode, string> = {
   'rate-limited': 'Troppi tentativi: riprova fra qualche minuto.',
   network: 'Server non raggiungibile. Controlla la connessione e riprova.',
   unavailable: 'Gli account non sono attivi su questa versione del gioco.',
+  'link-expired': 'Il link è scaduto o è già stato usato: richiedine uno nuovo.',
+  'same-password': 'La nuova password deve essere diversa da quella attuale.',
+  'same-email': 'È già l’email di questo account.',
+  'signed-out': 'Sessione scaduta: accedi di nuovo e riprova.',
+}
+
+/** Tipo di link ricevuto via email (conferma, recupero password, cambio email). */
+export type AuthRedirectType = 'signup' | 'recovery' | 'email_change' | 'magiclink' | 'invite'
+
+export interface AuthRedirect {
+  type: AuthRedirectType | null
+  /** Errore dichiarato nel link (es. scaduto). */
+  error: AuthErrorCode | null
+}
+
+type ParsedRedirect = { accessToken: string; refreshToken: string; expiresIn: number; type: AuthRedirectType | null } | { error: AuthErrorCode }
+
+const REDIRECT_TYPES: readonly AuthRedirectType[] = ['signup', 'recovery', 'email_change', 'magiclink', 'invite']
+
+/**
+ * Legge il frammento dell'URL con cui Supabase riporta al gioco dopo un link email
+ * (`#access_token=...&type=recovery` oppure `#error=...`). Null se il frammento non è suo.
+ */
+export function parseAuthRedirect(hash: string): ParsedRedirect | null {
+  const params = new URLSearchParams(hash.replace(/^#/, ''))
+  if (params.has('error') || params.has('error_code')) {
+    const code = params.get('error_code') ?? ''
+    return { error: code === 'otp_expired' || params.get('error') === 'access_denied' ? 'link-expired' : 'invalid-credentials' }
+  }
+  const accessToken = params.get('access_token')
+  const refreshToken = params.get('refresh_token')
+  if (!accessToken || !refreshToken) return null
+  const type = params.get('type') as AuthRedirectType | null
+  const expiresIn = Number(params.get('expires_in'))
+  return {
+    accessToken,
+    refreshToken,
+    expiresIn: Number.isFinite(expiresIn) && expiresIn > 0 ? expiresIn : 3600,
+    type: type && REDIRECT_TYPES.includes(type) ? type : null,
+  }
 }
 
 export class AuthError extends Error {
@@ -53,6 +93,8 @@ export function mapAuthError(status: number, body: Record<string, unknown>): Aut
   const message = String(body.msg ?? body.message ?? body.error_description ?? '').toLowerCase()
   if (status === 429 || code === 'over_request_rate_limit' || code === 'over_email_send_rate_limit') return 'rate-limited'
   if (code === 'user_already_exists' || code === 'email_exists' || message.includes('already registered')) return 'email-taken'
+  if (code === 'same_password' || message.includes('should be different')) return 'same-password'
+  if (code === 'otp_expired' || message.includes('expired')) return 'link-expired'
   if (code === 'weak_password' || message.includes('password should be')) return 'weak-password'
   if (code === 'email_not_confirmed' || message.includes('not confirmed')) return 'email-not-confirmed'
   if (code === 'email_address_invalid' || code === 'validation_failed' || message.includes('invalid email')) return 'invalid-email'
@@ -146,6 +188,58 @@ export class SupabaseAuth {
     }
   }
 
+  /** Invia l'email con il link per scegliere una nuova password (riporta a `redirectTo`). */
+  async requestPasswordReset(email: string, redirectTo: string): Promise<void> {
+    if (!isValidEmail(email)) throw new AuthError('invalid-email')
+    await this.send('POST', `/auth/v1/recover?redirect_to=${encodeURIComponent(redirectTo)}`, { email: email.trim() })
+  }
+
+  /**
+   * Completa l'accesso arrivato da un link email: salva la sessione del frammento e legge
+   * l'utente. Restituisce il tipo di link (es. `recovery` per scegliere la nuova password),
+   * o null se il frammento non viene da Supabase.
+   */
+  async completeRedirect(hash: string): Promise<AuthRedirect | null> {
+    const parsed = parseAuthRedirect(hash)
+    if (!parsed) return null
+    if ('error' in parsed) return { type: null, error: parsed.error }
+    let user: Record<string, unknown>
+    try {
+      user = await this.send('GET', '/auth/v1/user', undefined, parsed.accessToken)
+    } catch (error) {
+      return { type: parsed.type, error: error instanceof AuthError && error.code === 'network' ? 'network' : 'link-expired' }
+    }
+    const session = parseSession({ access_token: parsed.accessToken, refresh_token: parsed.refreshToken, expires_in: parsed.expiresIn, user }, this.now())
+    if (!session) return { type: parsed.type, error: 'link-expired' }
+    this.store(session)
+    return { type: parsed.type, error: null }
+  }
+
+  /** Nuova password per l'account connesso (anche dopo un link di recupero). */
+  async updatePassword(password: string): Promise<void> {
+    if (password.length < 6) throw new AuthError('weak-password')
+    const session = await this.requireSession()
+    await this.send('PUT', '/auth/v1/user', { password }, session.accessToken)
+  }
+
+  /**
+   * Chiede il cambio email: Supabase invia la conferma al nuovo indirizzo (e, con il cambio
+   * sicuro, anche al vecchio). L'email dell'account cambia solo dopo la conferma.
+   */
+  async requestEmailChange(email: string, redirectTo: string): Promise<void> {
+    if (!isValidEmail(email)) throw new AuthError('invalid-email')
+    const session = await this.requireSession()
+    if (email.trim().toLowerCase() === session.user.email.toLowerCase()) throw new AuthError('same-email')
+    await this.send('PUT', `/auth/v1/user?redirect_to=${encodeURIComponent(redirectTo)}`, { email: email.trim() }, session.accessToken)
+  }
+
+  /** Elimina definitivamente account e dati collegati (funzione del database), poi disconnette. */
+  async deleteAccount(): Promise<void> {
+    const session = await this.requireSession()
+    await this.send('POST', '/rest/v1/rpc/delete_my_account', {}, session.accessToken)
+    this.store(null)
+  }
+
   async signOut(): Promise<void> {
     const session = this.current
     this.store(null)
@@ -175,10 +269,20 @@ export class SupabaseAuth {
     }
   }
 
-  private async post(path: string, payload: unknown): Promise<Record<string, unknown>> {
+  private async requireSession(): Promise<AuthSession> {
+    const session = await this.getValidSession()
+    if (!session) throw new AuthError('signed-out')
+    return session
+  }
+
+  private post(path: string, payload: unknown): Promise<Record<string, unknown>> {
+    return this.send('POST', path, payload)
+  }
+
+  private async send(method: 'GET' | 'POST' | 'PUT', path: string, payload?: unknown, accessToken?: string): Promise<Record<string, unknown>> {
     let response: Response
     try {
-      response = await this.fetcher(`${this.baseUrl}${path}`, { method: 'POST', headers: this.headers(), body: JSON.stringify(payload) })
+      response = await this.fetcher(`${this.baseUrl}${path}`, { method, headers: this.headers(accessToken), body: payload === undefined ? undefined : JSON.stringify(payload) })
     } catch {
       throw new AuthError('network')
     }
@@ -188,7 +292,10 @@ export class SupabaseAuth {
     } catch {
       body = {}
     }
-    if (!response.ok) throw new AuthError(mapAuthError(response.status, body))
+    if (!response.ok) {
+      if (response.status === 401 && accessToken) throw new AuthError('signed-out')
+      throw new AuthError(mapAuthError(response.status, body))
+    }
     return body
   }
 }

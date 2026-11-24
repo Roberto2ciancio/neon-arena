@@ -3,6 +3,9 @@ import type { PlayerSave } from './game/accountSave'
 import { AccountNames, checkUsername, USERNAME_MESSAGES, UsernameError } from './game/accountName'
 import { AUTH_ERROR_MESSAGES, AuthError, SupabaseAuth } from './game/auth'
 
+/** Parola da scrivere per confermare l'eliminazione dell'account. */
+export const DELETE_CONFIRM_WORD = 'ELIMINA'
+
 const WELCOME_KEY = 'neon-arena:welcome:v1'
 const SAVE_DELAY_MS = 1500
 
@@ -33,6 +36,8 @@ export class AccountPanel {
   private readonly names: AccountNames | null
   private currentUsername: string | null = null
   private mode: 'login' | 'signup' = 'login'
+  /** Arrivati da un link di recupero: si mostra solo la scelta della nuova password. */
+  private recovering = false
   private saveTimer = 0
   private busy = false
 
@@ -59,6 +64,28 @@ export class AccountPanel {
       void this.submit()
     })
     byId('account-logout').addEventListener('click', () => void this.logout())
+    byId('account-forgot').addEventListener('click', () => void this.forgotPassword())
+    byId<HTMLFormElement>('account-recovery-form').addEventListener('submit', (event) => {
+      event.preventDefault()
+      void this.saveRecoveredPassword()
+    })
+    byId<HTMLFormElement>('account-email-form').addEventListener('submit', (event) => {
+      event.preventDefault()
+      void this.changeEmail()
+    })
+    byId<HTMLFormElement>('account-password-form').addEventListener('submit', (event) => {
+      event.preventDefault()
+      void this.changePassword()
+    })
+    byId('account-delete').addEventListener('click', () => {
+      byId('account-delete-form').classList.remove('hidden')
+      byId<HTMLInputElement>('account-delete-confirm').focus()
+    })
+    byId<HTMLInputElement>('account-delete-confirm').addEventListener('input', () => this.render())
+    byId<HTMLFormElement>('account-delete-form').addEventListener('submit', (event) => {
+      event.preventDefault()
+      void this.deleteAccount()
+    })
     window.addEventListener('keydown', (event) => {
       if (event.code === 'Escape' && this.isOpen) this.close()
     })
@@ -97,6 +124,7 @@ export class AccountPanel {
 
   /** All'avvio: se c'è una sessione valida, scarica e unisce il salvataggio dell'account. */
   async initialize(): Promise<void> {
+    if (await this.handleEmailLink()) return
     if (!this.options.auth?.session) return
     const session = await this.options.auth.getValidSession()
     if (!session) {
@@ -116,6 +144,8 @@ export class AccountPanel {
 
   close(): void {
     byId('account-screen').classList.add('hidden')
+    // Chiudendo senza scegliere la password si resta connessi: si può cambiarla dopo.
+    this.recovering = false
   }
 
   /** Da chiamare dopo ogni modifica di progressi, armeria o callsign. */
@@ -157,8 +187,13 @@ export class AccountPanel {
   private render(): void {
     const available = this.options.auth !== null
     const signedIn = this.signedIn
-    byId('account-form').classList.toggle('hidden', signedIn || !available)
-    byId('account-signed').classList.toggle('hidden', !signedIn)
+    byId('account-form').classList.toggle('hidden', signedIn || !available || this.recovering)
+    byId('account-recovery-form').classList.toggle('hidden', !this.recovering || !signedIn)
+    byId('account-signed').classList.toggle('hidden', !signedIn || this.recovering)
+    byId('account-forgot').classList.toggle('hidden', this.mode !== 'login')
+    byId<HTMLButtonElement>('account-recovery-save').disabled = this.busy
+    const confirmWord = byId<HTMLInputElement>('account-delete-confirm').value.trim().toUpperCase()
+    byId<HTMLButtonElement>('account-delete-final').disabled = this.busy || confirmWord !== DELETE_CONFIRM_WORD
     byId('account-email-display').textContent = this.email
     byId('account-name-label').textContent = this.currentUsername ? 'NOME UTENTE' : 'SCEGLI IL TUO NOME UTENTE'
     const nameInput = byId<HTMLInputElement>('account-name-input')
@@ -274,6 +309,146 @@ export class AccountPanel {
       await this.saves.save(this.options.getLocal())
     } catch {
       // Il prossimo salvataggio riproverà con i dati aggiornati.
+    }
+  }
+
+  /** Indirizzo a cui riportano i link email (questa pagina, senza frammento). */
+  private get redirectUrl(): string {
+    return `${window.location.origin}${window.location.pathname}`
+  }
+
+  private errorText(error: unknown): string {
+    return error instanceof AuthError ? error.message : AUTH_ERROR_MESSAGES.network
+  }
+
+  /**
+   * Link arrivato via email (conferma, recupero, cambio email): completa l'accesso, pulisce
+   * l'indirizzo e mostra cosa è successo. True se il link è stato gestito.
+   */
+  private async handleEmailLink(): Promise<boolean> {
+    const auth = this.options.auth
+    const hash = window.location.hash
+    if (!auth || hash.length < 2) return false
+    const params = new URLSearchParams(hash.slice(1))
+    // Cambio email sicuro: il primo dei due link conferma solo metà del cambio.
+    if (params.has('message') && !params.has('access_token')) {
+      this.clearHash()
+      this.open()
+      this.setStatus('Link accettato: apri anche il link inviato all’altro indirizzo per completare il cambio email.', false, true)
+      return false
+    }
+    const result = await auth.completeRedirect(hash)
+    if (!result) return false
+    this.clearHash()
+    if (result.error) {
+      this.open()
+      this.setStatus(AUTH_ERROR_MESSAGES[result.error], true)
+      return false
+    }
+    if (result.type === 'recovery') {
+      this.recovering = true
+      this.open()
+      this.setStatus('')
+      byId<HTMLInputElement>('account-recovery-password').focus()
+      // I progressi si uniscono subito: la nuova password si può scegliere con calma.
+      await this.pull()
+      this.open()
+      return true
+    }
+    await this.pull()
+    this.open()
+    this.setStatus(result.type === 'email_change' ? `Email aggiornata: ora è ${this.email}.` : 'Email confermata: sei connesso e i progressi sono salvati sull’account.', false, true)
+    return true
+  }
+
+  private clearHash(): void {
+    try {
+      window.history.replaceState(null, '', this.redirectUrl + window.location.search)
+    } catch {
+      window.location.hash = ''
+    }
+  }
+
+  private async forgotPassword(): Promise<void> {
+    const auth = this.options.auth
+    if (!auth || this.busy) return
+    const email = byId<HTMLInputElement>('account-email').value
+    if (!email.trim()) {
+      this.setStatus('Scrivi l’email del tuo account qui sopra, poi premi di nuovo PASSWORD DIMENTICATA.', true)
+      byId<HTMLInputElement>('account-email').focus()
+      return
+    }
+    await this.run('Invio del link...', async () => {
+      await auth.requestPasswordReset(email, this.redirectUrl)
+      // Stesso messaggio anche se l'email non esiste: non si rivela chi è registrato.
+      this.setStatus(`Se esiste un account con ${email.trim()}, riceverai un link per scegliere una nuova password.`, false, true)
+    })
+  }
+
+  private async saveRecoveredPassword(): Promise<void> {
+    const auth = this.options.auth
+    if (!auth) return
+    const input = byId<HTMLInputElement>('account-recovery-password')
+    await this.run('Salvataggio della password...', async () => {
+      await auth.updatePassword(input.value)
+      input.value = ''
+      this.recovering = false
+      this.setStatus('Password aggiornata: sei connesso.', false, true)
+    })
+  }
+
+  private async changeEmail(): Promise<void> {
+    const auth = this.options.auth
+    if (!auth) return
+    const input = byId<HTMLInputElement>('account-new-email')
+    await this.run('Invio della conferma...', async () => {
+      await auth.requestEmailChange(input.value, this.redirectUrl)
+      this.setStatus(`Controlla la posta di ${input.value.trim()} e apri il link di conferma: fino ad allora resta l’email attuale.`, false, true)
+      input.value = ''
+    })
+  }
+
+  private async changePassword(): Promise<void> {
+    const auth = this.options.auth
+    if (!auth) return
+    const input = byId<HTMLInputElement>('account-new-password')
+    await this.run('Salvataggio della password...', async () => {
+      await auth.updatePassword(input.value)
+      input.value = ''
+      this.setStatus('Password aggiornata.', false, true)
+    })
+  }
+
+  private async deleteAccount(): Promise<void> {
+    const auth = this.options.auth
+    if (!auth) return
+    if (byId<HTMLInputElement>('account-delete-confirm').value.trim().toUpperCase() !== DELETE_CONFIRM_WORD) return
+    window.clearTimeout(this.saveTimer)
+    await this.run('Eliminazione dell’account...', async () => {
+      await auth.deleteAccount()
+      this.currentUsername = null
+      this.options.onUsername(null)
+      byId<HTMLInputElement>('account-delete-confirm').value = ''
+      byId('account-delete-form').classList.add('hidden')
+      byId<HTMLDetailsElement>('account-manage').open = false
+      this.setStatus('Account eliminato con tutti i dati online. I progressi restano su questo dispositivo come ospite.', false, true)
+    })
+  }
+
+  /** Esegue un'operazione dell'account mostrando lo stato e gli errori. */
+  private async run(pending: string, action: () => Promise<void>): Promise<void> {
+    if (this.busy) return
+    this.busy = true
+    this.setStatus(pending)
+    this.render()
+    try {
+      await action()
+    } catch (error) {
+      this.setStatus(this.errorText(error), true)
+    } finally {
+      this.busy = false
+      this.render()
+      this.options.onProfileChange()
     }
   }
 

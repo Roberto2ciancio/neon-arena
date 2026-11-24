@@ -400,7 +400,14 @@
             <input id="account-email" type="email" autocomplete="email" required />
             <label for="account-password" class="hud-label">PASSWORD</label>
             <input id="account-password" type="password" autocomplete="current-password" minlength="6" required />
+            <button id="account-forgot" class="link-button account-forgot" type="button">PASSWORD DIMENTICATA?</button>
             <button id="account-submit" class="primary-button" type="submit"><span>ACCEDI</span><span aria-hidden="true">↗</span></button>
+          </form>
+          <form id="account-recovery-form" class="account-form hidden" novalidate>
+            <p class="account-hint">Scegli la nuova password del tuo account.</p>
+            <label for="account-recovery-password" class="hud-label">NUOVA PASSWORD</label>
+            <input id="account-recovery-password" type="password" autocomplete="new-password" minlength="6" required />
+            <button id="account-recovery-save" class="primary-button" type="submit"><span>SALVA LA PASSWORD</span><span aria-hidden="true">↗</span></button>
           </form>
           <div id="account-signed" class="account-signed hidden">
             <p>Connesso come <strong id="account-email-display"></strong>. Livello, armeria, officina e record vengono salvati sull'account.</p>
@@ -413,6 +420,36 @@
               <small class="account-hint">3–12 caratteri: lettere, numeri e _. Unico fra tutti i giocatori.</small>
             </form>
             <label class="settings-check account-hidden-row"><input id="account-hidden" type="checkbox" /> NASCONDI IL MIO PROFILO DALLA CLASSIFICA</label>
+            <details id="account-manage" class="account-manage">
+              <summary>GESTISCI ACCOUNT</summary>
+              <form id="account-email-form" class="account-form" novalidate>
+                <label for="account-new-email" class="hud-label">NUOVA EMAIL</label>
+                <div class="account-name-row">
+                  <input id="account-new-email" type="email" autocomplete="email" />
+                  <button class="primary-button" type="submit"><span>CAMBIA</span></button>
+                </div>
+                <small class="account-hint">Riceverai un link di conferma: l'email cambia solo dopo averlo aperto.</small>
+              </form>
+              <form id="account-password-form" class="account-form" novalidate>
+                <label for="account-new-password" class="hud-label">NUOVA PASSWORD</label>
+                <div class="account-name-row">
+                  <input id="account-new-password" type="password" autocomplete="new-password" minlength="6" />
+                  <button class="primary-button" type="submit"><span>CAMBIA</span></button>
+                </div>
+              </form>
+              <div class="account-danger">
+                <p class="hud-label">ELIMINA ACCOUNT</p>
+                <small class="account-hint">Cancella per sempre account, nome utente, salvataggio online, run in classifica e statistiche. I progressi restano su questo dispositivo come ospite.</small>
+                <button id="account-delete" class="secondary-button danger-button" type="button">ELIMINA ACCOUNT</button>
+                <form id="account-delete-form" class="account-form hidden" novalidate>
+                  <label for="account-delete-confirm" class="hud-label">SCRIVI ELIMINA PER CONFERMARE</label>
+                  <div class="account-name-row">
+                    <input id="account-delete-confirm" type="text" autocomplete="off" spellcheck="false" />
+                    <button id="account-delete-final" class="primary-button danger-button" type="submit" disabled><span>ELIMINA</span></button>
+                  </div>
+                </form>
+              </div>
+            </details>
             <button id="account-logout" class="secondary-button" type="button">ESCI DALL'ACCOUNT</button>
           </div>
           <p id="account-status" class="account-status" aria-live="polite"></p>

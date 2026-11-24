@@ -461,6 +461,18 @@ kbd { display: inline-block; color: #aab4cb; font-family: 'Chakra Petch', sans-s
 .account-status { min-height: 18px; margin: 10px 0 0; color: #a5adc4; font-size: 12px; line-height: 1.5; }
 .account-status.error { color: #ff6f9a; }
 .account-status.success { color: var(--cyan); }
+.link-button { padding: 4px 0; color: var(--cyan); border: 0; background: transparent; font-family: 'Chakra Petch', sans-serif; font-size: 10px; letter-spacing: 0.1em; text-align: left; text-decoration: underline; cursor: pointer; }
+.account-forgot { justify-self: start; }
+.account-manage { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+.account-manage summary { color: #a5adc4; font-family: 'Chakra Petch', sans-serif; font-size: 11px; letter-spacing: 0.1em; cursor: pointer; }
+.account-manage .account-form { margin-top: 12px; }
+.account-danger { display: grid; gap: 6px; margin-top: 16px; padding: 10px; border: 1px solid rgba(255, 111, 154, 0.35); }
+.account-danger .hud-label { margin: 0; color: #ff6f9a; }
+.account-danger .account-form { margin-top: 4px; }
+.danger-button { color: #ff6f9a; border-color: rgba(255, 111, 154, 0.6); }
+.account-signed .danger-button { margin-top: 4px; }
+.primary-button.danger-button { color: #fff; background: #b8335c; }
+.primary-button.danger-button:disabled { opacity: 0.45; cursor: not-allowed; }
 @media (max-width: 1000px) {
   .menu-screen { grid-template-columns: 1fr; }
   .menu-side { grid-template-columns: repeat(2, minmax(0, 1fr)); }
